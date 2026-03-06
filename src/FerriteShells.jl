@@ -7,16 +7,16 @@ using Reexport
 import Ferrite: reinit!
 
 include("shellcellvalues.jl")
-export ShellCellValues, ShellGeometry
+export ShellCellValues
 
 include("kinematics.jl")
-export ShellKinematics
+export kinematics
 
 include("material.jl")
-export LinearMembraneMaterial, membrane_stress, membrane_stress_and_tangent
+export LinearElastic, membrane_stress, membrane_tangent
 
 include("assembly.jl")
-export element_membrane_residual!, element_membrane_tangent!
+export membrane_residuals!, membrane_tangent!
 
 include("utils.jl")
 export shell_grid

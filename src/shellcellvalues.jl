@@ -21,11 +21,16 @@ struct ShellCellValues{QR, IPG, IPS, T <: AbstractFloat} <: AbstractCellValues
     detJdV      :: Vector{T}           # area element × weight (n_qp,)
     local_frame :: Matrix{T}           # 3×3 rotation matrix [t1 | t2 | n]
     J_loc       :: Matrix{T}           # 2×2 local Jacobian  [J1·t1 J2·t1; J1·t2 J2·t2]
+    aα          :: Matrix{Vec{3, T}}
+    Aα          :: Matrix{Vec{3, T}}
+    aαβ         :: Matrix
+    Aαβ         :: Matrix
 end
 export ShellCellValues
 
 Ferrite.getdetJdV(scv::ShellCellValues, q::Int) = scv.detJdV[q]
 Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
+Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 
 function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation)
     n_qp    = length(qr.weights)
@@ -37,6 +42,10 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         zeros(n_qp),
         zeros(3, 3),
         zeros(2, 2),
+        fill(zero(Vec{3, Float64}), n_qp, n_shape),
+        fill(zero(Vec{3, Float64}), n_qp, n_shape),
+        fill(zero(SymmetricTensor{2,2,Float64}), n_qp, n_shape),
+        fill(zero(SymmetricTensor{2,2,Float64}), n_qp, n_shape),
     )
 end
 
@@ -100,44 +109,4 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         end
     end
     return nothing
-end
-
-struct ShellCellValues_{T, CV<:Ferrite.CellValues, MITC} <: AbstractCellValues
-    cellvalues::CV
-    thickness::T
-
-    # Reference geometry (cached per element)
-    A1::Vec{3,T}
-    A2::Vec{3,T}
-    A_metric::SymmetricTensor{2,2,T}
-
-    # Current geometry (per quadrature)
-    a1::Vec{3,T}
-    a2::Vec{3,T}
-    a_metric::SymmetricTensor{2,2,T}
-    normal::Vec{3,T}
-    detJ_surface::T
-
-    # Director field
-    d::Vec{3,T}
-    dd_dξ1::Vec{3,T}
-    dd_dξ2::Vec{3,T}
-
-    # MITC data
-    mitc_data::MITC
-end
-struct ShellCellValues__{T, CV<:Ferrite.CellValues, MITC}
-    cellvalues::CV
-    thickness::T
-    mitc::MITC
-
-    # Reference nodal coordinates (cached per element)
-    Xnodal::Vector{Vec{3,T}}
-end
-function reinit!(scv::ShellCellValues__,cell,X::AbstractVector)
-    reinit!(scv.cellvalues, cell) # reinit parent
-    # store reference nodal coordinates locally
-    for i in 1:getnbasefunctions(scv.cellvalues)
-        scv.Xnodal[i] = X[i]
-    end
 end

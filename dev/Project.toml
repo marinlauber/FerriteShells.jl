@@ -1,2 +1,8 @@
 [deps]
 FerriteShells = "39bd9e63-70f9-4eb3-975d-f599ce62130a"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
+Tensors = "48a634ad-e948-5137-8d70-aa71f2a747f4"
+
+[sources]
+FerriteShells = {path = "/home/marin/Workspace/FerriteShells.jl/"}

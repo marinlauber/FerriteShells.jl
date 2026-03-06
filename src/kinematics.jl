@@ -1,3 +1,32 @@
+
+"""
+    kinematics(scv, qp, x, u_e)
+
+Compute the current kinematics at a quadrature point, given the reference geometry and current displacements.
+Returns the current basis vectors a₁, a₂, and the reference and current metric tensors
+A_{αβ} = A_α · A_β and a_{αβ} = a_α · a_β.
+"""
+function kinematics(scv, qp, x, u_e::AbstractVector{<:Vec{3,T}}) where T
+    # construct current geometry for this quadrature point (using current displacements u)
+    ξ = scv.qr.points[qp]
+    # get reference geometry for this quadrature point
+    A₁ = zero(Vec{3,T})
+    A₂ = zero(Vec{3,T})
+    a₁ = zero(Vec{3,T})
+    a₂ = zero(Vec{3,T})
+    for i in 1:getnbasefunctions(scv.ip_geo)
+        dNdξ = Ferrite.reference_shape_gradient(scv.ip_geo, ξ, i)
+        A₁  += x[i] * dNdξ[1]
+        A₂  += x[i] * dNdξ[2]
+        a₁  += (x[i] + u_e[i]) * dNdξ[1]
+        a₂  += (x[i] + u_e[i]) * dNdξ[2]
+    end
+    A_metric = SymmetricTensor{2,2}((dot(A₁,A₁),dot(A₁,A₂),dot(A₂,A₂)))
+    a_metric = SymmetricTensor{2,2}((dot(a₁,a₁),dot(a₁,a₂),dot(a₂,a₂)))
+    return a₁,a₂,A_metric,a_metric
+end
+
+
 struct ShellKinematics{T}
     a1::Vec{3,T}
     a2::Vec{3,T}
