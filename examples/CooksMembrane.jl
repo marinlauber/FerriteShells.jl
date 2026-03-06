@@ -89,6 +89,11 @@ assemble_traction_force!(f, dh, getfacetset(grid, "traction"), (0.0, 1.0/16, 0.0
 apply!(Ke, f, dbc)
 @time ue = Ke\f
 
+ # extract solution at point
+ph     = PointEvalHandler(grid, [Tensors.Vec{3}((48.0, 60.0, 0.0))])
+u_eval = first(evaluate_at_points(ph, dh, ue, :u))
+@show u_eval
+
 # write to vtk
 VTKGridFile("cooks_membrane", dh) do vtk
     write_solution(vtk, dh, ue)

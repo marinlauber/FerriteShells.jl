@@ -240,3 +240,25 @@ function membrane_stress_and_tangent(material::LinearMembraneMaterial{T},
     return N, C
 end
 ```
+
+
+### Reference Solutions for Patch Tests
+
+Reference solution:
+
+The standard Cook's membrane parameters are E = 1, ν = 1/3, t = 1, shear traction q = 1/16 (total shear force F = 1 on right edge of height 16). The reference quantity is the
+vertical displacement at the top-right corner (48, 60):
+
+┌───────────────────────────────┬─────────┐
+│            Source             │  v_tip  │
+├───────────────────────────────┼─────────┤
+│ Converged (fine mesh)         │ 23.9648 │
+├───────────────────────────────┼─────────┤
+│ Simo & Rifai 1990 (Q4, 32×32) │ ≈ 23.96 │
+└───────────────────────────────┴─────────┘
+
+Primary reference:
+Simo, J.C. & Rifai, M.S., "A class of mixed assumed strain methods and the method of incompatible modes", IJNME 29, 1595–1638 (1990)
+
+Original problem source:
+Cook, R.D., "Improved two-dimensional finite element", Journal of the Structural Division, ASCE 100, 1851–1863 (1974)
