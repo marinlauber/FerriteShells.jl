@@ -8,7 +8,7 @@ struct LinearElastic{T} <: AbstractMaterial
     thickness::T
     H :: SymmetricTensor{4,2,T}
     C :: SymmetricTensor{4,2,T}
-    function LinearElastic(E::T, ν, thickness) where T
+    function LinearElastic(E::T, ν, thickness=one(T)) where T
         @assert E > 0 "Young's modulus must be positive"
         @assert 0 ≤ ν < 0.5 "Poisson's ratio must be in [0, 0.5)"
         @assert thickness > 0 "Thickness must be positive"

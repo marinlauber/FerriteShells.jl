@@ -19,6 +19,6 @@ include("assembly.jl")
 export membrane_residuals!, membrane_tangent!
 
 include("utils.jl")
-export shell_grid
+export shell_grid, assemble_traction!
 
 end # module FerriteShells
