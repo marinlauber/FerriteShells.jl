@@ -37,6 +37,27 @@ struct LinearElastic{T} <: AbstractMaterial
     end
 end
 
+# Contravariant elasticity tensor C^{αβγδ} = λ A^{αβ}A^{γδ} + μ(A^{αγ}A^{βδ} + A^{αδ}A^{βγ})
+# where A^{αβ} = inv(A_{αβ}) is the contravariant reference metric.
+# For a unit-square element A^{αβ} = δ^{αβ} and this reduces to mat.C.
+function contravariant_elasticity(mat::LinearElastic, A_metric::SymmetricTensor{2,2,T}) where T
+    det_A = A_metric[1,1]*A_metric[2,2] - A_metric[1,2]^2
+    A11u  =  A_metric[2,2] / det_A
+    A12u  = -A_metric[1,2] / det_A
+    A22u  =  A_metric[1,1] / det_A
+    Aup   = SymmetricTensor{2,2,T}((A11u, A12u, A22u))
+
+    factor = mat.E / (1 - mat.ν^2)
+    μ = mat.E * mat.thickness / (2*(1 + mat.ν))
+    λ = mat.ν * mat.thickness * factor
+
+    C = zeros(T, 2, 2, 2, 2)
+    for α in 1:2, β in 1:2, γ in 1:2, δ in 1:2
+        C[α,β,γ,δ] = λ*Aup[α,β]*Aup[γ,δ] + μ*(Aup[α,γ]*Aup[β,δ] + Aup[α,δ]*Aup[β,γ])
+    end
+    return SymmetricTensor{4,2,T}(C)
+end
+
 """
     membrane_stress(material, E::SymmetricTensor{2,2,T}) -> N
 

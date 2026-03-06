@@ -6,7 +6,7 @@ Compute the current kinematics at a quadrature point, given the reference geomet
 Returns the current basis vectors a₁, a₂, and the reference and current metric tensors
 A_{αβ} = A_α · A_β and a_{αβ} = a_α · a_β.
 """
-function kinematics(scv, qp, x, u_e::AbstractVector{<:Vec{3,T}}) where T
+function kinematics(scv, qp, x, u_e::AbstractVector{<:Vec{3,T}}; director=false) where T
     # construct current geometry for this quadrature point (using current displacements u)
     ξ = scv.qr.points[qp]
     # get reference geometry for this quadrature point
@@ -23,7 +23,17 @@ function kinematics(scv, qp, x, u_e::AbstractVector{<:Vec{3,T}}) where T
     end
     A_metric = SymmetricTensor{2,2}((dot(A₁,A₁),dot(A₁,A₂),dot(A₂,A₂)))
     a_metric = SymmetricTensor{2,2}((dot(a₁,a₁),dot(a₁,a₂),dot(a₂,a₂)))
-    return a₁,a₂,A_metric,a_metric
+    # if we dont need directors, we can skip computing them and save some time
+    !director && return (a₁,a₂,A_metric,a_metric)
+    ∂d₁ = zero(Vec{3,Float64})
+    ∂d₂ = zero(Vec{3,Float64})
+    for I in 1:n_nodes
+        NI = shape_value(scv.ip_shape, I, qp)
+        ∂NI1, ∂NI2 = Ferrite.reference_shape_gradient(scv.ip_shape, ξ, I)
+        ∂d₁ += NI * zero(Vec{3,Float64}) + ∂NI1 * zero(Vec{3,Float64})
+        ∂d₂ += NI * zero(Vec{3,Float64}) + ∂NI2 * zero(Vec{3,Float64})
+    end
+    return (a₁, a₂, A_metric, a_metric, ∂d₁, ∂d₂)
 end
 
 
@@ -107,16 +117,10 @@ Symmetrized appropriately for bending strain measure
      K_{αβ} = 1/2(b_{αβ} - d_{βα}) - B_{αβ}
 where reference curvature can be zero for flat shells initially.
 """
-function compute_bending_strain(geom::ShellGeometry)
-    a1 = geom.a1
-    a2 = geom.a2
-    dd1 = geom.dd1
-    dd2 = geom.dd2
-
+function compute_bending_strain(dd1, dd2, a1, a2)
     k11 = dot(dd1, a1)
     k12 = 0.5*(dot(dd1,a2) + dot(dd2,a1))
     k22 = dot(dd2, a2)
-
     return SymmetricTensor{2,2}(k11, k12, k22)
 end
 

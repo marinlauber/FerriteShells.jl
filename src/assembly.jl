@@ -16,7 +16,7 @@ function membrane_residuals!(re, scv, x, u_e, mat)
         ξ = scv.qr.points[qp]
         a₁,a₂,A_metric,a_metric = kinematics(scv, qp, x, u_e)
         E = 0.5 * (a_metric - A_metric)
-        N = mat.H ⊡ E
+        N = contravariant_elasticity(mat, A_metric) ⊡ E
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = Ferrite.reference_shape_gradient(scv.ip_shape, ξ, I)
@@ -44,8 +44,8 @@ function membrane_tangent!(ke, scv, x, u_e, mat)
         ξ = scv.qr.points[qp]
         a₁,a₂,A_metric,a_metric = kinematics(scv, qp, x, u_e)
         E = 0.5 * (a_metric - A_metric)
-        N = mat.H ⊡ E
-        C = mat.C
+        C = contravariant_elasticity(mat, A_metric)
+        N = C ⊡ E
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = Ferrite.reference_shape_gradient(scv.ip_shape, ξ, I)
@@ -69,4 +69,54 @@ function membrane_tangent!(ke, scv, x, u_e, mat)
             end
         end
     end
+end
+
+
+function bending_residuals!(re, scv, x, u_e, mat)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        ξ = scv.qr.points[qp]
+        a₁,a₂,A_metric,a_metric,∂d₁,∂d₂ = kinematics(scv, qp, x, u_e, director=true)
+        κ = FerriteShells.compute_bending_strain(∂d₁, ∂d₂, a₁, a₂)
+        M = mat.H ⊡ κ
+        dΩ = scv.detJdV[qp]
+        for I in 1:n_nodes
+            ∂NI1, ∂NI2 = Ferrite.reference_shape_gradient(scv.ip_shape, ξ, I)
+            v = ∂NI1 * (M[1,1]*a₁ + M[1,2]*a₂) +
+                ∂NI2 * (M[2,1]*a₁ + M[2,2]*a₂)
+            re[3I-2:3I] .+= v * dΩ
+        end
+    end
+end
+
+function bending_tangent!(ke, scv, x, u_e, mat)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        ξ = scv.qr.points[qp]
+        a₁,a₂,A_metric,a_metric,∂d₁,∂d₂ = kinematics(scv, qp, x, u_e, director=true)
+        κ = FerriteShells.compute_bending_strain(∂d₁, ∂d₂, a₁, a₂)
+        M = mat.H ⊡ κ
+        C = mat.C
+        dΩ = scv.detJdV[qp]
+        for I in 1:n_nodes
+            ∂NI1, ∂NI2 = Ferrite.reference_shape_gradient(scv.ip_shape, ξ, I)
+            for J in 1:n_nodes
+                ∂NJ1, ∂NJ2 = Ferrite.reference_shape_gradient(scv.ip_shape, ξ, J)
+                geo_scalar = ∂NI1*(M[1,1]*∂NJ1 + M[1,2]*∂NJ2) +
+                             ∂NI2*(M[2,1]*∂NJ1 + M[2,2]*∂NJ2)
+                Kgeo = geo_scalar * one(SymmetricTensor{2,3})
+                H1 = SymmetricTensor{2,2}((∂NJ1, 0.5∂NJ2, 0.0))
+                H2 = SymmetricTensor{2,2}((0.0, 0.5∂NJ1, ∂NJ2))
+                D1 = C ⊡ H1
+                D2 = C ⊡ H2
+                Kmat = zero(Tensor{2,3})
+                for (α,∂NIα) in enumerate((∂NI1, ∂NI2)), (β,aβ) in enumerate((a₁, a₂))
+                    v = D1[α,β]*a₁ + D2[α,β]*a₂
+                    Kmat += ∂NIα * (aβ ⊗ v)
+                end
+                ke[3I-2:3I, 3J-2:3J] .+= (Kgeo + Kmat) * dΩ
+            end
+        end
+    end
+    return ke
 end
