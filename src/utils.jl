@@ -6,6 +6,15 @@ function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(
     return Grid(grid.cells, [Node(Tensors.Vec{3}(map(n))) for n in grid.nodes])
 end
 
+# Compute the contravariant metric A^{αβ} = inv(A_{αβ}) from the covariant metric A_{αβ}.
+function contravariant(A_cov::SymmetricTensor{2,2,T}) where T
+    det_A = A_cov[1,1]*A_cov[2,2] - A_cov[1,2]^2
+    A11u  =  A_cov[2,2] / det_A
+    A12u  = -A_cov[1,2] / det_A
+    A22u  =  A_cov[1,1] / det_A
+    SymmetricTensor{2,2,T}((A11u, A12u, A22u))
+end
+
 # Assemble external traction into force vector f.
 # `traction` is either a Vec{3} (uniform) or a callable x::Vec{3} -> Vec{3}.
 # `fv` is a FacetValues created for the element interpolation of the :u field.

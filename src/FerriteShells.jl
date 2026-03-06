@@ -13,7 +13,7 @@ include("kinematics.jl")
 export kinematics
 
 include("material.jl")
-export LinearElastic, membrane_stress, membrane_tangent
+export LinearElastic, contravariant_elasticity
 
 include("assembly.jl")
 export membrane_residuals!, membrane_tangent!
