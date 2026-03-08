@@ -33,3 +33,6 @@ JuliaLocalPreferences.toml
 *.vtu
 *.png
 *.log
+
+# vscode files
+.vscode/
