@@ -28,9 +28,15 @@ struct ShellCellValues{QR, IPG, IPS, T <: AbstractFloat} <: AbstractCellValues
 end
 export ShellCellValues
 
+# maybe we should have somthing like `CellValues{ShellCellValues}` instead of a separate type?
+# But then we would need to make all the accessors work for both types, which might be more complicated.
+# For now, let's just have a separate type for shell cell values, since they have some specific geometry-related
+# fields that are not needed for general cell values.
+
 Ferrite.getdetJdV(scv::ShellCellValues, q::Int) = scv.detJdV[q]
 Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
+@propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = size(scv.ip_geo.M, 1)
 
 function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation)
     n_qp    = length(qr.weights)

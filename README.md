@@ -40,6 +40,11 @@ FerriteShells.jl
     └── ...
 ```
 
+Claude code development
+```
+claude --resume 24b48640-280b-467c-853d-48a10578c8c3
+```
+
 ## Membrane-Only Implementation Notes
 
 A Ferrite.jl extension for Reissner-Mindlin shells, focusing initially on linear triangles/quadrilaterals with MITC shear integration. The emphasis is on a membrane-only, geometrically exact implementation, suitable for debugging and initial testing.
@@ -262,3 +267,15 @@ Simo, J.C. & Rifai, M.S., "A class of mixed assumed strain methods and the metho
 
 Original problem source:
 Cook, R.D., "Improved two-dimensional finite element", Journal of the Structural Division, ASCE 100, 1851–1863 (1974)
+
+
+### Square Pillow inflation
+The ODE formulation:
+Differentiating the equilibrium constraint R_int(u) = p · F(u) w.r.t. the load parameter p:
+
+K_eff · du/dp = F(u)
+
+where K_eff = K_membrane(u) − K_pressure_tangent(u, p). This is a first-order ODE in u with p as "time" — exactly what OrdinaryDiffEq solves. No Newton iterations needed; the ODE solver handles the path
+following.
+
+The singularity: At u=0 (flat), z-DOFs have zero stiffness so K_eff is singular. A small initial z-perturbation satisfying the BCs is required.

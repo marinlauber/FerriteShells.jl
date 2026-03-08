@@ -1,4 +1,5 @@
 import Ferrite: Grid,Triangle,Quadrilateral,Nodes
+using LinearAlgebra: cross
 
 # maps the 2D nodes of a mesh onto the 3D coordinates
 # by applying the `map` function to the nodes (default: flat z=0 plane)
@@ -39,6 +40,43 @@ function assemble_traction!(f, dh, facetset, fv::FacetValues, traction)
         f[celldofs(fc)] .+= fe
     end
 end
+
+# scv.detJdV[qp] = ‖A₁ × A₂‖ · w (reference area × weight).
+# cross(a₁, a₂) already has magnitude ‖a₁ × a₂‖ (current area per parametric area).
+# multiplying by w integrates over the parameter domain
+# assemble_pressure!(re, scv, x, u_e, p::Number) = assemble_pressure!(re, scv, x, u_e, ()->p)
+function assemble_pressure!(re, scv, x, u_e, pfunc)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        ξ = scv.qr.points[qp]
+        w = scv.qr.weights[qp] # pure parametric weight — NOT detJdV
+        a₁, a₂, _, _ = kinematics(scv, qp, x, u_e)
+        # local oriented area vector
+        n_weighted = cross(a₁, a₂)
+        for I in 1:n_nodes
+            NI = Ferrite.reference_shape_value(scv.ip_shape, ξ, I)
+            # re[3I-2:3I] .+= pfunc(spatial_coordinate(scv, qp, x)) * NI * n_weighted * w
+            re[3I-2:3I] .+= pfunc * NI * n_weighted * w
+        end
+    end
+end
+
+using ForwardDiff
+# K_IJ^p = p * ∂(a₁ × a₂)/∂u_J * N_I
+function assemble_pressure_tangent!(ke, scv, x, u_e, p)
+    n_nodes = length(u_e)
+    u_vec   = collect(reinterpret(Float64, u_e))   # flat Float64 input for ForwardDiff
+
+    function pressure_residual(u)
+        re     = zeros(eltype(u), 3*n_nodes)
+        u_e_d  = [Vec{3}((u[3i-2], u[3i-1], u[3i])) for i in 1:n_nodes]
+        assemble_pressure!(re, scv, x, u_e_d, p)
+        return re
+    end
+
+    ke .+= ForwardDiff.jacobian(pressure_residual, u_vec)
+end
+
 
 # K.J - Bath https://doi.org/10.1016/S0045-7949(03)00010-5
 function s_norm(u, uₕ)
