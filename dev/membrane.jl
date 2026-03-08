@@ -93,109 +93,109 @@ t = 0.5        # thickness (dm)
 ν = 1.0/3.0
 mat = LinearElastic(E, ν, t)
 
-# select first cell
-cell = first(CellIterator(dh))
-reinit!(scv, cell) # prepares reference geometry
+# # select first cell
+# cell = first(CellIterator(dh))
+# reinit!(scv, cell) # prepares reference geometry
 
-# assemble and solve
-n = ndofs_per_cell(dh)
-ke = zeros(n, n)
-re  = zeros(n)
-T = Float64
-x = getcoordinates(cell)
+# # assemble and solve
+# n = ndofs_per_cell(dh)
+# ke = zeros(n, n)
+# re  = zeros(n)
+# T = Float64
+# x = getcoordinates(cell)
 
-# zero displacement should be zero residual, check that first
-u = zeros(n) # passed: no displacements, should be zero residual for membrane part
-membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
-@assert norm(re) ≤ 10eps(T)
-u = ones(n) # passed: test with uniform displacement as well, should still be zero residual for membrane part (rigid body motion)
-membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
-@assert norm(re) ≤ 10eps(T)
-u .= 0; u[[1,4,7,10]] .= 0.1 # passed: small x-displacement to break rigid body motion, should give nonzero residual
-membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
-@assert norm(re) ≤ 10eps(T)
-
-
-# random field should sum to zero internally
-u = rand(n)
-membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
-total = zeros(3)
-for I in 1:length(scv.N)
-    total .+= re[3I-2:3I]
-end
-@assert all(total .≤ 10eps(T))
-
-# affine displacement should give zero residual for membrane part (rigid body motion + uniform stretch)
-u = vcat([xᵢ.*[0.01,0.02,0] for xᵢ in x]...)
-re .= 0
-membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
-total = zeros(3)
-for I in 1:length(scv.N)
-    total .+= re[3I-2:3I]
-end
-@assert all(total .≤ 10eps(T))
+# # zero displacement should be zero residual, check that first
+# u = zeros(n) # passed: no displacements, should be zero residual for membrane part
+# membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
+# @assert norm(re) ≤ 10eps(T)
+# u = ones(n) # passed: test with uniform displacement as well, should still be zero residual for membrane part (rigid body motion)
+# membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
+# @assert norm(re) ≤ 10eps(T)
+# u .= 0; u[[1,4,7,10]] .= 0.1 # passed: small x-displacement to break rigid body motion, should give nonzero residual
+# membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
+# @assert norm(re) ≤ 10eps(T)
 
 
-# can we make something?
-ke .= 0
-membrane_tangent!(ke, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
-ke
-using LinearAlgebra
-eigenvals = eigvals(Matrix(ke))
-eigvecs = LinearAlgebra.eigvecs(Matrix(ke))
-n_rigid = count(x -> x ≤ 0, eigenvals)
-println("number of rigid body modes (zero eigenvalues): ", n_rigid)
-idx = sortperm(eigenvals)
-vals = eigenvals[idx]
-vecs = eigvecs[:, idx[n_rigid+1:end]]
-@show vecs
+# # random field should sum to zero internally
+# u = rand(n)
+# membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
+# total = zeros(3)
+# for I in 1:length(scv.N)
+#     total .+= re[3I-2:3I]
+# end
+# @assert all(total .≤ 10eps(T))
+
+# # affine displacement should give zero residual for membrane part (rigid body motion + uniform stretch)
+# u = vcat([xᵢ.*[0.01,0.02,0] for xᵢ in x]...)
+# re .= 0
+# membrane_residuals!(re, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
+# total = zeros(3)
+# for I in 1:length(scv.N)
+#     total .+= re[3I-2:3I]
+# end
+# @assert all(total .≤ 10eps(T))
+
+
+# # can we make something?
+# ke .= 0
+# membrane_tangent!(ke, scv, x, reinterpret(Vec{3,T}, u[celldofs(cell)]), mat)
+# ke
+# using LinearAlgebra
+# eigenvals = eigvals(Matrix(ke))
+# eigvecs = LinearAlgebra.eigvecs(Matrix(ke))
+# n_rigid = count(x -> x ≤ 0, eigenvals)
+# println("number of rigid body modes (zero eigenvalues): ", n_rigid)
+# idx = sortperm(eigenvals)
+# vals = eigenvals[idx]
+# vecs = eigvecs[:, idx[n_rigid+1:end]]
+# @show vecs
 
 # try to assemble into global system
-K = allocate_matrix(dh)
-r = zeros(ndofs(dh))
-function assemble_membrane!(K, r, dh, scv, u, mat)
-    @assert length(u) == ndofs(dh) "u're not long enough mate!"
-    n = ndofs_per_cell(dh)
-    ke = zeros(n, n)
-    re  = zeros(n)
-    assembler = start_assemble(K, r)
-    for cell in CellIterator(dh)
-        x = getcoordinates(cell)
-        fill!(ke, 0.0); fill!(re, 0.0)
-        reinit!(scv, cell) # prepares reference geometry
-        u_e = reinterpret(Vec{3,T}, u[celldofs(cell)])
-        membrane_tangent!(ke, scv, x, u_e, mat)
-        membrane_residuals!(re, scv, x, u_e, mat)
-        assemble!(assembler, celldofs(cell), ke, re)
-    end
-end
-assemble_membrane!(K, r, dh, scv, u, mat)
-
-# """
-# PATCH TEST
-# """
-# grid = plate_grid(4, 4)
-# dh = DofHandler(grid)
-# add!(dh, :u, ip^3)
-# close!(dh)
 # K = allocate_matrix(dh)
 # r = zeros(ndofs(dh))
-# u = zeros(ndofs(dh))
+# function assemble_membrane!(K, r, dh, scv, u, mat)
+#     @assert length(u) == ndofs(dh) "u're not long enough mate!"
+#     n = ndofs_per_cell(dh)
+#     ke = zeros(n, n)
+#     re  = zeros(n)
+#     assembler = start_assemble(K, r)
+#     for cell in CellIterator(dh)
+#         x = getcoordinates(cell)
+#         fill!(ke, 0.0); fill!(re, 0.0)
+#         reinit!(scv, cell) # prepares reference geometry
+#         u_e = reinterpret(Vec{3,T}, u[celldofs(cell)])
+#         membrane_tangent!(ke, scv, x, u_e, mat)
+#         membrane_residuals!(re, scv, x, u_e, mat)
+#         assemble!(assembler, celldofs(cell), ke, re)
+#     end
+# end
 # assemble_membrane!(K, r, dh, scv, u, mat)
-# @assert norm(r) ≤ 10eps(T) "residual should be zero for zero displacements"
 
-# # set some boundary conditions
-# addfacetset!(grid, "clamped",  x -> x[1] ≈ 0.0)
-# addfacetset!(grid, "traction", x -> x[1] ≈ 1.0)
+"""
+PATCH TEST
+"""
+grid = plate_grid(4, 4)
+dh = DofHandler(grid)
+add!(dh, :u, ip^3)
+close!(dh)
+K = allocate_matrix(dh)
+r = zeros(ndofs(dh))
+u = zeros(ndofs(dh))
+assemble_membrane!(K, r, dh, scv, u, mat)
+@assert norm(r) ≤ 10eps(T) "residual should be zero for zero displacements"
 
-# # apply boundary conditions
-# dbc = ConstraintHandler(dh)
-# add!(dbc, Dirichlet(:u, getfacetset(dh.grid, "clamped"), x -> zero(x), [1,2,3]))
-# add!(dbc, Dirichlet(:u, getfacetset(dh.grid, "traction"), x -> [0.01], [1]))
-# close!(dbc)
+# set some boundary conditions
+addfacetset!(grid, "clamped",  x -> x[1] ≈ 0.0)
+addfacetset!(grid, "traction", x -> x[1] ≈ 1.0)
 
-# apply!(K, r, dbc)
-# u_e = K \ r
+# apply boundary conditions
+dbc = ConstraintHandler(dh)
+add!(dbc, Dirichlet(:u, getfacetset(dh.grid, "clamped"), x -> zero(x), [1,2,3]))
+add!(dbc, Dirichlet(:u, getfacetset(dh.grid, "traction"), x -> [0.01], [1]))
+close!(dbc)
+
+apply!(K, r, dbc)
+u_e = K \ r
 
 
 # T = Float64
