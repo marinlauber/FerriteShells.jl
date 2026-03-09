@@ -8,29 +8,6 @@ function create_cook_grid(nx, ny; primitive=Quadrilateral)
     return generate_grid(primitive, (nx, ny), corners) |> shell_grid # embed in into a 3D space
 end
 
-# integrate edge traction force into f
-# DOF ordering assumed: :u field first (3 DOFs per node, interleaved u,v,w)
-function assemble_traction_force!(f, dh, facetset, traction)
-    edge_local_nodes = Ferrite.reference_facets(RefQuadrilateral)
-    n_dpc = ndofs_per_cell(dh)
-    fe    = zeros(n_dpc)
-    for fc in FacetIterator(dh, facetset)
-        x  = getcoordinates(fc)
-        fn = fc.current_facet_id             # local facet index: 1, 2, or 3
-        ia, ib = edge_local_nodes[fn]        # local node indices on this edge
-        edge_len = norm(x[ib] - x[ia])
-        fill!(fe, 0.0)
-        # 1-point midpoint quadrature: both edge nodes receive equal weight 0.5
-        # (exact for the linear shape functions used here)
-        for (node, N) in ((ia, 0.5), (ib, 0.5))
-            for c in 1:3    # u, v, w components
-                fe[3(node-1)+c] += N * traction[c] * edge_len
-            end
-        end
-        f[celldofs(fc)] .+= fe
-    end
-end
-
 function assemble_membrane!(K, r, dh, scv, u, mat)
     @assert length(u) == ndofs(dh) "u're not long enough mate!"
     n = ndofs_per_cell(dh)
@@ -49,7 +26,7 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
 end
 
 # number of cells
-grid = create_cook_grid(32, 16)
+grid = create_cook_grid(32, 16; primitive=QuadraticQuadrilateral)
 
 # facesets for boundary conditions
 addfacetset!(grid, "clamped", x -> norm(x[1]) ≈ 0.0)
@@ -57,11 +34,12 @@ addfacetset!(grid, "traction", x -> norm(x[1]) ≈ 48.0)
 addnodeset!(grid, "nodes", x -> true)
 
 # interpolation order
-ip = Lagrange{RefQuadrilateral,1}() #to define fields only
-qr = QuadratureRule{RefQuadrilateral}(2) # avoid zero spurious modes
+ip = Lagrange{RefQuadrilateral, 2}() #to define fields only
+qr = QuadratureRule{RefQuadrilateral}(3) # avoid zero spurious modes
 
 # cell (shell) values
 scv = ShellCellValues(qr, ip, ip)
+fqr = FacetQuadratureRule{RefQuadrilateral}(3)
 
 # degrees of freedom for displacements (pure membrane test)
 dh = DofHandler(grid)
@@ -69,7 +47,7 @@ add!(dh, :u, ip^3)
 close!(dh)
 
 # material model
-mat = LinearElastic(1.0, 0.3)
+mat = LinearElastic(1.0, 1/3)
 
 # boundary conditions
 dbc = ConstraintHandler(dh)
@@ -83,7 +61,7 @@ f = zeros(ndofs(dh))
 assemble_membrane!(Ke, f, dh, scv, zeros(ndofs(dh)), mat)
 
 # test traction force assembly
-assemble_traction_force!(f, dh, getfacetset(grid, "traction"), (0.0, 1.0/16, 0.0))
+assemble_traction!(f, dh, getfacetset(grid, "traction"), ip, fqr, (0.0, 1.0/16, 0.0))
 
 # apply BCs
 apply!(Ke, f, dbc)

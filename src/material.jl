@@ -18,7 +18,8 @@ end
 # where A^{αβ} = inv(A_{αβ}) is the contravariant reference metric.
 # For a unit-square element A^{αβ} = δ^{αβ} and this reduces to mat.C.
 function contravariant_elasticity(mat::LinearElastic, A_metric::SymmetricTensor{2,2,T}) where T
-    Aup = contravariant(A_metric)
+    # Compute the contravariant metric A^{αβ} = inv(A_{αβ}) from the covariant metric A_{αβ}.
+    Aup = inv(A_metric) # implemented in Tensors.jl
 
     # Lame parameters scaled by thickness (for plane stress)
     μ = mat.E * mat.thickness / (2*(1 + mat.ν))

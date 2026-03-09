@@ -3,38 +3,40 @@ using LinearAlgebra: cross
 
 # maps the 2D nodes of a mesh onto the 3D coordinates
 # by applying the `map` function to the nodes (default: flat z=0 plane)
-function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(T))) where {P<:Union{Triangle,Quadrilateral},T}
+function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(T))) where {P<:Union{Triangle,Quadrilateral,QuadraticQuadrilateral},T}
     return Grid(grid.cells, [Node(Tensors.Vec{3}(map(n))) for n in grid.nodes])
 end
 
-# Compute the contravariant metric A^{αβ} = inv(A_{αβ}) from the covariant metric A_{αβ}.
-function contravariant(A_cov::SymmetricTensor{2,2,T}) where T
-    det_A = A_cov[1,1]*A_cov[2,2] - A_cov[1,2]^2
-    A11u  =  A_cov[2,2] / det_A
-    A12u  = -A_cov[1,2] / det_A
-    A22u  =  A_cov[1,1] / det_A
-    SymmetricTensor{2,2,T}((A11u, A12u, A22u))
-end
-
-# Assemble external traction into force vector f.
+# Assemble external traction into force vector f for embedded shell elements (2D mesh in 3D).
 # `traction` is either a Vec{3} (uniform) or a callable x::Vec{3} -> Vec{3}.
-# `fv` is a FacetValues created for the element interpolation of the :u field.
-function assemble_traction!(f, dh, facetset, fv::FacetValues, traction)
+# Uses a FacetQuadratureRule and computes the edge length element directly from 3D node positions,
+# bypassing the sdim mismatch that prevents standard FacetValues from working on embedded meshes.
+# For RefQuadrilateral: facets 1,3 (bottom/top) vary in ξ₁; facets 2,4 (right/left) vary in ξ₂.
+function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
-    n_base = getnbasefunctions(fv)
+    n_base = getnbasefunctions(ip)
     fe     = zeros(ndofs_per_cell(dh))
     for fc in FacetIterator(dh, facetset)
         fill!(fe, 0.0)
-        reinit!(fv, fc)
-        x = getcoordinates(fc)
-        for qp in 1:getnquadpoints(fv)
-            dΓ = getdetJdV(fv, qp)
-            t  = t_func(spatial_coordinate(fv, qp, x))
+        x        = getcoordinates(fc)
+        facet_nr = fc.current_facet_id
+        qr_f     = fqr.facet_rules[facet_nr]
+        tdir     = facet_nr ∈ (1, 3) ? 1 : 2  # parametric direction along edge
+        for (ξ, w) in zip(qr_f.points, qr_f.weights)
+            xp = zero(Vec{3,Float64})
+            Jt = zero(Vec{3,Float64})  # physical tangent along edge
             for I in 1:n_base
-                NI = shape_value(fv, qp, I)
-                fe[3I-2] += NI * t[1] * dΓ
-                fe[3I-1] += NI * t[2] * dΓ
-                fe[3I  ] += NI * t[3] * dΓ
+                dN, N = Ferrite.reference_shape_gradient_and_value(ip, ξ, I)
+                xp += N * x[I]
+                Jt += dN[tdir] * x[I]
+            end
+            dΓ = norm(Jt) * w
+            t  = t_func(xp)
+            for I in 1:n_base
+                N = Ferrite.reference_shape_value(ip, ξ, I)
+                fe[3I-2] += N * t[1] * dΓ
+                fe[3I-1] += N * t[2] * dΓ
+                fe[3I  ] += N * t[3] * dΓ
             end
         end
         f[celldofs(fc)] .+= fe
