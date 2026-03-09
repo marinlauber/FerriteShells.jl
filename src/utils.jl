@@ -66,17 +66,8 @@ end
 using ForwardDiff
 # K_IJ^p = p * ∂(a₁ × a₂)/∂u_J * N_I
 function assemble_pressure_tangent!(ke, scv, x, u_e, p)
-    n_nodes = length(u_e)
-    u_vec   = collect(reinterpret(Float64, u_e))   # flat Float64 input for ForwardDiff
-
-    function pressure_residual(u)
-        re     = zeros(eltype(u), 3*n_nodes)
-        u_e_d  = [Vec{3}((u[3i-2], u[3i-1], u[3i])) for i in 1:n_nodes]
-        assemble_pressure!(re, scv, x, u_e_d, p)
-        return re
-    end
-
-    ke .+= ForwardDiff.jacobian(pressure_residual, u_vec)
+    pressure_residual(u) = (re = zeros(eltype(u), length(u)); assemble_pressure!(re, scv, x, u, p); re)
+    ke .+= ForwardDiff.jacobian(pressure_residual, u_e)
 end
 
 

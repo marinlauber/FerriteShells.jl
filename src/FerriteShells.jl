@@ -18,7 +18,7 @@ include("material.jl")
 export LinearElastic, contravariant_elasticity
 
 include("assembly.jl")
-export membrane_residuals!, membrane_tangent!
+export membrane_residuals!, membrane_tangent!, bending_residuals!, bending_tangent!
 
 include("utils.jl")
 export shell_grid, assemble_traction!, assemble_pressure!, assemble_pressure_tangent!

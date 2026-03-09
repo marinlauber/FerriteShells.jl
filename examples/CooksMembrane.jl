@@ -1,10 +1,8 @@
 using FerriteShells
 
 function create_cook_grid(nx, ny; primitive=Quadrilateral)
-    corners = [Tensors.Vec{2}((0.0, 0.0)),
-               Tensors.Vec{2}((48.0, 44.0)),
-               Tensors.Vec{2}((48.0, 60.0)),
-               Tensors.Vec{2}((0.0, 44.0))]
+    corners = [Vec{2}(( 0.0,  0.0)), Vec{2}((48.0, 44.0)),
+               Vec{2}((48.0, 60.0)), Vec{2}(( 0.0, 44.0))]
     return generate_grid(primitive, (nx, ny), corners) |> shell_grid # embed in into a 3D space
 end
 
@@ -18,7 +16,7 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
         x = getcoordinates(cell)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell) # prepares reference geometry
-        u_e = reinterpret(Vec{3,eltype(u)}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         membrane_tangent!(ke, scv, x, u_e, mat)
         membrane_residuals!(re, scv, x, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
@@ -34,8 +32,8 @@ addfacetset!(grid, "traction", x -> norm(x[1]) ≈ 48.0)
 addnodeset!(grid, "nodes", x -> true)
 
 # interpolation order
-ip = Lagrange{RefQuadrilateral, 2}() #to define fields only
-qr = QuadratureRule{RefQuadrilateral}(3) # avoid zero spurious modes
+ip = Lagrange{RefQuadrilateral, 2}()
+qr = QuadratureRule{RefQuadrilateral}(3)
 
 # cell (shell) values
 scv = ShellCellValues(qr, ip, ip)
@@ -55,20 +53,20 @@ add!(dbc, Dirichlet(:u, getfacetset(dh.grid, "clamped"), x -> zero(x), [1,2,3]))
 add!(dbc, Dirichlet(:u, getnodeset(dh.grid, "nodes"), x -> [0.0], [3]))
 close!(dbc)
 
-# stiffness matrix assembly (for visual inspection only, not used in a solve here)
+# stiffness matrix and residuals vector construction and assembly
 Ke = allocate_matrix(dh)
 f = zeros(ndofs(dh))
 assemble_membrane!(Ke, f, dh, scv, zeros(ndofs(dh)), mat)
 
-# test traction force assembly
+# traction force assembly, force of 1N on the face, split into 16 units (length of face)
 assemble_traction!(f, dh, getfacetset(grid, "traction"), ip, fqr, (0.0, 1.0/16, 0.0))
 
-# apply BCs
+# apply BCs and solve (\) figures out the best linear solver to use
 apply!(Ke, f, dbc)
 @time ue = Ke\f
 
- # extract solution at point
-ph     = PointEvalHandler(grid, [Tensors.Vec{3}((48.0, 60.0, 0.0))])
+# extract solution at point
+ph     = PointEvalHandler(grid, [Vec{3}((48.0, 60.0, 0.0))])
 u_eval = first(evaluate_at_points(ph, dh, ue, :u))
 @show u_eval
 

@@ -16,7 +16,7 @@ end
 
 # Contravariant elasticity tensor C^{αβγδ} = λ A^{αβ}A^{γδ} + μ(A^{αγ}A^{βδ} + A^{αδ}A^{βγ})
 # where A^{αβ} = inv(A_{αβ}) is the contravariant reference metric.
-# For a unit-square element A^{αβ} = δ^{αβ} and this reduces to mat.C.
+# For a unit-square element A^{αβ} = δ^{αβ}
 function contravariant_elasticity(mat::LinearElastic, A_metric::SymmetricTensor{2,2,T}) where T
     # Compute the contravariant metric A^{αβ} = inv(A_{αβ}) from the covariant metric A_{αβ}.
     Aup = inv(A_metric) # implemented in Tensors.jl
@@ -27,4 +27,9 @@ function contravariant_elasticity(mat::LinearElastic, A_metric::SymmetricTensor{
 
     # use implicit function constructor to build the 4th-order elasticity tensor from the contravariant metric
     SymmetricTensor{4,2,T}((α,β,γ,δ) -> λ*Aup[α,β]*Aup[γ,δ] + μ*(Aup[α,γ]*Aup[β,δ] + Aup[α,δ]*Aup[β,γ]))
+end
+
+# Bending stiffness tensor D^{αβγδ} = (t²/12) C^{αβγδ} (same structure as membrane, scaled by t²/12)
+function contravariant_bending_stiffness(mat::LinearElastic, A_metric::SymmetricTensor{2,2,T}) where T
+    (mat.thickness^2 / 12) * contravariant_elasticity(mat, A_metric)
 end
