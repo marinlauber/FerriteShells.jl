@@ -36,7 +36,7 @@ for cell in CellIterator(dh)
     re = zeros(ndofs_per_cell(dh))
     x = getcoordinates(cell)
     u_e = zeros(ndofs_per_cell(dh)) # zero displacements
-    assemble_pressure!(re, scv, x, reinterpret(Vec{3,eltype(u_e)}, u_e), pressure)
+    assemble_pressure!(re, scv, x, u_e, pressure)
     f[celldofs(cell)] .+= re
 end
 @assert sum(f) ≈ pressure * Area

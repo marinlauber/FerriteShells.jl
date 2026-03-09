@@ -20,14 +20,14 @@ const X_UNIT_SQUARE = [
 # Helper: compute residual into a fresh zeroed vector
 function residual(scv, x, u_vec, mat)
     re = zeros(length(u_vec))
-    membrane_residuals!(re, scv, x, reinterpret(Vec{3, Float64}, u_vec), mat)
+    membrane_residuals!(re, scv, x, u_vec, mat)
     return re
 end
 
 # Helper: compute tangent into a fresh zeroed matrix
 function tangent(scv, x, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    membrane_tangent!(ke, scv, x, reinterpret(Vec{3, Float64}, u_vec), mat)
+    membrane_tangent!(ke, scv, x, u_vec, mat)
     return ke
 end
 

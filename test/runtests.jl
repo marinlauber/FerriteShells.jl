@@ -20,14 +20,14 @@ const X_UNIT_SQUARE = [
 # Helper: compute residual into a fresh zeroed vector
 function residual(scv, x, u_vec, mat)
     re = zeros(length(u_vec))
-    membrane_residuals!(re, scv, x, reinterpret(Vec{3, Float64}, u_vec), mat)
+    membrane_residuals!(re, scv, x, u_vec, mat)
     return re
 end
 
 # Helper: compute tangent into a fresh zeroed matrix
 function tangent(scv, x, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    membrane_tangent!(ke, scv, x, reinterpret(Vec{3, Float64}, u_vec), mat)
+    membrane_tangent!(ke, scv, x, u_vec, mat)
     return ke
 end
 
@@ -48,10 +48,9 @@ end
 
 # Strain energy of a single element: W = ∫ 0.5 N^{αβ} E_{αβ} dA
 function element_strain_energy(scv, x, u_vec, mat)
-    u_e = reinterpret(Vec{3, Float64}, u_vec)
     W = 0.0
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, x, u_e)
+        a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, x, u_vec)
         E = 0.5 * (a_metric - A_metric)
         N = FerriteShells.contravariant_elasticity(mat, A_metric) ⊡ E
         W += 0.5 * (N ⊡ E) * scv.detJdV[qp]
@@ -98,11 +97,11 @@ function l2_error(dh, scv, u_h, u_exact)
     for cell in CellIterator(dh)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
-        u_e    = reinterpret(Vec{3, Float64}, u_h[celldofs(cell)])
+        u_e    = u_h[celldofs(cell)]
         for qp in 1:getnquadpoints(scv)
             ξ  = scv.qr.points[qp]
             dΩ = scv.detJdV[qp]
-            u_h_qp = sum(Ferrite.reference_shape_value(scv.ip_shape, ξ, I) * u_e[I]
+            u_h_qp = sum(Ferrite.reference_shape_value(scv.ip_shape, ξ, I) * Vec{3}((u_e[3I-2], u_e[3I-1], u_e[3I]))
                          for I in 1:n_nodes)
             x_qp   = sum(Ferrite.reference_shape_value(scv.ip_shape, ξ, I) * coords[I]
                          for I in 1:n_nodes)
@@ -132,7 +131,7 @@ end
 
         # rigid body rotation should give zero membrane residual
         u = vcat([(R(-π/2)⋅xᵢ)-xᵢ for xᵢ in X_UNIT_SQUARE]...) # passed
-        membrane_residuals!(re, scv, X_UNIT_SQUARE, reinterpret(Vec{3,Float64}, u), mat)
+        membrane_residuals!(re, scv, X_UNIT_SQUARE, u, mat)
         @test norm(re) ≤ 10eps(Float64) && sum(re) ≤ 10eps(Float64)
 
         # Tangent symmetry (zero displacement) should be exactly symmetric since geometric stiffness is zero.
@@ -204,7 +203,7 @@ end
         @test n_zero + n_positive == n_dof
     end
     @testset "bending residuals and tangent" begin
-        # TODO implement bending residuals and tangent, then add tests here
+        # tested in test_bending.jl
         @test true
     end
     @testset "combined membrane and bending" begin
@@ -321,7 +320,7 @@ function assemble_residual!(r, dh, scv, u, mat)
         fill!(re, 0.0)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
-        u_e = reinterpret(Vec{3, Float64}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         membrane_residuals!(re, scv, x, u_e, mat)
         r[celldofs(cell)] .+= re
     end
@@ -336,7 +335,7 @@ function assemble_tangent_and_residual!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
-        u_e = reinterpret(Vec{3, Float64}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         membrane_tangent!(ke, scv, x, u_e, mat)
         membrane_residuals!(re, scv, x, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
@@ -587,3 +586,5 @@ end
     rates = [log2(errors[i] / errors[i+1]) for i in 1:length(errors)-1]
     @test all(r -> r ≥ 1.8, rates)
 end
+
+include("test_bending.jl")

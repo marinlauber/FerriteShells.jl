@@ -41,7 +41,7 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
         x = getcoordinates(cell)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell) # prepares reference geometry
-        u_e = reinterpret(Vec{3,eltype(u)}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         membrane_tangent!(ke, scv, x, u_e, mat)
         membrane_residuals!(re, scv, x, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)

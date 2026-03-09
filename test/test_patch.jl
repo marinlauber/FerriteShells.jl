@@ -55,7 +55,7 @@ function assemble_residual!(r, dh, scv, u, mat)
         fill!(re, 0.0)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
-        u_e = reinterpret(Vec{3, Float64}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         membrane_residuals!(re, scv, x, u_e, mat)
         r[celldofs(cell)] .+= re
     end
@@ -70,7 +70,7 @@ function assemble_tangent_and_residual!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
-        u_e = reinterpret(Vec{3, Float64}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         membrane_tangent!(ke, scv, x, u_e, mat)
         membrane_residuals!(re, scv, x, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
