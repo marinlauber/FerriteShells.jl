@@ -15,10 +15,12 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
         x = getcoordinates(cell)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell) # prepares reference geometry
-        u_e = u[celldofs(cell)]
-        membrane_tangent_KL!(ke, scv, x, u_e, mat)
-        membrane_residuals_KL!(re, scv, x, u_e, mat)
-        assemble!(assembler, celldofs(cell), ke, re)
+        u_e = u[shelldofs(cell)]
+        membrane_tangent_RM!(ke, scv, x, u_e, mat)
+        bending_tangent_RM!(ke, scv, x, u_e, mat)
+        membrane_residuals_RM!(re, scv, x, u_e, mat)
+        bending_residuals_RM!(re, scv, x, u_e, mat)
+        assemble!(assembler, shelldofs(cell), ke, re)
     end
 end
 
@@ -26,12 +28,13 @@ end
 grid = create_cook_grid(32, 16; primitive=QuadraticQuadrilateral)
 
 # facesets for boundary conditions
-addfacetset!(grid, "clamped", x -> norm(x[1]) ≈ 0.0)
+addfacetset!(grid,  "clamped", x -> norm(x[1]) ≈ 0.0)
 addfacetset!(grid, "traction", x -> norm(x[1]) ≈ 48.0)
-addnodeset!(grid, "nodes", x -> true)
 
 # interpolation order
-ip = Lagrange{RefQuadrilateral, 2}()
+ip = Lagrange{RefQuadrilateral, 1}()  # Q4
+# ip = Serendipity{RefQuadrilateral, 2}()  # Q8
+# ip = Lagrange{RefQuadrilateral, 2}()  # Q9
 qr = QuadratureRule{RefQuadrilateral}(3)
 
 # cell (shell) values
@@ -41,15 +44,16 @@ fqr = FacetQuadratureRule{RefQuadrilateral}(3)
 # degrees of freedom for displacements (pure membrane test)
 dh = DofHandler(grid)
 add!(dh, :u, ip^3)
+add!(dh, :θ, ip^2)
 close!(dh)
 
 # material model
-mat = LinearElastic(1.0, 1/3)
+mat = LinearElastic(1.0, 1/3, 1.0)
 
 # boundary conditions
 dbc = ConstraintHandler(dh)
 add!(dbc, Dirichlet(:u, getfacetset(dh.grid, "clamped"), x -> zero(x), [1,2,3]))
-add!(dbc, Dirichlet(:u, getnodeset(dh.grid, "nodes"), x -> [0.0], [3])) # prevents the singular K if z unconstrained
+add!(dbc, Dirichlet(:θ, getfacetset(dh.grid, "clamped"), x -> [0.0,0.0], [1,2]))
 close!(dbc)
 
 # stiffness matrix and residuals vector construction and assembly
@@ -58,11 +62,11 @@ f = zeros(ndofs(dh))
 assemble_membrane!(Ke, f, dh, scv, zeros(ndofs(dh)), mat)
 
 # traction force assembly, force of 1N on the face, split into 16 units (length of face)
-assemble_traction!(f, dh, getfacetset(grid, "traction"), ip, fqr, (0.0, 1.0/16, 0.0))
+assemble_traction!(f, dh, getfacetset(grid, "traction"), ip, fqr, (0.0, 1/16, 0.0))
 
 # apply BCs and solve (\) figures out the best linear solver to use
 apply!(Ke, f, dbc)
-@time ue = Ke\f
+@time ue = Ke \ f
 
 # extract solution at point
 ph     = PointEvalHandler(grid, [Vec{3}((48.0, 60.0, 0.0))])
@@ -70,6 +74,6 @@ u_eval = first(evaluate_at_points(ph, dh, ue, :u))
 @show u_eval
 
 # write to vtk
-VTKGridFile("cooks_membrane", dh) do vtk
+VTKGridFile("cooks_membrane_RM", dh) do vtk
     write_solution(vtk, dh, ue)
 end
