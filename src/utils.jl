@@ -16,6 +16,9 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
     n_base = getnbasefunctions(ip)
     fe     = zeros(ndofs_per_cell(dh))
+    ndofs_per_node = ndofs_per_cell(dh) ÷ n_base
+    is_interleaved = ndofs_per_node == 5 && length(Ferrite.getfieldnames(dh)) == 1
+    @inline block(I) = is_interleaved ? (5I-4:5I-2) : (3I-2:3I)
     for fc in FacetIterator(dh, facetset)
         fill!(fe, 0.0)
         x        = getcoordinates(fc)
@@ -34,9 +37,7 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
             t  = t_func(xp)
             for I in 1:n_base
                 N = Ferrite.reference_shape_value(ip, ξ, I)
-                fe[3I-2] += N * t[1] * dΓ
-                fe[3I-1] += N * t[2] * dΓ
-                fe[3I  ] += N * t[3] * dΓ
+                fe[block(I)] .+= N * t * dΓ
             end
         end
         f[celldofs(fc)] .+= fe
@@ -47,6 +48,7 @@ end
 # cross(a₁, a₂) already has magnitude ‖a₁ × a₂‖ (current area per parametric area).
 # multiplying by w integrates over the parameter domain
 # assemble_pressure!(re, scv, x, u_e, p::Number) = assemble_pressure!(re, scv, x, u_e, ()->p)
+# @TODO should be agnostic of the number of dofs of u_e
 function assemble_pressure!(re, scv, x, u_e, pfunc)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
@@ -70,8 +72,38 @@ function assemble_pressure_tangent!(ke, scv, x, u_e, p)
     ke .+= ForwardDiff.jacobian(pressure_residual, u_e)
 end
 
+# write the strain at the quadrature points, does that work
+function compute_membrane_strains(Es, scv, x, u_e)
+    for qp in 1:getnquadpoints(scv)
+        ξ = scv.qr.points[qp]
+        _,_A_metric,a_metric = kinematics(scv, qp, x, u_e)
+        Es[qp] = 0.5 * (a_metric - A_metric)
+    end
+end
+
 
 # K.J - Bath https://doi.org/10.1016/S0045-7949(03)00010-5
 function s_norm(u, uₕ)
     nothing
+end
+
+import Ferrite: CellCache
+"""
+    shelldofs()
+
+Reorder DOFs from a two-field DofHandler layout (:u as ip^3, :θ as ip^2)
+to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
+Input:  [u1x,u1y,u1z, u2x,...,unz | θ1₁,θ1₂, θ2₁,...,θn₂]
+Output: [u1x,u1y,u1z,θ1₁,θ1₂, u2x,u2y,u2z,θ2₁,θ2₂, ...]
+"""
+function shelldofs(cell::CellCache)
+    dofs = cell.dofs
+    n = length(dofs) ÷ 5
+    perm = similar(dofs)
+    for I in 1:n
+        @views perm[5I-4:5I-2] .= dofs[3I-2:3I]
+        perm[5I-1] = dofs[3n + 2I-1]
+        perm[5I  ] = dofs[3n + 2I]
+    end
+    return perm
 end
