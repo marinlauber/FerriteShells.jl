@@ -1,0 +1,253 @@
+using FerriteShells
+using LinearAlgebra
+using Test
+using Random
+
+# Q9 unit square in XY plane, 5 DOFs/node → 45 DOFs per element.
+const X_Q9_UNIT_RM = [
+    Vec{3}((0.0, 0.0, 0.0)),
+    Vec{3}((1.0, 0.0, 0.0)),
+    Vec{3}((1.0, 1.0, 0.0)),
+    Vec{3}((0.0, 1.0, 0.0)),
+    Vec{3}((0.5, 0.0, 0.0)),
+    Vec{3}((1.0, 0.5, 0.0)),
+    Vec{3}((0.5, 1.0, 0.0)),
+    Vec{3}((0.0, 0.5, 0.0)),
+    Vec{3}((0.5, 0.5, 0.0)),
+]
+
+function make_rm_scv(; qr_order=3)
+    ip = Lagrange{RefQuadrilateral, 2}()
+    qr = QuadratureRule{RefQuadrilateral}(qr_order)
+    return ShellCellValues(qr, ip, ip)
+end
+
+function rm_residual(scv, x, u5, mat)
+    re = zeros(length(u5))
+    membrane_residuals_RM!(re, scv, x, u5, mat)
+    bending_residuals_RM!(re, scv, x, u5, mat)
+    return re
+end
+
+function rm_tangent_mat(scv, x, u5, mat)
+    ke = zeros(length(u5), length(u5))
+    membrane_tangent_RM!(ke, scv, x, u5, mat)
+    bending_tangent_RM!(ke, scv, x, u5, mat)
+    return ke
+end
+
+function numerical_rm_tangent(scv, x, u5, mat; ε=1e-5)
+    n = length(u5)
+    Kfd = zeros(n, n)
+    for j in 1:n
+        up = copy(u5); up[j] += ε
+        um = copy(u5); um[j] -= ε
+        Kfd[:, j] = (rm_residual(scv, x, up, mat) .- rm_residual(scv, x, um, mat)) ./ (2ε)
+    end
+    return Kfd
+end
+
+@testset "RM shell" begin
+    mat   = LinearElastic(1.0e6, 0.3, 0.01)
+    scv   = make_rm_scv()
+    reinit!(scv, X_Q9_UNIT_RM)
+    n_dof = 45   # 9 nodes × 5 DOFs
+
+    # 1. Zero energy and residual at reference state (u=0, φ=0).
+    @test FerriteShells.rm_membrane_energy(zeros(n_dof), scv, X_Q9_UNIT_RM, mat) == 0.0
+    @test FerriteShells.rm_bending_shear_energy(zeros(n_dof), scv, X_Q9_UNIT_RM, mat) == 0.0
+    @test rm_residual(scv, X_Q9_UNIT_RM, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
+
+    # 2. Tangent FD consistency at a non-trivial displacement.
+    # Apply sinusoidal z-perturbation through displacement DOFs (index 5I-2)
+    # and a small rotation through φ DOFs (indices 5I-1, 5I).
+    Random.seed!(42)
+    u_pert = zeros(n_dof)
+    for I in 1:9
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
+        u_pert[5I-1] = 1e-3 * randn()
+        u_pert[5I  ] = 1e-3 * randn()
+    end
+    ke_an = rm_tangent_mat(scv, X_Q9_UNIT_RM, u_pert, mat)
+    ke_fd = numerical_rm_tangent(scv, X_Q9_UNIT_RM, u_pert, mat)
+    @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
+
+    # 3. Tangent symmetry (Hessian of a scalar energy is symmetric by construction,
+    # but this catches any accidental asymmetry introduced in the accumulation).
+    @test norm(ke_an .- ke_an') / (norm(ke_an) + 1e-14) < 1e-12
+
+    # 4. Rigid-body invariance: energy unchanged under rigid translation and rotation.
+    # Translation: add a constant offset to all node positions (u only, not φ).
+    u_trans = copy(u_pert)
+    for I in 1:9
+        u_trans[5I-4] += 3.7
+        u_trans[5I-3] += -1.2
+        u_trans[5I-2] += 0.5
+    end
+    @test FerriteShells.rm_membrane_energy(u_trans, scv, X_Q9_UNIT_RM, mat) ≈
+          FerriteShells.rm_membrane_energy(u_pert,  scv, X_Q9_UNIT_RM, mat) rtol=1e-10
+    @test FerriteShells.rm_bending_shear_energy(u_trans, scv, X_Q9_UNIT_RM, mat) ≈
+          FerriteShells.rm_bending_shear_energy(u_pert,  scv, X_Q9_UNIT_RM, mat) rtol=1e-10
+
+    # In-plane rotation (about z-axis): rotate both node positions and DOFs.
+    θ = π / 7
+    Rz = [cos(θ) -sin(θ) 0.0; sin(θ) cos(θ) 0.0; 0.0 0.0 1.0]
+    x_rot   = [Vec{3}(Tuple(Rz * collect(xi))) for xi in X_Q9_UNIT_RM]
+    scv_rot = make_rm_scv(); reinit!(scv_rot, x_rot)
+    u_rot   = copy(u_pert)
+    for I in 1:9
+        u_rot[5I-4:5I-2] = Rz * u_pert[5I-4:5I-2]
+        # φ rotates the director, which lives in the tangent plane;
+        # for a z-rotation the in-plane frame rotates too, but since
+        # G₃ = ẑ is unchanged the bending/shear energy is frame-invariant.
+    end
+    @test FerriteShells.rm_membrane_energy(u_rot, scv_rot, x_rot, mat) ≈
+          FerriteShells.rm_membrane_energy(u_pert, scv, X_Q9_UNIT_RM, mat) rtol=1e-8
+    @test FerriteShells.rm_bending_shear_energy(u_rot, scv_rot, x_rot, mat) ≈
+          FerriteShells.rm_bending_shear_energy(u_pert, scv, X_Q9_UNIT_RM, mat) rtol=1e-8
+end
+
+@testset "RM membrane patch test" begin
+    nodes_p = [Vec{3}(( 0.0,  0.0, 0.0)), Vec{3}((10.0,  0.0, 0.0)),
+               Vec{3}((10.0, 10.0, 0.0)), Vec{3}(( 0.0, 10.0, 0.0)),
+               Vec{3}(( 2.0,  2.0, 0.0)), Vec{3}(( 8.0,  3.0, 0.0)),
+               Vec{3}(( 8.0,  7.0, 0.0)), Vec{3}(( 4.0,  7.0, 0.0))]
+    cells_p = [Quadrilateral(c) for c in [(1,2,6,5),(2,3,7,6),(3,4,8,7),(4,1,5,8),(5,6,7,8)]]
+    grid_p  = Grid(cells_p, Node.(nodes_p))
+    addnodeset!(grid_p, "boundary",
+        x -> isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+             isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10))
+    addnodeset!(grid_p, "interior",
+        x -> !(isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+               isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10)))
+
+    ip_q4  = Lagrange{RefQuadrilateral,1}()
+    scv_p  = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip_q4, ip_q4)
+    dh_p   = DofHandler(grid_p); add!(dh_p, :u, ip_q4^5); close!(dh_p)
+    mat_p  = LinearElastic(1.0e6, 0.3, 0.01)
+    ε_xx, ε_yy, γ_xy = 1e-3, 2e-3, 5e-4
+
+    # Build exact displacement vector (linear field, φ = 0).
+    n_p  = ndofs(dh_p)
+    u_ex = zeros(n_p)
+    for cell in CellIterator(dh_p)
+        coords = getcoordinates(cell); dofs = celldofs(cell)
+        for (i, xi) in enumerate(coords)
+            u_ex[dofs[5i-4]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
+            u_ex[dofs[5i-3]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
+        end
+    end
+
+    # Interior residual must vanish under the exact linear field.
+    r_p = zeros(n_p); re_p = zeros(ndofs_per_cell(dh_p))
+    for cell in CellIterator(dh_p)
+        fill!(re_p, 0.0); reinit!(scv_p, cell)
+        x = getcoordinates(cell); u_e = u_ex[celldofs(cell)]
+        membrane_residuals_RM!(re_p, scv_p, x, u_e, mat_p)
+        bending_residuals_RM!(re_p, scv_p, x, u_e, mat_p)
+        r_p[celldofs(cell)] .+= re_p
+    end
+    ch_tmp = ConstraintHandler(dh_p)
+    add!(ch_tmp, Dirichlet(:u, getnodeset(grid_p, "boundary"), x -> zeros(5), [1,2,3,4,5]))
+    close!(ch_tmp)
+    @test norm(r_p[ch_tmp.free_dofs]) ≤ 1e-8 * norm(r_p)
+    @test sum(r_p) < 1e-14
+
+    # Linear solve with boundary data recovers the exact interior field.
+    K_p = allocate_matrix(dh_p); r_p2 = zeros(n_p)
+    asmb_p = start_assemble(K_p, r_p2)
+    ke_p = zeros(ndofs_per_cell(dh_p), ndofs_per_cell(dh_p)); re_p2 = zeros(ndofs_per_cell(dh_p))
+    for cell in CellIterator(dh_p)
+        fill!(ke_p, 0.0); fill!(re_p2, 0.0); reinit!(scv_p, cell)
+        x = getcoordinates(cell); u0 = zeros(ndofs_per_cell(dh_p))
+        membrane_tangent_RM!(ke_p, scv_p, x, u0, mat_p)
+        bending_tangent_RM!(ke_p, scv_p, x, u0, mat_p)
+        assemble!(asmb_p, celldofs(cell), ke_p, re_p2)
+    end
+    ch2 = ConstraintHandler(dh_p)
+    add!(ch2, Dirichlet(:u, getnodeset(grid_p, "boundary"),
+         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0, 0.0, 0.0], [1,2,3,4,5]))
+    add!(ch2, Dirichlet(:u, getnodeset(grid_p, "interior"), x -> zeros(3), [3,4,5]))
+    close!(ch2); Ferrite.update!(ch2, 0.0)
+    apply!(K_p, r_p2, ch2)
+    u_sol = K_p \ r_p2
+    @test norm(u_sol[ch2.free_dofs] .- u_ex[ch2.free_dofs]) ≤ 1e-8 * norm(u_ex[ch2.free_dofs])
+end
+
+@testset "RM Kirchhoff limit (zero shear)" begin
+    # Bilinear mode u₃ = α·x·y with Kirchhoff rotations φ₁ = -α·y, φ₂ = -α·x.
+    # The shear γ_α = a_α·d − A_α·G₃ vanishes for this mode, so W_RM ≈ W_KL.
+    α = 1e-4
+    mat_kl = LinearElastic(1.0e6, 0.3, 0.01)
+    scv_kl = make_rm_scv(); reinit!(scv_kl, X_Q9_UNIT_RM)
+    u_kl  = zeros(27)   # 9 nodes × 3 DOFs
+    u_rm5 = zeros(45)   # 9 nodes × 5 DOFs
+    for I in 1:9
+        xI, yI = X_Q9_UNIT_RM[I][1], X_Q9_UNIT_RM[I][2]
+        u_kl[3I]    = α * xI * yI
+        u_rm5[5I-2] = α * xI * yI
+        u_rm5[5I-1] = -α * yI   # φ₁ = -∂u₃/∂x = -α·y
+        u_rm5[5I  ] = -α * xI   # φ₂ = -∂u₃/∂y = -α·x
+    end
+    W_kl = FerriteShells.bending_energy_KL(u_kl, scv_kl, X_Q9_UNIT_RM, mat_kl)
+    W_rm = FerriteShells.rm_bending_shear_energy(u_rm5, scv_kl, X_Q9_UNIT_RM, mat_kl)
+    @test W_rm > 0.0
+    @test W_rm ≈ W_kl rtol=1e-4
+end
+
+@testset "RM cantilever tip load (Timoshenko reference)" begin
+    L, W_b, t_b = 2.0, 1.0, 0.2
+    E_b, ν_b, P_b = 1.2e6, 0.0, 3.0
+    mat_b = LinearElastic(E_b, ν_b, t_b)
+
+    grid2d = generate_grid(QuadraticQuadrilateral, (10, 1), Vec{2}((0.0, 0.0)), Vec{2}((L, W_b)))
+    grid3d = shell_grid(grid2d)
+    addnodeset!(grid3d, "left",  x -> isapprox(x[1], 0.0, atol=1e-10))
+    addfacetset!(grid3d, "right", x -> isapprox(x[1], L,  atol=1e-10))
+
+    ip_b  = Serendipity{RefQuadrilateral,2}()
+    scv_b = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_b, ip_b)
+    dh_b  = DofHandler(grid3d); add!(dh_b, :u, ip_b^5); close!(dh_b)
+
+    # Assemble linear stiffness at u = 0.
+    n_el_b = ndofs_per_cell(dh_b)
+    K_b = allocate_matrix(dh_b); r_b = zeros(ndofs(dh_b))
+    asmb_b = start_assemble(K_b, r_b)
+    ke_b = zeros(n_el_b, n_el_b); re_b = zeros(n_el_b)
+    for cell in CellIterator(dh_b)
+        fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
+        x = getcoordinates(cell); u0 = zeros(n_el_b)
+        membrane_tangent_RM!(ke_b, scv_b, x, u0, mat_b)
+        bending_tangent_RM!(ke_b, scv_b, x, u0, mat_b)
+        assemble!(asmb_b, celldofs(cell), ke_b, re_b)
+    end
+
+    # Tip traction: total force P_b in z-direction distributed over the right edge.
+    fqr_b = FacetQuadratureRule{RefQuadrilateral}(3)
+    f_b   = zeros(ndofs(dh_b))
+    assemble_traction!(f_b, dh_b, getfacetset(grid3d, "right"), ip_b, fqr_b,
+                       Vec{3}((0.0, 0.0, P_b/W_b)))
+
+    ch_b = ConstraintHandler(dh_b)
+    add!(ch_b, Dirichlet(:u, getnodeset(grid3d, "left"), x -> zeros(5), [1,2,3,4,5]))
+    close!(ch_b); Ferrite.update!(ch_b, 0.0)
+    apply!(K_b, f_b, ch_b)
+    u_b = K_b \ f_b
+
+    # Average z-displacement over tip nodes.
+    tip_z = Float64[]
+    for cell in CellIterator(dh_b)
+        coords = getcoordinates(cell); dofs = celldofs(cell)
+        for (i, xi) in enumerate(coords)
+            isapprox(xi[1], L, atol=1e-10) && push!(tip_z, u_b[dofs[5i-2]])
+        end
+    end
+    unique!(tip_z)
+    w_tip = sum(tip_z) / length(tip_z)
+
+    # Timoshenko beam: w = PL³/(3EI) + PL/(κ_s·G·A)
+    I_b   = W_b * t_b^3 / 12
+    G_b   = E_b / (2*(1+ν_b))
+    w_tim = P_b*L^3/(3*E_b*I_b) + P_b*L/(5/6 * G_b * W_b * t_b)
+    @test w_tip ≈ w_tim rtol=0.05
+end

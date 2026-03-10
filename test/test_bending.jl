@@ -27,14 +27,14 @@ const X_Q9_UNIT = [
 # Bending residual helper
 function bending_residual(scv, x, u_vec, mat)
     re = zeros(length(u_vec))
-    bending_residuals!(re, scv, x, u_vec, mat)
+    bending_residuals_KL!(re, scv, x, u_vec, mat)
     return re
 end
 
 # Bending tangent helper
 function bending_tangent_mat(scv, x, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    bending_tangent!(ke, scv, x, u_vec, mat)
+    bending_tangent_KL!(ke, scv, x, u_vec, mat)
     return ke
 end
 
@@ -110,7 +110,7 @@ end
         xI = X_Q9_UNIT[I][1]
         u_curve[3I] = xI * (1.0 - xI)
     end
-    W = FerriteShells.bending_energy(u_curve, scv, X_Q9_UNIT, mat)
+    W = FerriteShells.bending_energy_KL(u_curve, scv, X_Q9_UNIT, mat)
     @test W > 0.0
 
     # Zero-energy mode spectrum at u=0.
@@ -136,7 +136,7 @@ end
         for I in 1:9
             u_rot[3I-2:3I] = R * u_curve[3I-2:3I]
         end
-        W_rot = FerriteShells.bending_energy(u_rot, scv_rot, x_rot, mat)
+        W_rot = FerriteShells.bending_energy_KL(u_rot, scv_rot, x_rot, mat)
         @test W_rot ≈ W rtol=1e-8
     end
 
@@ -147,7 +147,7 @@ end
     let ε = 1e-3
         D11 = mat.E * mat.thickness^3 / (12 * (1 - mat.ν^2))
         W_lin_an = 0.5 * D11 * 4.0 * ε^2   # κ₁₁ = -2ε, Area = 1
-        W_lin_fe = FerriteShells.bending_energy(ε * u_curve, scv, X_Q9_UNIT, mat)
+        W_lin_fe = FerriteShells.bending_energy_KL(ε * u_curve, scv, X_Q9_UNIT, mat)
         @test W_lin_fe ≈ W_lin_an rtol=1e-4
     end
 
@@ -170,11 +170,11 @@ end
     end
 
     # Combined membrane + bending tangent: symmetry and FD consistency.
-    combined_re(u) = (re = zeros(length(u)); membrane_residuals!(re, scv, X_Q9_UNIT, u, mat); bending_residuals!(re, scv, X_Q9_UNIT, u, mat); re)
+    combined_re(u) = (re = zeros(length(u)); membrane_residuals_KL!(re, scv, X_Q9_UNIT, u, mat); bending_residuals_KL!(re, scv, X_Q9_UNIT, u, mat); re)
     @test norm(combined_re(zeros(n_dof))) ≤ 1e-14
     ke_comb = zeros(n_dof, n_dof)
-    membrane_tangent!(ke_comb, scv, X_Q9_UNIT, u_curve, mat)
-    bending_tangent!(ke_comb, scv, X_Q9_UNIT, u_curve, mat)
+    membrane_tangent_KL!(ke_comb, scv, X_Q9_UNIT, u_curve, mat)
+    bending_tangent_KL!(ke_comb, scv, X_Q9_UNIT, u_curve, mat)
     @test norm(ke_comb .- ke_comb') / norm(ke_comb) ≤ 1e-10
     ke_comb_fd = zeros(n_dof, n_dof)
     let ε = 1e-5
@@ -218,7 +218,7 @@ end
             for k in 1:9
                 u_el[3k] = ε * sin(π * xs[k]) * sin(π * ys[k])
             end
-            W_FE += FerriteShells.bending_energy(u_el, scv_h, x_el, mat)
+            W_FE += FerriteShells.bending_energy_KL(u_el, scv_h, x_el, mat)
         end
         push!(errors, abs(W_FE - W_an))
     end

@@ -20,14 +20,14 @@ const X_UNIT_SQUARE = [
 # Helper: compute residual into a fresh zeroed vector
 function residual(scv, x, u_vec, mat)
     re = zeros(length(u_vec))
-    membrane_residuals!(re, scv, x, u_vec, mat)
+    membrane_residuals_KL!(re, scv, x, u_vec, mat)
     return re
 end
 
 # Helper: compute tangent into a fresh zeroed matrix
 function tangent(scv, x, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    membrane_tangent!(ke, scv, x, u_vec, mat)
+    membrane_tangent_KL!(ke, scv, x, u_vec, mat)
     return ke
 end
 
@@ -131,7 +131,7 @@ end
 
         # rigid body rotation should give zero membrane residual
         u = vcat([(R(-π/2)⋅xᵢ)-xᵢ for xᵢ in X_UNIT_SQUARE]...) # passed
-        membrane_residuals!(re, scv, X_UNIT_SQUARE, u, mat)
+        membrane_residuals_KL!(re, scv, X_UNIT_SQUARE, u, mat)
         @test norm(re) ≤ 10eps(Float64) && sum(re) ≤ 10eps(Float64)
 
         # Tangent symmetry (zero displacement) should be exactly symmetric since geometric stiffness is zero.
@@ -321,7 +321,7 @@ function assemble_residual!(r, dh, scv, u, mat)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
         u_e = u[celldofs(cell)]
-        membrane_residuals!(re, scv, x, u_e, mat)
+        membrane_residuals_KL!(re, scv, x, u_e, mat)
         r[celldofs(cell)] .+= re
     end
 end
@@ -336,8 +336,8 @@ function assemble_tangent_and_residual!(K, r, dh, scv, u, mat)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
         u_e = u[celldofs(cell)]
-        membrane_tangent!(ke, scv, x, u_e, mat)
-        membrane_residuals!(re, scv, x, u_e, mat)
+        membrane_tangent_KL!(ke, scv, x, u_e, mat)
+        membrane_residuals_KL!(re, scv, x, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
     end
 end
@@ -588,3 +588,4 @@ end
 end
 
 include("test_bending.jl")
+include("test_rm.jl")
