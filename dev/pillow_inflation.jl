@@ -24,9 +24,9 @@ function assemble_pressure_global!(r, dh, scv, u, p)
     re = zeros(ndofs_per_cell(dh))
     for cell in CellIterator(dh)
         fill!(re, 0.0)
-        reinit!(scv, cell)
+        FerriteShells.reinit!(scv, cell)
         x   = getcoordinates(cell)
-        u_e = reinterpret(Vec{3, Float64}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         assemble_pressure!(re, scv, x, u_e, p)
         r[celldofs(cell)] .+= re
     end
@@ -38,11 +38,27 @@ function assemble_pressure_tangent_global!(K, dh, scv, u, p)
     assembler = start_assemble(K)
     for cell in CellIterator(dh)
         fill!(ke, 0.0)
-        reinit!(scv, cell)
+        FerriteShells.reinit!(scv, cell)
         x   = getcoordinates(cell)
-        u_e = reinterpret(Vec{3, Float64}, u[celldofs(cell)])
+        u_e = u[celldofs(cell)]
         assemble_pressure_tangent!(ke, scv, x, u_e, p)
         assemble!(assembler, celldofs(cell), ke)
+    end
+end
+
+function assemble_tangent_and_residual!(K, r, dh, scv, u, mat)
+    n = ndofs_per_cell(dh)
+    ke = zeros(n, n)
+    re  = zeros(n)
+    assembler = start_assemble(K, r)
+    for cell in CellIterator(dh)
+        x = getcoordinates(cell)
+        fill!(ke, 0.0); fill!(re, 0.0)
+        FerriteShells.reinit!(scv, cell) # prepares reference geometry
+        u_e = u[celldofs(cell)]
+        membrane_tangent_KL!(ke, scv, x, u_e, mat)
+        membrane_residuals_KL!(re, scv, x, u_e, mat)
+        assemble!(assembler, celldofs(cell), ke, re)
     end
 end
 
@@ -61,7 +77,7 @@ add!(dh, :u, ip^3)
 close!(dh)
 
 ch = ConstraintHandler(dh)
-add!(ch, Dirichlet(:u, getnodeset(grid, "boundary"), x -> 0.0, [1, 2, 3]))
+add!(ch, Dirichlet(:u, getnodeset(grid, "boundary"), x -> zero(x), [1, 2, 3]))
 close!(ch)
 Ferrite.update!(ch, 0.0)
 
