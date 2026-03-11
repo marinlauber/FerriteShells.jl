@@ -19,12 +19,11 @@ function assemble_global_shell!(K, g, u, dh, scv, mat)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
-        x   = getcoordinates(cell)
         u_e = u[celldofs(cell)]
-        membrane_tangent_KL!(ke, scv, x, u_e, mat)
-        bending_tangent_KL!(ke, scv, x, u_e, mat)
-        membrane_residuals_KL!(re, scv, x, u_e, mat)
-        bending_residuals_KL!(re, scv, x, u_e, mat)
+        membrane_tangent_KL!(ke, scv, u_e, mat)
+        bending_tangent_KL!(ke, scv, u_e, mat)
+        membrane_residuals_KL!(re, scv, u_e, mat)
+        bending_residuals_KL!(re, scv, u_e, mat)
         assemble!(asm, celldofs(cell), ke, re)
     end
 end

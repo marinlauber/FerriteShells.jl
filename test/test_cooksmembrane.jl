@@ -42,8 +42,8 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell) # prepares reference geometry
         u_e = u[celldofs(cell)]
-        membrane_tangent_KL!(ke, scv, x, u_e, mat)
-        membrane_residuals_KL!(re, scv, x, u_e, mat)
+        membrane_tangent_KL!(ke, scv, u_e, mat)
+        membrane_residuals_KL!(re, scv, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
     end
 end

@@ -106,8 +106,8 @@ end
         fill!(ke3, 0.0); fill!(re3, 0.0)
         reinit!(scv3, cell)
         x = getcoordinates(cell); u_e = zeros(n_el)
-        membrane_tangent_RM!(ke3, scv3, x, u_e, mat3)
-        bending_tangent_RM!(ke3, scv3, x, u_e, mat3)
+        membrane_tangent_RM!(ke3, scv3, u_e, mat3)
+        bending_tangent_RM!(ke3, scv3, u_e, mat3)
         assemble!(asmb3, shelldofs(cell), ke3, re3)
     end
     dbc3 = ConstraintHandler(dh3)

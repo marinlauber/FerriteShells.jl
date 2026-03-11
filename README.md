@@ -8,6 +8,17 @@ Proper assembly of these different terms lead to the different formulation menti
 
 We refer to the reader to the specific weak form for each of these shell and their numerical an implementation limitiations.
 
+Some formulation that can be assembled with this package
+
+Function | Membrane | Kirchhoff-Love | Reissner-Mindlin
+:------------ | :-------------| :-------------| :-------------
+linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
+non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
+Q4 | :white_check_mark: |  :x: | :white_check_mark:
+Q8 | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
+Q9 | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
+MITC |  |   | :white_check_mark:
+
 ## 1. `ShellCellValues`
 
 Since most wak forms use in shell analysis are specified by specializing the classical weak form to the curvilinear system of the mid-plane of the shell, classical continuum mechanics quantities, such as the deformation gradient tensor $\bf{F}$ change when expressed in curvilinear coordinates.
@@ -67,6 +78,38 @@ Q8 is purely practical: `generate_grid(QuadraticQuadrilateral, ...) gives Q8 dir
 The real dividing line is Q4 vs quadratic (Q8/Q9):
 - KL: Q4 is fundamentally broken (missing curvature components), Q8/Q9 both work
 - RM: Q4 locks badly for bending, Q8/Q9 both work well
+
+To improve the KL formulation:
+ - [ ] Discrete Kirchhoff elements (DKQ) which enforce the KL constraint only at discrete boundary points
+ - [ ] C1 elements (Hermite, NURBS/IGA)
+ - [ ] MITC/mixed formulations
+
+The core problem: KL bending energy W = ½∫ κ:D:κ dA requires integrating κ_αβ = -u₃,αβ — second derivatives — which are Dirac deltas at element boundaries with C0 elements.
+Mixed formulation (Hellinger-Reissner) introduce the moment tensor M_αβ as an independent field and rewrite the energy:
+
+W = ∫ (M_αβ κ_αβ - ½ M_αβ D⁻¹_αβγδ M_γδ) dA
+
+Then integrate the M:κ term by parts:
+
+∫ M_αβ κ_αβ dA = ∫ M_αβ (-u₃,αβ) dA = ∫ M_αβ,β u₃,α dA - [boundary terms]
+
+The second derivative of u₃ has been shifted onto a first derivative of M. Now:
+- u₃ only needs C0 (first derivatives square-integrable)
+- M_αβ needs to be C0 (first derivatives square-integrable)
+- No second derivatives of u₃ appear in the weak form at all
+
+The cost is extra DOFs for M_αβ and a saddle-point system (inf-sup condition must be satisfied for stability).
+
+MITC approach
+
+MITC avoids the extra M DOFs by doing the decoupling differently: instead of computing κ_αβ pointwise from u₃,αβ, it samples κ at specific tying points along element edges and then interpolates those sampled values over the element using a reduced strain basis. The crucial effect is that the assumed strain field is no longer derived directly from the second derivatives of u₃ — it's interpolated independently, so the inter-element normal discontinuity doesn't pollute the integral. You get approximate curvature fields that are consistent with the displacement DOFs at the tying points only (weak consistency), not everywhere.
+
+The conceptual link
+
+Both approaches break the same chain: standard KL requires κ → u₃,αβ → C1. Mixed formulations break it by shifting derivatives from u₃ to M via integration by parts. MITC breaks it by decoupling the strain field from displacement derivatives entirely, sampling only at chosen points. Neither requires global C1 — they just relocate where smoothness is required.
+
+The discrete Kirchhoff (DKQ) approach is related but different: it enforces γ = 0 (zero shear = Kirchhoff constraint) only at a finite set of points on element edges, which implicitly constructs a compatible normal rotation field without C1.
+
 
 > [!WARNING]
 > The RM formulation can still exhibit shear locking for very thin shells with Q4 elements. Use Q8 or Q9 for better performance.
@@ -265,5 +308,73 @@ following.
 
 The singularity: At $u=0$ (flat), $z$-DOFs have zero stiffness so $K_\text{eff}$ is singular. A small initial $z$-perturbation satisfying the BCs is required.
 
+## 6. Kirchhoff–Love Limitations on Curved Shells
+
+### 6.1 The C⁰ continuity problem
+
+The current KL bending implementation computes the curvature change as
+
+$$\kappa_{\alpha\beta} = b_{\alpha\beta} - B_{\alpha\beta}$$
+
+where $b_{\alpha\beta} = \mathbf{x}_{,\alpha\beta} \cdot \mathbf{n}$ and $B_{\alpha\beta} = \mathbf{X}_{,\alpha\beta} \cdot \mathbf{N}$ are the current and reference second fundamental forms, computed from the within-element second derivatives of position.
+This is mathematically correct inside each element. The problem is inter-element continuity.
+
+Q8/Q9 elements (and any $C^0$ element) enforce continuity of position but not of the tangent vectors across element boundaries. The surface normal $\mathbf{n}$ is therefore **discontinuous at element edges**. For a curved shell, this means:
+
+- The curvature $\kappa_{\alpha\beta}$ is computed independently inside each element with no coupling to neighboring normals.
+- Bending moments have no mechanism to transfer across element boundaries — each interface effectively acts as a free hinge with zero bending energy.
+- The global bending stiffness is systematically under-integrated, producing a structure that is too flexible.
+
+For **flat shells** the normal is $(0,0,1)$ everywhere and discontinuities do not arise, so the formulation gives correct results. For **curved shells** the issue is fundamental.
+
+### 6.2 Benchmark evidence
+
+The Scordelis-Lo roof and pinched cylinder are standard curved-shell benchmarks. The RM formulation (which avoids the problem via explicit rotation DOFs) converges correctly; KL diverges:
+
+| Benchmark | Reference | KL 4×4 | KL 8×8 | KL 16×16 | RM 16×16 |
+|---|---|---|---|---|---|
+| Scordelis-Lo $u_y$ | −0.3024 | −0.324 | −0.449 | −0.468 | −0.297 |
+| Pinched cylinder $u_z$ | −1.825×10⁻⁵ | −6.1×10⁻⁵ | −1.5×10⁻⁴ | −1.8×10⁻⁴ | −1.7×10⁻⁵ |
+
+The KL results diverge away from the reference as the mesh refines (the Scordelis-Lo coarse mesh accidentally undershoots near the reference, then overshoots as $h \to 0$). This is not a convergence rate issue — the method is converging to the wrong answer.
+
+### 6.3 Planned improvements
+
+Three approaches can fix this, in order of increasing complexity:
+
+**Discrete Kirchhoff elements (DKQ/DKT)**
+
+Instead of enforcing the KL constraint (zero transverse shear $\gamma_\alpha = 0$) everywhere, it is enforced only at a finite number of points along element edges. The rotation DOFs $\phi$ are introduced and then eliminated via the Kirchhoff constraint at the tying points, leaving only displacement DOFs. This gives:
+- $C^0$ elements with correct inter-element bending continuity
+- No additional global DOFs compared to standard KL
+- Well-understood and widely used in engineering codes
+
+This is the most practical near-term fix.
+
+**MITC / assumed strain**
+
+Instead of computing $\kappa_{\alpha\beta}$ pointwise from $u_{3,\alpha\beta}$, sample $\kappa$ at specific tying points along element edges and interpolate using a reduced strain basis. The assumed strain field is decoupled from the displacement second derivatives — the inter-element normal discontinuity no longer pollutes the integral.
+
+Alternatively, the mixed (Hellinger–Reissner) formulation introduces the moment tensor $M_{\alpha\beta}$ as an independent field and rewrites the energy:
+
+$$W = \int \left( M_{\alpha\beta} \kappa_{\alpha\beta} - \tfrac{1}{2} M_{\alpha\beta} D^{-1}_{\alpha\beta\gamma\delta} M_{\gamma\delta} \right) dA$$
+
+Integration by parts shifts the second derivative from $u_3$ onto $M$:
+
+$$\int M_{\alpha\beta} \kappa_{\alpha\beta} \, dA = \int M_{\alpha\beta,\beta} \, u_{3,\alpha} \, dA - [\text{boundary terms}]$$
+
+Now only first derivatives of $u_3$ appear — $C^0$ is sufficient. The cost is extra DOFs for $M_{\alpha\beta}$ and a saddle-point system that must satisfy an inf-sup condition.
+
+**Isogeometric analysis (IGA / NURBS)**
+
+NURBS basis functions are globally $C^{p-1}$ continuous for degree $p$. Quadratic NURBS ($p=2$) are $C^1$, which is exactly what KL requires. IGA gives:
+- Exact geometry representation for common curved shells (cylinders, spheres)
+- Full KL bending continuity across patch boundaries
+- No special element formulation needed
+
+The main challenge is multi-patch coupling at $C^0$ or $C^1$ junctions, which requires additional constraint enforcement.
+
 ## Contributing
+
+
 

@@ -54,10 +54,9 @@ function pinched_cylinder_solve(ns, na)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
-        x  = getcoordinates(cell)
         u0 = zeros(n_el)
-        membrane_tangent_KL!(ke, scv, x, u0, mat)
-        bending_tangent_KL!(ke, scv, x, u0, mat)
+        membrane_tangent_KL!(ke, scv, u0, mat)
+        bending_tangent_KL!(ke, scv, u0, mat)
         assemble!(asmb, celldofs(cell), ke, re)
     end
 

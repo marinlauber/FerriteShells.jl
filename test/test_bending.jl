@@ -25,27 +25,27 @@ const X_Q9_UNIT = [
 ]
 
 # Bending residual helper
-function bending_residual(scv, x, u_vec, mat)
+function bending_residual(scv, u_vec, mat)
     re = zeros(length(u_vec))
-    bending_residuals_KL!(re, scv, x, u_vec, mat)
+    bending_residuals_KL!(re, scv, u_vec, mat)
     return re
 end
 
 # Bending tangent helper
-function bending_tangent_mat(scv, x, u_vec, mat)
+function bending_tangent_mat(scv, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    bending_tangent_KL!(ke, scv, x, u_vec, mat)
+    bending_tangent_KL!(ke, scv, u_vec, mat)
     return ke
 end
 
 # Central-difference numerical tangent
-function numerical_bending_tangent(scv, x, u_vec, mat; ε=1e-5)
+function numerical_bending_tangent(scv, u_vec, mat; ε=1e-5)
     n = length(u_vec)
     Kfd = zeros(n, n)
     for j in 1:n
         up = copy(u_vec); up[j] += ε
         um = copy(u_vec); um[j] -= ε
-        Kfd[:, j] = (bending_residual(scv, x, up, mat) .- bending_residual(scv, x, um, mat)) ./ (2ε)
+        Kfd[:, j] = (bending_residual(scv, up, mat) .- bending_residual(scv, um, mat)) ./ (2ε)
     end
     return Kfd
 end
@@ -56,11 +56,11 @@ end
     reinit!(scv, X_Q9_UNIT)
     n_dof = 27  # 9 nodes × 3 DOFs
 
-    @test bending_residual(scv, X_Q9_UNIT, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
+    @test bending_residual(scv, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
 
     # Rigid-body translation: zero curvature → zero residual
     u_trans = repeat([0.1, 0.2, 0.3], 9)
-    @test norm(bending_residual(scv, X_Q9_UNIT, u_trans, mat)) ≤ 1e-10
+    @test norm(bending_residual(scv, u_trans, mat)) ≤ 1e-10
 
     # Uniform in-plane stretch: flat surface stays flat → zero bending
     u_stretch = zeros(n_dof)
@@ -68,23 +68,23 @@ end
         u_stretch[3I-2] = 0.01 * X_Q9_UNIT[I][1]
         u_stretch[3I-1] = 0.01 * X_Q9_UNIT[I][2]
     end
-    @test norm(bending_residual(scv, X_Q9_UNIT, u_stretch, mat)) ≤ 1e-10
+    @test norm(bending_residual(scv, u_stretch, mat)) ≤ 1e-10
 
     # Tangent symmetry at zero displacement
-    ke0 = bending_tangent_mat(scv, X_Q9_UNIT, zeros(n_dof), mat)
+    ke0 = bending_tangent_mat(scv, zeros(n_dof), mat)
     @test norm(ke0 .- ke0') ≤ 1e-12 * norm(ke0)
 
     # Tangent symmetry at nonzero displacement
     Random.seed!(42)
     u_rnd = 0.02 * randn(n_dof)
-    ke_rnd = bending_tangent_mat(scv, X_Q9_UNIT, u_rnd, mat)
+    ke_rnd = bending_tangent_mat(scv, u_rnd, mat)
     @test norm(ke_rnd .- ke_rnd') / norm(ke_rnd) ≤ 1e-10
 
     # Finite-difference tangent consistency (small displacement)
     Random.seed!(7)
     u_small = 0.001 * randn(n_dof)
-    ke_an = bending_tangent_mat(scv, X_Q9_UNIT, u_small, mat)
-    ke_fd = numerical_bending_tangent(scv, X_Q9_UNIT, u_small, mat)
+    ke_an = bending_tangent_mat(scv, u_small, mat)
+    ke_fd = numerical_bending_tangent(scv, u_small, mat)
     @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-6
 
     # Finite-difference tangent consistency (moderate out-of-plane displacement)
@@ -93,8 +93,8 @@ end
     for I in 1:9
         u_mod[3I] = 0.05 * randn()  # z-displacements induce curvature
     end
-    ke_an2 = bending_tangent_mat(scv, X_Q9_UNIT, u_mod, mat)
-    ke_fd2 = numerical_bending_tangent(scv, X_Q9_UNIT, u_mod, mat)
+    ke_an2 = bending_tangent_mat(scv, u_mod, mat)
+    ke_fd2 = numerical_bending_tangent(scv, u_mod, mat)
     @test norm(ke_an2 .- ke_fd2) / (norm(ke_fd2) + 1e-14) < 1e-6
 
     # Positive semi-definiteness at zero displacement (geometric stiffness vanishes → only material term)
@@ -110,7 +110,7 @@ end
         xI = X_Q9_UNIT[I][1]
         u_curve[3I] = xI * (1.0 - xI)
     end
-    W = FerriteShells.bending_energy_KL(u_curve, scv, X_Q9_UNIT, mat)
+    W = FerriteShells.bending_energy_KL(u_curve, scv, mat)
     @test W > 0.0
 
     # Zero-energy mode spectrum at u=0.
@@ -136,7 +136,7 @@ end
         for I in 1:9
             u_rot[3I-2:3I] = R * u_curve[3I-2:3I]
         end
-        W_rot = FerriteShells.bending_energy_KL(u_rot, scv_rot, x_rot, mat)
+        W_rot = FerriteShells.bending_energy_KL(u_rot, scv_rot, mat)
         @test W_rot ≈ W rtol=1e-8
     end
 
@@ -147,7 +147,7 @@ end
     let ε = 1e-3
         D11 = mat.E * mat.thickness^3 / (12 * (1 - mat.ν^2))
         W_lin_an = 0.5 * D11 * 4.0 * ε^2   # κ₁₁ = -2ε, Area = 1
-        W_lin_fe = FerriteShells.bending_energy_KL(ε * u_curve, scv, X_Q9_UNIT, mat)
+        W_lin_fe = FerriteShells.bending_energy_KL(ε * u_curve, scv, mat)
         @test W_lin_fe ≈ W_lin_an rtol=1e-4
     end
 
@@ -160,21 +160,21 @@ end
         scv_cyl = make_bending_scv()
         reinit!(scv_cyl, X_cyl)
         # Reference state: κ = b - B = 0 → zero residual
-        @test norm(bending_residual(scv_cyl, X_cyl, zeros(n_dof), mat)) ≤ 1e-12
+        @test norm(bending_residual(scv_cyl, zeros(n_dof), mat)) ≤ 1e-12
         # FD tangent consistency on curved geometry
         Random.seed!(99)
         u_cyl = zeros(n_dof); u_cyl[3:3:end] .= 0.01 * randn(9)
-        ke_cyl    = bending_tangent_mat(scv_cyl, X_cyl, u_cyl, mat)
-        ke_cyl_fd = numerical_bending_tangent(scv_cyl, X_cyl, u_cyl, mat)
+        ke_cyl    = bending_tangent_mat(scv_cyl, u_cyl, mat)
+        ke_cyl_fd = numerical_bending_tangent(scv_cyl, u_cyl, mat)
         @test norm(ke_cyl .- ke_cyl_fd) / (norm(ke_cyl_fd) + 1e-14) < 1e-6
     end
 
     # Combined membrane + bending tangent: symmetry and FD consistency.
-    combined_re(u) = (re = zeros(length(u)); membrane_residuals_KL!(re, scv, X_Q9_UNIT, u, mat); bending_residuals_KL!(re, scv, X_Q9_UNIT, u, mat); re)
+    combined_re(u) = (re = zeros(length(u)); membrane_residuals_KL!(re, scv, u, mat); bending_residuals_KL!(re, scv, u, mat); re)
     @test norm(combined_re(zeros(n_dof))) ≤ 1e-14
     ke_comb = zeros(n_dof, n_dof)
-    membrane_tangent_KL!(ke_comb, scv, X_Q9_UNIT, u_curve, mat)
-    bending_tangent_KL!(ke_comb, scv, X_Q9_UNIT, u_curve, mat)
+    membrane_tangent_KL!(ke_comb, scv, u_curve, mat)
+    bending_tangent_KL!(ke_comb, scv, u_curve, mat)
     @test norm(ke_comb .- ke_comb') / norm(ke_comb) ≤ 1e-10
     ke_comb_fd = zeros(n_dof, n_dof)
     let ε = 1e-5
@@ -218,7 +218,7 @@ end
             for k in 1:9
                 u_el[3k] = ε * sin(π * xs[k]) * sin(π * ys[k])
             end
-            W_FE += FerriteShells.bending_energy_KL(u_el, scv_h, x_el, mat)
+            W_FE += FerriteShells.bending_energy_KL(u_el, scv_h, mat)
         end
         push!(errors, abs(W_FE - W_an))
     end

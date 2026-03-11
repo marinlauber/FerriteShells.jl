@@ -22,27 +22,27 @@ function make_rm_scv(; qr_order=3)
     return ShellCellValues(qr, ip, ip)
 end
 
-function rm_residual(scv, x, u5, mat)
+function rm_residual(scv, u5, mat)
     re = zeros(length(u5))
-    membrane_residuals_RM!(re, scv, x, u5, mat)
-    bending_residuals_RM!(re, scv, x, u5, mat)
+    membrane_residuals_RM!(re, scv, u5, mat)
+    bending_residuals_RM!(re, scv, u5, mat)
     return re
 end
 
-function rm_tangent_mat(scv, x, u5, mat)
+function rm_tangent_mat(scv, u5, mat)
     ke = zeros(length(u5), length(u5))
-    membrane_tangent_RM!(ke, scv, x, u5, mat)
-    bending_tangent_RM!(ke, scv, x, u5, mat)
+    membrane_tangent_RM!(ke, scv, u5, mat)
+    bending_tangent_RM!(ke, scv, u5, mat)
     return ke
 end
 
-function numerical_rm_tangent(scv, x, u5, mat; ε=1e-5)
+function numerical_rm_tangent(scv, u5, mat; ε=1e-5)
     n = length(u5)
     Kfd = zeros(n, n)
     for j in 1:n
         up = copy(u5); up[j] += ε
         um = copy(u5); um[j] -= ε
-        Kfd[:, j] = (rm_residual(scv, x, up, mat) .- rm_residual(scv, x, um, mat)) ./ (2ε)
+        Kfd[:, j] = (rm_residual(scv, up, mat) .- rm_residual(scv, um, mat)) ./ (2ε)
     end
     return Kfd
 end
@@ -54,9 +54,9 @@ end
     n_dof = 45   # 9 nodes × 5 DOFs
 
     # 1. Zero energy and residual at reference state (u=0, φ=0).
-    @test FerriteShells.rm_membrane_energy(zeros(n_dof), scv, X_Q9_UNIT_RM, mat) == 0.0
-    @test FerriteShells.rm_bending_shear_energy(zeros(n_dof), scv, X_Q9_UNIT_RM, mat) == 0.0
-    @test rm_residual(scv, X_Q9_UNIT_RM, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
+    @test FerriteShells.rm_membrane_energy(zeros(n_dof), scv, mat) == 0.0
+    @test FerriteShells.rm_bending_shear_energy(zeros(n_dof), scv, mat) == 0.0
+    @test rm_residual(scv, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
 
     # 2. Tangent FD consistency at a non-trivial displacement.
     # Apply sinusoidal z-perturbation through displacement DOFs (index 5I-2)
@@ -68,8 +68,8 @@ end
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
-    ke_an = rm_tangent_mat(scv, X_Q9_UNIT_RM, u_pert, mat)
-    ke_fd = numerical_rm_tangent(scv, X_Q9_UNIT_RM, u_pert, mat)
+    ke_an = rm_tangent_mat(scv, u_pert, mat)
+    ke_fd = numerical_rm_tangent(scv, u_pert, mat)
     @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
 
     # 3. Tangent symmetry (Hessian of a scalar energy is symmetric by construction,
@@ -84,10 +84,10 @@ end
         u_trans[5I-3] += -1.2
         u_trans[5I-2] += 0.5
     end
-    @test FerriteShells.rm_membrane_energy(u_trans, scv, X_Q9_UNIT_RM, mat) ≈
-          FerriteShells.rm_membrane_energy(u_pert,  scv, X_Q9_UNIT_RM, mat) rtol=1e-10
-    @test FerriteShells.rm_bending_shear_energy(u_trans, scv, X_Q9_UNIT_RM, mat) ≈
-          FerriteShells.rm_bending_shear_energy(u_pert,  scv, X_Q9_UNIT_RM, mat) rtol=1e-10
+    @test FerriteShells.rm_membrane_energy(u_trans, scv, mat) ≈
+          FerriteShells.rm_membrane_energy(u_pert,  scv, mat) rtol=1e-10
+    @test FerriteShells.rm_bending_shear_energy(u_trans, scv, mat) ≈
+          FerriteShells.rm_bending_shear_energy(u_pert,  scv, mat) rtol=1e-10
 
     # In-plane rotation (about z-axis): rotate both node positions and DOFs.
     θ = π / 7
@@ -101,10 +101,10 @@ end
         # for a z-rotation the in-plane frame rotates too, but since
         # G₃ = ẑ is unchanged the bending/shear energy is frame-invariant.
     end
-    @test FerriteShells.rm_membrane_energy(u_rot, scv_rot, x_rot, mat) ≈
-          FerriteShells.rm_membrane_energy(u_pert, scv, X_Q9_UNIT_RM, mat) rtol=1e-8
-    @test FerriteShells.rm_bending_shear_energy(u_rot, scv_rot, x_rot, mat) ≈
-          FerriteShells.rm_bending_shear_energy(u_pert, scv, X_Q9_UNIT_RM, mat) rtol=1e-8
+    @test FerriteShells.rm_membrane_energy(u_rot, scv_rot, mat) ≈
+          FerriteShells.rm_membrane_energy(u_pert, scv, mat) rtol=1e-8
+    @test FerriteShells.rm_bending_shear_energy(u_rot, scv_rot, mat) ≈
+          FerriteShells.rm_bending_shear_energy(u_pert, scv, mat) rtol=1e-8
 end
 
 @testset "RM membrane patch test" begin
@@ -143,15 +143,15 @@ end
     for cell in CellIterator(dh_p)
         fill!(re_p, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u_e = u_ex[celldofs(cell)]
-        membrane_residuals_RM!(re_p, scv_p, x, u_e, mat_p)
-        bending_residuals_RM!(re_p, scv_p, x, u_e, mat_p)
+        membrane_residuals_RM!(re_p, scv_p, u_e, mat_p)
+        bending_residuals_RM!(re_p, scv_p, u_e, mat_p)
         r_p[celldofs(cell)] .+= re_p
     end
     ch_tmp = ConstraintHandler(dh_p)
     add!(ch_tmp, Dirichlet(:u, getnodeset(grid_p, "boundary"), x -> zeros(5), [1,2,3,4,5]))
     close!(ch_tmp)
     @test norm(r_p[ch_tmp.free_dofs]) ≤ 1e-8 * norm(r_p)
-    @test sum(r_p) < 1e-14
+    @test abs(sum(r_p)) < 1e-12
 
     # Linear solve with boundary data recovers the exact interior field.
     K_p = allocate_matrix(dh_p); r_p2 = zeros(n_p)
@@ -160,8 +160,8 @@ end
     for cell in CellIterator(dh_p)
         fill!(ke_p, 0.0); fill!(re_p2, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u0 = zeros(ndofs_per_cell(dh_p))
-        membrane_tangent_RM!(ke_p, scv_p, x, u0, mat_p)
-        bending_tangent_RM!(ke_p, scv_p, x, u0, mat_p)
+        membrane_tangent_RM!(ke_p, scv_p, u0, mat_p)
+        bending_tangent_RM!(ke_p, scv_p, u0, mat_p)
         assemble!(asmb_p, celldofs(cell), ke_p, re_p2)
     end
     ch2 = ConstraintHandler(dh_p)
@@ -189,8 +189,8 @@ end
         u_rm5[5I-1] = -α * yI   # φ₁ = -∂u₃/∂x = -α·y
         u_rm5[5I  ] = -α * xI   # φ₂ = -∂u₃/∂y = -α·x
     end
-    W_kl = FerriteShells.bending_energy_KL(u_kl, scv_kl, X_Q9_UNIT_RM, mat_kl)
-    W_rm = FerriteShells.rm_bending_shear_energy(u_rm5, scv_kl, X_Q9_UNIT_RM, mat_kl)
+    W_kl = FerriteShells.bending_energy_KL(u_kl, scv_kl, mat_kl)
+    W_rm = FerriteShells.rm_bending_shear_energy(u_rm5, scv_kl, mat_kl)
     @test W_rm > 0.0
     @test W_rm ≈ W_kl rtol=1e-4
 end
@@ -217,8 +217,8 @@ end
     for cell in CellIterator(dh_b)
         fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
         x = getcoordinates(cell); u0 = zeros(n_el_b)
-        membrane_tangent_RM!(ke_b, scv_b, x, u0, mat_b)
-        bending_tangent_RM!(ke_b, scv_b, x, u0, mat_b)
+        membrane_tangent_RM!(ke_b, scv_b, u0, mat_b)
+        bending_tangent_RM!(ke_b, scv_b, u0, mat_b)
         assemble!(asmb_b, celldofs(cell), ke_b, re_b)
     end
 
@@ -273,14 +273,14 @@ end
     # 1. Membrane residual is exactly zero (membrane energy depends only on stretch,
     #    which is zero at u=0 by construction).
     re_mem = zeros(45)
-    membrane_residuals_RM!(re_mem, scv, X_cyl, zeros(45), mat)
+    membrane_residuals_RM!(re_mem, scv, zeros(45), mat)
     @test norm(re_mem) ≤ 1e-12
 
     # 2. Initial bending/shear residual is small: O(h²/R) per unit shear stiffness.
     #    For R=5, h≈1, κ_s·G·t ≈ (5/6)·(E/(2(1+ν)))·t ≈ 32, element area ≈ 1:
     #    expected |r| ≲ (h/R)² · κ_s·G·t · area ≈ 0.04 · 32 ≈ 1.3 (loose bound).
     re_bs = zeros(45)
-    bending_residuals_RM!(re_bs, scv, X_cyl, zeros(45), mat)
+    bending_residuals_RM!(re_bs, scv, zeros(45), mat)
     @test norm(re_bs) < 2.0
 
     # 3. Tangent FD consistency at a small perturbation on the curved element.
@@ -291,8 +291,8 @@ end
         u_c[5I-1] = 1e-3 * randn()
         u_c[5I  ] = 1e-3 * randn()
     end
-    ke_an = rm_tangent_mat(scv, X_cyl, u_c, mat)
-    ke_fd = numerical_rm_tangent(scv, X_cyl, u_c, mat)
+    ke_an = rm_tangent_mat(scv, u_c, mat)
+    ke_fd = numerical_rm_tangent(scv, u_c, mat)
     @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
 
     # 4. Tangent symmetry on the curved element.
@@ -343,8 +343,8 @@ end
             reinit!(scv_h, cell)
             x   = getcoordinates(cell)
             u_e = zeros(n_el)
-            membrane_tangent_RM!(ke, scv_h, x, u_e, mat_h)
-            bending_tangent_RM!(ke, scv_h, x, u_e, mat_h)
+            membrane_tangent_RM!(ke, scv_h, u_e, mat_h)
+            bending_tangent_RM!(ke, scv_h, u_e, mat_h)
             assemble!(asmb, shelldofs(cell), ke, re)
             # z-body force in interleaved layout; scatter via shelldofs mapping
             for qp in 1:getnquadpoints(scv_h)

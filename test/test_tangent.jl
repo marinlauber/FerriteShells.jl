@@ -18,27 +18,27 @@ const X_UNIT_SQUARE = [
 ]
 
 # Helper: compute residual into a fresh zeroed vector
-function residual(scv, x, u_vec, mat)
+function residual(scv, u_vec, mat)
     re = zeros(length(u_vec))
-    membrane_residuals_KL!(re, scv, x, u_vec, mat)
+    membrane_residuals_KL!(re, scv, u_vec, mat)
     return re
 end
 
 # Helper: compute tangent into a fresh zeroed matrix
-function tangent(scv, x, u_vec, mat)
+function tangent(scv, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    membrane_tangent_KL!(ke, scv, x, u_vec, mat)
+    membrane_tangent_KL!(ke, scv, u_vec, mat)
     return ke
 end
 
 # Central-difference numerical tangent: O(ε²) accuracy
-function numerical_tangent(scv, x, u_vec, mat; ε=1e-5)
+function numerical_tangent(scv, u_vec, mat; ε=1e-5)
     n = length(u_vec)
     Kfd = zeros(n, n)
     for j in 1:n
         up = copy(u_vec); up[j] += ε
         um = copy(u_vec); um[j] -= ε
-        Kfd[:, j] = (residual(scv, x, up, mat) .- residual(scv, x, um, mat)) ./ (2ε)
+        Kfd[:, j] = (residual(scv, up, mat) .- residual(scv, um, mat)) ./ (2ε)
     end
     return Kfd
 end

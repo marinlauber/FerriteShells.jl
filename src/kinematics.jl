@@ -1,25 +1,25 @@
 
 """
-    kinematics(scv, qp, x, u_e)
+    kinematics(scv, qp, u_e)
 
-Compute the current kinematics at a quadrature point given reference geometry and
-nodal displacements. `u_e` is a flat vector of length `3 * n_nodes` (u₁, v₁, w₁, …).
-Returns `(a₁, a₂, A_metric, a_metric)` — current basis vectors and reference/current
-metric tensors A_{αβ} = A_α · A_β, a_{αβ} = a_α · a_β.
+Compute current kinematics at quadrature point `qp` given nodal displacements `u_e`
+(flat vector of length `3 * n_nodes`: [u₁, v₁, w₁, …]).
+
+Reference geometry (A₁, A₂, A_metric) is read from `scv`, which must have been
+`reinit!`-ed with the element coordinates before calling this function.
+
+Returns `(a₁, a₂, A_metric, a_metric)`.
 """
-function kinematics(scv, qp, x, u_e::AbstractVector{T}) where T
-    ξ = scv.qr.points[qp]
-    A₁ = zero(Vec{3,Float64}); A₂ = zero(Vec{3,Float64})
-    a₁ = zero(Vec{3,T});       a₂ = zero(Vec{3,T})
-    for i in 1:getnbasefunctions(scv.ip_geo)
-        dNdξ = Ferrite.reference_shape_gradient(scv.ip_geo, ξ, i)
-        ui   = Vec{3,T}((u_e[3i-2], u_e[3i-1], u_e[3i]))
-        A₁  += x[i] * dNdξ[1]
-        A₂  += x[i] * dNdξ[2]
-        a₁  += (x[i] + ui) * dNdξ[1]
-        a₂  += (x[i] + ui) * dNdξ[2]
+function kinematics(scv, qp, u_e::AbstractVector{T}) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+    for i in 1:n_nodes
+        ui  = Vec{3,T}((u_e[3i-2], u_e[3i-1], u_e[3i]))
+        Δa₁ += ui * scv.dNdξ[i, qp][1]
+        Δa₂ += ui * scv.dNdξ[i, qp][2]
     end
-    A_metric = SymmetricTensor{2,2,Float64}((dot(A₁,A₁), dot(A₁,A₂), dot(A₂,A₂)))
+    a₁       = scv.A₁[qp] + Δa₁
+    a₂       = scv.A₂[qp] + Δa₂
     a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-    return (a₁, a₂, A_metric, a_metric)
+    return a₁, a₂, scv.A_metric[qp], a_metric
 end

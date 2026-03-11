@@ -39,10 +39,9 @@ function scordelis_lo_rm_solve(ns, nt)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
         reinit!(scv, cell)
-        x  = getcoordinates(cell)
         u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, x, u0, mat)
-        bending_tangent_RM!(ke, scv, x, u0, mat)
+        membrane_tangent_RM!(ke, scv, u0, mat)
+        bending_tangent_RM!(ke, scv, u0, mat)
         sd = shelldofs(cell)
         assemble!(asmb, sd, ke, re)
         for qp in 1:getnquadpoints(scv)
@@ -61,6 +60,11 @@ function scordelis_lo_rm_solve(ns, nt)
 
     u_sol = K \ f
 
+    # write to vtk
+    VTKGridFile("scordelis_Lo_roof", dh) do vtk
+        write_solution(vtk, dh, u_sol)
+    end
+
     ref_nodes = collect(getnodeset(grid, "ref_point"))
     @assert length(ref_nodes) == 1
     for cell in CellIterator(dh)
@@ -75,4 +79,4 @@ function scordelis_lo_rm_solve(ns, nt)
 end
 
 w = scordelis_lo_rm_solve(16, 16)
-println("Scordelis-Lo (RM, 16×16): u_y at free-edge midpoint = $(round(w; digits=5))  (reference: -0.3024)")
+println("Scordelis-Lo (RM, 16×16): u_y at free-edge midpoint = $(round(w; digits=5)) (reference: -0.3024)")

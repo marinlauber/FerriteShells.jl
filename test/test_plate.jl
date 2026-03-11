@@ -31,7 +31,7 @@ using Test
             fill!(ke, 0.0); fill!(re, 0.0)
             reinit!(scv, cell)
             x = getcoordinates(cell)
-            bending_tangent_KL!(ke, scv, x, zeros(n_el), mat)
+            bending_tangent_KL!(ke, scv, zeros(n_el), mat)
             assemble!(asmb, celldofs(cell), ke, re)
         end
 

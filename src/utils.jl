@@ -47,36 +47,30 @@ end
 # scv.detJdV[qp] = ‖A₁ × A₂‖ · w (reference area × weight).
 # cross(a₁, a₂) already has magnitude ‖a₁ × a₂‖ (current area per parametric area).
 # multiplying by w integrates over the parameter domain
-# assemble_pressure!(re, scv, x, u_e, p::Number) = assemble_pressure!(re, scv, x, u_e, ()->p)
+# assemble_pressure!(re, scv, u_e, p::Number) = assemble_pressure!(re, scv, u_e, ()->p)
 # @TODO should be agnostic of the number of dofs of u_e
-function assemble_pressure!(re, scv, x, u_e, pfunc)
+function assemble_pressure!(re, scv, u_e, pfunc)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
-        ξ = scv.qr.points[qp]
         w = scv.qr.weights[qp] # pure parametric weight — NOT detJdV
-        a₁, a₂, _, _ = kinematics(scv, qp, x, u_e)
-        # local oriented area vector
+        a₁, a₂, _, _ = kinematics(scv, qp, u_e)
         n_weighted = cross(a₁, a₂)
         for I in 1:n_nodes
-            NI = Ferrite.reference_shape_value(scv.ip_shape, ξ, I)
-            # re[3I-2:3I] .+= pfunc(spatial_coordinate(scv, qp, x)) * NI * n_weighted * w
-            re[3I-2:3I] .+= pfunc * NI * n_weighted * w
+            re[3I-2:3I] .+= pfunc * scv.N[I, qp] * n_weighted * w
         end
     end
 end
 
 using ForwardDiff
 # K_IJ^p = p * ∂(a₁ × a₂)/∂u_J * N_I
-function assemble_pressure_tangent!(ke, scv, x, u_e, p)
-    pressure_residual(u) = (re = zeros(eltype(u), length(u)); assemble_pressure!(re, scv, x, u, p); re)
+function assemble_pressure_tangent!(ke, scv, u_e, p)
+    pressure_residual(u) = (re = zeros(eltype(u), length(u)); assemble_pressure!(re, scv, u, p); re)
     ke .+= ForwardDiff.jacobian(pressure_residual, u_e)
 end
 
-# write the strain at the quadrature points, does that work
-function compute_membrane_strains(Es, scv, x, u_e)
+function compute_membrane_strains(Es, scv, u_e)
     for qp in 1:getnquadpoints(scv)
-        ξ = scv.qr.points[qp]
-        _,_A_metric,a_metric = kinematics(scv, qp, x, u_e)
+        _, _, A_metric, a_metric = kinematics(scv, qp, u_e)
         Es[qp] = 0.5 * (a_metric - A_metric)
     end
 end

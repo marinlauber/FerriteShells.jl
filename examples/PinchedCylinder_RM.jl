@@ -40,10 +40,9 @@ function pinched_cylinder_rm_solve(ns, na)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
-        x  = getcoordinates(cell)
         u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, x, u0, mat)
-        bending_tangent_RM!(ke, scv, x, u0, mat)
+        membrane_tangent_RM!(ke, scv, u0, mat)
+        bending_tangent_RM!(ke, scv, u0, mat)
         sd = shelldofs(cell)
         assemble!(asmb, sd, ke, re)
     end
@@ -85,4 +84,4 @@ function pinched_cylinder_rm_solve(ns, na)
 end
 
 δ = pinched_cylinder_rm_solve(16, 16)
-println("Pinched cylinder (RM, 16×16): u_z at load point = $(δ)  (reference: -1.8248e-5)")
+println("Pinched cylinder (RM, 16×16): u_z at load point = $(δ) (reference: -1.8248e-5)")

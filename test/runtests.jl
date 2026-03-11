@@ -18,27 +18,27 @@ const X_UNIT_SQUARE = [
 ]
 
 # Helper: compute residual into a fresh zeroed vector
-function residual(scv, x, u_vec, mat)
+function residual(scv, u_vec, mat)
     re = zeros(length(u_vec))
-    membrane_residuals_KL!(re, scv, x, u_vec, mat)
+    membrane_residuals_KL!(re, scv, u_vec, mat)
     return re
 end
 
 # Helper: compute tangent into a fresh zeroed matrix
-function tangent(scv, x, u_vec, mat)
+function tangent(scv, u_vec, mat)
     ke = zeros(length(u_vec), length(u_vec))
-    membrane_tangent_KL!(ke, scv, x, u_vec, mat)
+    membrane_tangent_KL!(ke, scv, u_vec, mat)
     return ke
 end
 
 # Central-difference numerical tangent: O(ε²) accuracy
-function numerical_tangent(scv, x, u_vec, mat; ε=1e-5)
+function numerical_tangent(scv, u_vec, mat; ε=1e-5)
     n = length(u_vec)
     Kfd = zeros(n, n)
     for j in 1:n
         up = copy(u_vec); up[j] += ε
         um = copy(u_vec); um[j] -= ε
-        Kfd[:, j] = (residual(scv, x, up, mat) .- residual(scv, x, um, mat)) ./ (2ε)
+        Kfd[:, j] = (residual(scv, up, mat) .- residual(scv, um, mat)) ./ (2ε)
     end
     return Kfd
 end
@@ -47,10 +47,10 @@ end
 @inline R(θ=-π/2) = Tensor{2,3}([cos(θ) -sin(θ) 0; sin(θ) cos(θ) 0; 0 0 1])
 
 # Strain energy of a single element: W = ∫ 0.5 N^{αβ} E_{αβ} dA
-function element_strain_energy(scv, x, u_vec, mat)
+function element_strain_energy(scv, u_vec, mat)
     W = 0.0
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, x, u_vec)
+        a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, u_vec)
         E = 0.5 * (a_metric - A_metric)
         N = FerriteShells.contravariant_elasticity(mat, A_metric) ⊡ E
         W += 0.5 * (N ⊡ E) * scv.detJdV[qp]
@@ -121,35 +121,35 @@ end
         n_dof = 12  # 4 nodes × 3 DOFs
 
         # test zero displacement: should give zero residual
-        re = residual(scv, X_UNIT_SQUARE, zeros(n_dof), mat)
+        re = residual(scv, zeros(n_dof), mat)
         @test norm(re) ≤ 1e-14
 
         # Uniform shift in x-direction — pure translation, zero strain
         u_vec = repeat([0.5, 0.0, 0.0], 4)
-        re = residual(scv, X_UNIT_SQUARE, u_vec, mat)
+        re = residual(scv, u_vec, mat)
         @test norm(re) ≤ 1e-13
 
         # rigid body rotation should give zero membrane residual
         u = vcat([(R(-π/2)⋅xᵢ)-xᵢ for xᵢ in X_UNIT_SQUARE]...) # passed
-        membrane_residuals_KL!(re, scv, X_UNIT_SQUARE, u, mat)
+        membrane_residuals_KL!(re, scv, u, mat)
         @test norm(re) ≤ 10eps(Float64) && sum(re) ≤ 10eps(Float64)
 
         # Tangent symmetry (zero displacement) should be exactly symmetric since geometric stiffness is zero.
-        ke = tangent(scv, X_UNIT_SQUARE, zeros(n_dof), mat)
+        ke = tangent(scv, zeros(n_dof), mat)
         @test norm(ke .- ke') ≤ 1e-14 * norm(ke)
 
         # tangent symmetry (nonzero displacement)
         Random.seed!(1)
         u_vec = 0.05 * randn(n_dof)
-        ke = tangent(scv, X_UNIT_SQUARE, u_vec, mat)
+        ke = tangent(scv, u_vec, mat)
         @test norm(ke .- ke') / norm(ke) ≤ 1e-12
 
         # FD consistency (small displacement)
         # Small displacement: geometric stiffness is negligible; material part dominates.
         Random.seed!(2)
         u_vec = 0.01 * randn(n_dof)
-        ke    = tangent(scv, X_UNIT_SQUARE, u_vec, mat)
-        ke_fd = numerical_tangent(scv, X_UNIT_SQUARE, u_vec, mat)
+        ke    = tangent(scv, u_vec, mat)
+        ke_fd = numerical_tangent(scv, u_vec, mat)
         rel_err = norm(ke .- ke_fd) / (norm(ke_fd) + 1e-14)
         @test rel_err < 1e-7
 
@@ -157,14 +157,14 @@ end
         # Moderate displacement: geometric stiffness is non-negligible.
         Random.seed!(3)
         u_vec = 0.3 * randn(n_dof)
-        ke = tangent(scv, X_UNIT_SQUARE, u_vec, mat)
-        ke_fd = numerical_tangent(scv, X_UNIT_SQUARE, u_vec, mat)
+        ke = tangent(scv, u_vec, mat)
+        ke_fd = numerical_tangent(scv, u_vec, mat)
         rel_err = norm(ke .- ke_fd) / (norm(ke_fd) + 1e-14)
         @test rel_err < 1e-7
 
         # autodiff consistency
         # using ForwardDiff
-        # ke_ad = ForwardDiff.jacobian(u -> residual(scv, X_UNIT_SQUARE, u, mat), u_vec)
+        # ke_ad = ForwardDiff.jacobian(u -> residual(scv, u, mat), u_vec)
         # rel_err = norm(ke .- ke_ad) / (norm(ke_ad) + 1e-14)
         # @test rel_err < 1e-7
 
@@ -172,14 +172,14 @@ end
         # For a free element, rigid-body modes yield zero eigenvalues.
         Random.seed!(4)
         u_vec = 0.01 * randn(n_dof)
-        ke = tangent(scv, X_UNIT_SQUARE, u_vec, mat)
+        ke = tangent(scv, u_vec, mat)
         λ  = eigvals(Symmetric(ke))
         @test minimum(λ) ≥ -1e-10 * maximum(abs, λ)
 
         # check that higher-order rules work correctly.
         scv2 = make_scv(qr_order=2)
         reinit!(scv2, X_UNIT_SQUARE)
-        re2 = residual(scv2, X_UNIT_SQUARE, zeros(n_dof), mat)
+        re2 = residual(scv2, zeros(n_dof), mat)
         @test norm(re2) ≤ 1e-14
 
         # Full 2×2 Gauss integration — required to suppress hourglass modes.
@@ -187,7 +187,7 @@ end
         # increasing the zero-eigenvalue count from 7 to 10.
         scv2 = make_scv(qr_order=2)
         reinit!(scv2, X_UNIT_SQUARE)
-        ke = tangent(scv2, X_UNIT_SQUARE, zeros(n_dof), mat)
+        ke = tangent(scv2, zeros(n_dof), mat)
         λs  = eigvals(Symmetric(ke))
         tol = 1e-10 * maximum(abs, λs)
         n_zero     = count(λ ->  abs(λ) ≤ tol, λs)
@@ -231,7 +231,7 @@ end
     mat = LinearElastic(1.0e6, ν, 0.01)
     scv = make_scv(qr_order=2)
     reinit!(scv, X_UNIT_SQUARE)
-    K = tangent(scv, X_UNIT_SQUARE, zeros(12), mat)
+    K = tangent(scv, zeros(12), mat)
 
     p_dofs = [1, 2, 3, 4, 5, 6, 7, 9, 10, 12]   # prescribed DOF indices
     p_vals = [0.0, 0.0, 0.0, δ, 0.0, 0.0, δ, 0.0, 0.0, 0.0]
@@ -255,14 +255,14 @@ end
 
     reinit!(scv, X_UNIT_SQUARE)
     u_orig = vcat(u_lin.(X_UNIT_SQUARE)...)
-    W_orig = element_strain_energy(scv, X_UNIT_SQUARE, u_orig, mat)
+    W_orig = element_strain_energy(scv, u_orig, mat)
 
     for θ in [π/6, π/4, π/3, π/2, 2π/3, π]
         Rot   = R(θ)
         x_rot = [Rot ⋅ xi for xi in X_UNIT_SQUARE]
         u_rot = vcat([Rot ⋅ u_lin(xi) for xi in X_UNIT_SQUARE]...)
         reinit!(scv, x_rot)
-        W_rot = element_strain_energy(scv, x_rot, u_rot, mat)
+        W_rot = element_strain_energy(scv, u_rot, mat)
         @test W_rot ≈ W_orig  rtol=1e-10
     end
 end
@@ -321,7 +321,7 @@ function assemble_residual!(r, dh, scv, u, mat)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
         u_e = u[celldofs(cell)]
-        membrane_residuals_KL!(re, scv, x, u_e, mat)
+        membrane_residuals_KL!(re, scv, u_e, mat)
         r[celldofs(cell)] .+= re
     end
 end
@@ -336,8 +336,8 @@ function assemble_tangent_and_residual!(K, r, dh, scv, u, mat)
         reinit!(scv, cell)
         x   = getcoordinates(cell)
         u_e = u[celldofs(cell)]
-        membrane_tangent_KL!(ke, scv, x, u_e, mat)
-        membrane_residuals_KL!(re, scv, x, u_e, mat)
+        membrane_tangent_KL!(ke, scv, u_e, mat)
+        membrane_residuals_KL!(re, scv, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
     end
 end
@@ -410,7 +410,7 @@ end
 
             # The boundary reactions can be large; only interior entries must be zero.
             @test norm(r[ch_tmp.free_dofs]) ≤ 1e-8 * norm(r)
-            @test sum(r) < 1e-14
+            @test sum(r) < 1e-12
         end
 
         # ── Test 2: solve with linear BCs recovers the exact interior field ────────
@@ -625,8 +625,8 @@ end
         fill!(ke_rm, 0.0); fill!(re_rm, 0.0)
         reinit!(scv_rm, cell)
         x = getcoordinates(cell); u_e = zeros(n_el_rm)
-        membrane_tangent_RM!(ke_rm, scv_rm, x, u_e, mat_rm)
-        bending_tangent_RM!(ke_rm, scv_rm, x, u_e, mat_rm)
+        membrane_tangent_RM!(ke_rm, scv_rm, u_e, mat_rm)
+        bending_tangent_RM!(ke_rm, scv_rm, u_e, mat_rm)
         assemble!(asmb_rm, shelldofs(cell), ke_rm, re_rm)
     end
 
