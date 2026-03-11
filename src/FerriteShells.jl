@@ -22,6 +22,7 @@ export membrane_residuals_KL!, membrane_tangent_KL!, bending_residuals_KL!, bend
 export membrane_residuals_RM!, membrane_tangent_RM!, bending_residuals_RM!, bending_tangent_RM!
 
 include("utils.jl")
-export shell_grid, assemble_traction!, assemble_pressure!, assemble_pressure_tangent!, shelldofs
+export shell_grid, shelldofs, assemble_traction!, apply_pointload!
+export assemble_pressure!, assemble_pressure_tangent!
 
 end # module FerriteShells

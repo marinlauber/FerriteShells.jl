@@ -587,5 +587,68 @@ end
     @test all(r -> r ≥ 1.8, rates)
 end
 
+@testset "RM Cook's membrane" begin
+    # RM (Reissner-Mindlin) Cook's membrane: same geometry and loading as the KL test.
+    # Cook's membrane is an in-plane dominated problem; KL and RM should give identical
+    # tip displacements (bending/shear DOFs are pinned everywhere, membrane governs).
+    function create_cook_grid_rm(nx, ny)
+        corners = [Tensors.Vec{2}((0.0, 0.0)),
+                   Tensors.Vec{2}((48.0, 44.0)),
+                   Tensors.Vec{2}((48.0, 60.0)),
+                   Tensors.Vec{2}((0.0, 44.0))]
+        return generate_grid(Quadrilateral, (nx, ny), corners) |> shell_grid
+    end
+
+    grid_rm = create_cook_grid_rm(32, 32)
+    addfacetset!(grid_rm, "clamped", x -> norm(x[1]) ≈ 0.0)
+    addfacetset!(grid_rm, "traction", x -> norm(x[1]) ≈ 48.0)
+    addnodeset!(grid_rm, "allnodes", x -> true)
+
+    ip_rm  = Lagrange{RefQuadrilateral, 1}()
+    qr_rm  = QuadratureRule{RefQuadrilateral}(2)
+    fqr_rm = FacetQuadratureRule{RefQuadrilateral}(2)
+    scv_rm = ShellCellValues(qr_rm, ip_rm, ip_rm)
+    mat_rm = LinearElastic(1.0, 1/3, 1.0)
+
+    dh_rm = DofHandler(grid_rm)
+    add!(dh_rm, :u, ip_rm^3)
+    add!(dh_rm, :θ, ip_rm^2)
+    close!(dh_rm)
+
+    n_el_rm = ndofs_per_cell(dh_rm)
+    K_rm = allocate_matrix(dh_rm)
+    f_rm = zeros(ndofs(dh_rm))
+    asmb_rm = start_assemble(K_rm, zeros(ndofs(dh_rm)))
+    ke_rm = zeros(n_el_rm, n_el_rm); re_rm = zeros(n_el_rm)
+
+    for cell in CellIterator(dh_rm)
+        fill!(ke_rm, 0.0); fill!(re_rm, 0.0)
+        reinit!(scv_rm, cell)
+        x = getcoordinates(cell); u_e = zeros(n_el_rm)
+        membrane_tangent_RM!(ke_rm, scv_rm, x, u_e, mat_rm)
+        bending_tangent_RM!(ke_rm, scv_rm, x, u_e, mat_rm)
+        assemble!(asmb_rm, shelldofs(cell), ke_rm, re_rm)
+    end
+
+    assemble_traction!(f_rm, dh_rm, getfacetset(grid_rm, "traction"),
+                       ip_rm, fqr_rm, Vec{3}((0.0, 1/16, 0.0)))
+
+    dbc_rm = ConstraintHandler(dh_rm)
+    add!(dbc_rm, Dirichlet(:u, getfacetset(grid_rm, "clamped"), x -> zeros(3), [1,2,3]))
+    add!(dbc_rm, Dirichlet(:θ, getfacetset(grid_rm, "clamped"), x -> zeros(2), [1,2]))
+    add!(dbc_rm, Dirichlet(:u, getnodeset(grid_rm, "allnodes"), x -> [0.0], [3]))
+    add!(dbc_rm, Dirichlet(:θ, getnodeset(grid_rm, "allnodes"), x -> zeros(2), [1,2]))
+    close!(dbc_rm); Ferrite.update!(dbc_rm, 0.0)
+    apply!(K_rm, f_rm, dbc_rm)
+    ue_rm = K_rm \ f_rm
+
+    ph_rm    = PointEvalHandler(grid_rm, [Tensors.Vec{3}((48.0, 60.0, 0.0))])
+    u_tip_rm = first(evaluate_at_points(ph_rm, dh_rm, ue_rm, :u))
+    @test all(u_tip_rm .- [-18.5338, 24.8366, 0.0] .< 1e-3)
+end
+
 include("test_bending.jl")
 include("test_rm.jl")
+include("test_utils.jl")
+include("test_plate.jl")
+include("test_benchmarks.jl")

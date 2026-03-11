@@ -87,6 +87,28 @@ function s_norm(u, uₕ)
     nothing
 end
 
+"""
+    apply_pointload!(f, dh, nodeset_name, load)
+
+Add a concentrated force `load::Vec{3}` to the displacement DOFs of all nodes in `nodeset_name`.
+Works for both single-field (:u only) and two-field (:u, :θ) DofHandlers; in both cases the
+:u DOFs for node I in a cell occupy local positions 3I-2:3I.
+"""
+function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
+    node_set  = getnodeset(dh.grid, nodeset_name)
+    processed = Set{Int}()
+    for cell in CellIterator(dh)
+        nodes = getnodes(cell)
+        cd    = celldofs(cell)
+        for (I, gid) in enumerate(nodes)
+            if gid ∈ node_set && gid ∉ processed
+                push!(processed, gid)
+                @views f[cd[3I-2:3I]] .+= load
+            end
+        end
+    end
+end
+
 import Ferrite: CellCache
 """
     shelldofs()

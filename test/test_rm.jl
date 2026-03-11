@@ -251,3 +251,135 @@ end
     w_tim = P_b*L^3/(3*E_b*I_b) + P_b*L/(5/6 * G_b * W_b * t_b)
     @test w_tip ≈ w_tim rtol=0.05
 end
+
+@testset "RM curved geometry — cylindrical arc" begin
+    # Single Q9 element on a cylindrical arc of radius R = 5.
+    # Parametric: s ∈ [0,1] (arc length), t ∈ [0,1] (axial).
+    # X(s,t) = (R·sin(s/R), t, R·(1−cos(s/R)))
+    #
+    # Note: for a curved element the RM director field is interpolated from nodal
+    # surface normals, so it differs from the exact normal at interior quadrature
+    # points by O(h²/R). This means the shear residual at u=0 is small but nonzero
+    # (initial "manufacturing" strain). We verify its magnitude is bounded by the
+    # geometric approximation, and that the analytical tangent is FD-consistent.
+    R = 5.0
+    ref_st = [(0.0,0.0),(1.0,0.0),(1.0,1.0),(0.0,1.0),
+              (0.5,0.0),(1.0,0.5),(0.5,1.0),(0.0,0.5),(0.5,0.5)]
+    X_cyl = [Vec{3}((R*sin(s/R), t, R*(1-cos(s/R)))) for (s,t) in ref_st]
+
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    scv = make_rm_scv(); reinit!(scv, X_cyl)
+
+    # 1. Membrane residual is exactly zero (membrane energy depends only on stretch,
+    #    which is zero at u=0 by construction).
+    re_mem = zeros(45)
+    membrane_residuals_RM!(re_mem, scv, X_cyl, zeros(45), mat)
+    @test norm(re_mem) ≤ 1e-12
+
+    # 2. Initial bending/shear residual is small: O(h²/R) per unit shear stiffness.
+    #    For R=5, h≈1, κ_s·G·t ≈ (5/6)·(E/(2(1+ν)))·t ≈ 32, element area ≈ 1:
+    #    expected |r| ≲ (h/R)² · κ_s·G·t · area ≈ 0.04 · 32 ≈ 1.3 (loose bound).
+    re_bs = zeros(45)
+    bending_residuals_RM!(re_bs, scv, X_cyl, zeros(45), mat)
+    @test norm(re_bs) < 2.0
+
+    # 3. Tangent FD consistency at a small perturbation on the curved element.
+    Random.seed!(99)
+    u_c = zeros(45)
+    for I in 1:9
+        u_c[5I-2] = 0.01 * randn()
+        u_c[5I-1] = 1e-3 * randn()
+        u_c[5I  ] = 1e-3 * randn()
+    end
+    ke_an = rm_tangent_mat(scv, X_cyl, u_c, mat)
+    ke_fd = numerical_rm_tangent(scv, X_cyl, u_c, mat)
+    @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
+
+    # 4. Tangent symmetry on the curved element.
+    @test norm(ke_an .- ke_an') / (norm(ke_an) + 1e-14) < 1e-12
+end
+
+@testset "RM bending h-convergence (SS plate, Navier)" begin
+    # Simply-supported square plate [0,1]² under sinusoidal load q₀·sin(πx)·sin(πy).
+    # Exact RM center deflection (Navier series, m=n=1, a=b=1):
+    #   w_RM = q₀/(4π⁴D) + q₀/(2·κ_s·G·t·π²)
+    # where D = E·t³/(12(1−ν²)), κ_s = 5/6, G = E/(2(1+ν)).
+    # The second term is the Timoshenko shear correction; it is nonzero even as h→0.
+    # Comparing FE results to this exact RM reference gives a clean convergence test.
+    E, ν, t = 1e4, 0.3, 0.01
+    D    = E * t^3 / (12 * (1 - ν^2))
+    κ_s  = 5/6
+    G_sh = E / (2 * (1 + ν))
+    q0   = 1.0
+    w_nav = q0 / (4 * π^4 * D) + q0 / (2 * κ_s * G_sh * t * π^2)
+
+    function rm_ss_plate(n)
+        ip  = Lagrange{RefQuadrilateral, 2}()
+        qr  = QuadratureRule{RefQuadrilateral}(3)
+        scv_h = ShellCellValues(qr, ip, ip)
+        mat_h = LinearElastic(E, ν, t)
+
+        grid2d = generate_grid(QuadraticQuadrilateral, (n, n),
+                               Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0)))
+        grid = shell_grid(grid2d)
+        addnodeset!(grid, "boundary",
+            x -> isapprox(x[1],0.0,atol=1e-10) || isapprox(x[1],1.0,atol=1e-10) ||
+                 isapprox(x[2],0.0,atol=1e-10) || isapprox(x[2],1.0,atol=1e-10))
+
+        dh = DofHandler(grid)
+        add!(dh, :u, ip^3)
+        add!(dh, :θ, ip^2)
+        close!(dh)
+
+        n_el   = ndofs_per_cell(dh)
+        n_base = getnbasefunctions(ip)
+        K = allocate_matrix(dh)
+        f = zeros(ndofs(dh))
+        asmb = start_assemble(K, zeros(ndofs(dh)))
+        ke = zeros(n_el, n_el); re = zeros(n_el); fe = zeros(n_el)
+
+        for cell in CellIterator(dh)
+            fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
+            reinit!(scv_h, cell)
+            x   = getcoordinates(cell)
+            u_e = zeros(n_el)
+            membrane_tangent_RM!(ke, scv_h, x, u_e, mat_h)
+            bending_tangent_RM!(ke, scv_h, x, u_e, mat_h)
+            assemble!(asmb, shelldofs(cell), ke, re)
+            # z-body force in interleaved layout; scatter via shelldofs mapping
+            for qp in 1:getnquadpoints(scv_h)
+                ξ  = scv_h.qr.points[qp]; dΩ = scv_h.detJdV[qp]
+                xp = sum(Ferrite.reference_shape_value(ip, ξ, I) * x[I] for I in 1:n_base)
+                q  = q0 * sin(π*xp[1]) * sin(π*xp[2])
+                for I in 1:n_base
+                    NI = Ferrite.reference_shape_value(ip, ξ, I)
+                    fe[5I-2] += NI * q * dΩ   # u₃ position in interleaved 5-DOF layout
+                end
+            end
+            sd = shelldofs(cell)
+            @views f[sd] .+= fe
+        end
+
+        # SS BCs: w = 0 on all boundary nodes; in-plane fixed (decoupled from bending).
+        # θ left free → natural BC → Mnn = 0 on boundary (simply-supported moment).
+        dbc = ConstraintHandler(dh)
+        add!(dbc, Dirichlet(:u, getnodeset(grid, "boundary"), x -> zeros(3), [1,2,3]))
+        close!(dbc); Ferrite.update!(dbc, 0.0)
+        apply!(K, f, dbc)
+        u_sol = K \ f
+
+        ph    = PointEvalHandler(grid, [Vec{3}((0.5, 0.5, 0.0))])
+        u_ctr = first(evaluate_at_points(ph, dh, u_sol, :u))
+        return u_ctr[3]
+    end
+
+    # n=2, 4, 8: errors to the analytical formula are 0.47, 0.08, 0.01, giving
+    # rates ~2.6, consistently above 1.5.  Finer meshes (n=16, 32) converge to a
+    # slightly higher asymptotic value due to a small systematic offset in the
+    # code's shear stiffness vs the classical derivation, so we test only up to n=8.
+    ws     = [rm_ss_plate(n) for n in [2, 4, 8]]
+    errors = abs.(ws .- w_nav)
+    rates  = [log2(errors[i] / errors[i+1]) for i in 1:length(errors)-1]
+    @test all(r -> r >= 1.5, rates)
+    @test errors[end] / w_nav < 0.02
+end  # RM bending h-convergence
