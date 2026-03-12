@@ -75,27 +75,90 @@ traction = Vec{3}((0., 0., 4.0))
 f_ext = zeros(ndofs(dh))
 assemble_traction!(f_ext, dh, getfacetset(grid, "traction"), ip, fqr, traction)
 
-# solve
-let newton_itr = 0; @time while true
-    newton_itr += 1
-    # Construct the current guess
-    u .= un .+ Δu
-    # Compute residual and tangent for current guess
-    assemble_global_shell!(K, g, u, dh, scv, mat)
-    g .-= f_ext # apply external force
-    # Apply boundary conditions
-    apply_zero!(K, g, dbc)
-    # Compute the residual norm and compare with tolerance
-    norm(g[dbc.free_dofs]) < 1e-6 && break
-    newton_itr > 30 && break
-    # Compute increment
-    Δu .-= K \ g
-    # make sure BC are zero
-    apply_zero!(Δu, dbc)
-    # save
-    VTKGridFile("cantilever-$newton_itr", dh) do vtk
-        write_solution(vtk, dh, u); pvd[newton_itr] = vtk
+# brute force Newton solve for initial load step λ=1.0, save intermediate steps for visualization
+# let newton_itr = 0; @time while true
+#     newton_itr += 1
+#     # Construct the current guess
+#     u .= un .+ Δu
+#     # Compute residual and tangent for current guess
+#     assemble_global_shell!(K, g, u, dh, scv, mat)
+#     g .-= f_ext # apply external force
+#     # Apply boundary conditions
+#     apply_zero!(K, g, dbc)
+#     # Compute the residual norm and compare with tolerance
+#     norm(g[dbc.free_dofs]) < 1e-6 && break
+#     newton_itr > 30 && break
+#     # Compute increment
+#     Δu .-= K \ g
+#     # make sure BC are zero
+#     apply_zero!(Δu, dbc)
+#     # save
+#     VTKGridFile("cantilever-$newton_itr", dh) do vtk
+#         write_solution(vtk, dh, u); pvd[newton_itr] = vtk
+#     end
+# end; println("Converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
+# end
+# close(pvd);
+
+# # load controlled Newton-Raphson
+# let λᵢ=0; @time for λ in 0.2:0.2:1.0
+#     # Newton solve for current load step
+#     λᵢ += 1; newton_itr = 0
+#     while true
+#         newton_itr += 1
+#         # Construct the current guess
+#         u .= un .+ Δu
+#         # Compute residual and tangent for current guess
+#         assemble_global_shell!(K, g, u, dh, scv, mat)
+#         g .-= λ .* f_ext # apply external force
+#         # Apply boundary conditions
+#         apply_zero!(K, g, dbc)
+#         # Compute the residual norm and compare with tolerance
+#         norm(g[dbc.free_dofs]) < 1e-6 && break
+#         newton_itr > 30 && break
+#         # Compute increment
+#         Δu .-= K \ g
+#         # make sure BC are zero
+#         apply_zero!(Δu, dbc)
+#     end
+#     println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
+#     # save
+#     VTKGridFile("cantilever-$λᵢ", dh) do vtk
+#         write_solution(vtk, dh, u); pvd[λᵢ] = vtk
+#     end
+# end;
+# end
+# close(pvd);
+
+
+# arc-length controlled Newton-Raphson
+let λᵢ=0; λ=0.1; @time while λ < 1.0
+    # Newton solve for current load step
+    λᵢ += 1; newton_itr = 0
+    while true
+        newton_itr += 1
+        # Construct the current guess
+        u .= un .+ Δu
+        # Compute residual and tangent for current guess
+        assemble_global_shell!(K, g, u, dh, scv, mat)
+        # compute the effective tangent and residual for the current guess
+        
+        g .-= λ .* f_ext # apply external force
+        # Apply boundary conditions
+        apply_zero!(K, g, dbc)
+        # Compute the residual norm and compare with tolerance
+        norm(g[dbc.free_dofs]) < 1e-6 && break
+        newton_itr > 30 && break
+        # Compute increment
+        Δu .-= K \ g
+        # make sure BC are zero
+        apply_zero!(Δu, dbc)
     end
-end; println("Converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
+    println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
+    # save
+    VTKGridFile("cantilever-$λᵢ", dh) do vtk
+        write_solution(vtk, dh, u); pvd[λᵢ] = vtk
+    end
+end;
 end
 close(pvd);

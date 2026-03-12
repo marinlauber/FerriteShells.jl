@@ -374,7 +374,22 @@ NURBS basis functions are globally $C^{p-1}$ continuous for degree $p$. Quadrati
 
 The main challenge is multi-patch coupling at $C^0$ or $C^1$ junctions, which requires additional constraint enforcement.
 
+## Authors
+
+- Marin Lauber, Delft University of Technology, The Netherlands.
+
+
 ## Contributing
 
+We are always looking for contributions and help with FerriteShells. If you
+have ideas, nice applications or code contributions then we would be happy to
+help you get them included. We ask you to follow the FerriteShells git
+workflow.
 
+## Issues and Support
 
+Please use the GitHub issue tracker to report any issues.
+
+## License
+
+FerriteShells is released under the MIT License. See the [LICENSE](LICENSE) file for details.

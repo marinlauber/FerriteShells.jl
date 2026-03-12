@@ -18,71 +18,65 @@ using FerriteShells
 #   θ=0    (y=0 plane):     u_y=0
 #   θ=π/2  (z=0 plane):     u_z=0
 
-const R_pc, L_pc = 300.0, 600.0
-const E_pc, ν_pc, t_pc = 3.0e6, 0.3, 3.0
-const P_pc = 1.0   # full pinch load; 1/8 model gets P/4
-
 function pinched_cylinder_grid(ns, na)
     g = shell_grid(
         generate_grid(QuadraticQuadrilateral, (ns, na),
-                      Vec{2}((0.0, 0.0)), Vec{2}((π/2, L_pc/2)));
-        map = n -> (n.x[2], R_pc * sin(n.x[1]), R_pc * cos(n.x[1])))
-    addnodeset!(g, "diaphragm",  x -> x[1] ≈ 0.0)
-    addnodeset!(g, "sym_axial",  x -> x[1] ≈ L_pc/2)
-    addnodeset!(g, "sym_theta0", x -> abs(x[2]) < 1e-6)     # y≈0  (θ=0 plane)
-    addnodeset!(g, "sym_theta90", x -> abs(x[3]) < 1e-6)    # z≈0  (θ=π/2 plane)
+                      Vec{2}((0.0, 0.0)), Vec{2}((π/2, 600.0/2)));
+        map = n -> (n.x[2], 300.0 * sin(n.x[1]), 300.0 * cos(n.x[1])))
+    addnodeset!(g, "diaphragm",   x -> x[1] ≈ 0.0)
+    addnodeset!(g, "sym_axial",   x -> x[1] ≈ 600.0/2)
+    addnodeset!(g, "sym_theta0",  x -> abs(x[2]) < 1e-6)
+    addnodeset!(g, "sym_theta90", x -> abs(x[3]) < 1e-6)
     addnodeset!(g, "load_point",
-        x -> x[1] ≈ L_pc/2 && abs(x[2]) < 1e-6 && abs(x[3] - R_pc) < 1e-6)
+        x -> x[1] ≈ 600.0/2 && abs(x[2]) < 1e-6 && abs(x[3] - 300.0) < 1e-6)
     return g
 end
 
-function pinched_cylinder_solve(ns, na)
-    ip  = Lagrange{RefQuadrilateral, 2}()
-    qr  = QuadratureRule{RefQuadrilateral}(4)
-    scv = ShellCellValues(qr, ip, ip)
-    mat = LinearElastic(E_pc, ν_pc, t_pc)
+# interplation space
+ip  = Lagrange{RefQuadrilateral, 2}() # Q9
+qr  = QuadratureRule{RefQuadrilateral}(3)
+scv = ShellCellValues(qr, ip, ip)
 
-    grid   = pinched_cylinder_grid(ns, na)
-    dh     = DofHandler(grid); add!(dh, :u, ip^3); close!(dh)
-    n_el   = ndofs_per_cell(dh)
+# material
+mat = LinearElastic(3.0e6, 0.3, 3.0)
 
-    K  = allocate_matrix(dh)
-    f  = zeros(ndofs(dh))
-    asmb = start_assemble(K, zeros(ndofs(dh)))
-    ke = zeros(n_el, n_el); re = zeros(n_el)
+# make grid
+grid = pinched_cylinder_grid(16, 16)
 
-    for cell in CellIterator(dh)
-        fill!(ke, 0.0); fill!(re, 0.0)
-        reinit!(scv, cell)
-        u0 = zeros(n_el)
-        membrane_tangent_KL!(ke, scv, u0, mat)
-        bending_tangent_KL!(ke, scv, u0, mat)
-        assemble!(asmb, celldofs(cell), ke, re)
-    end
+# degrees of freedom
+dh   = DofHandler(grid)
+add!(dh, :u, ip^3)
+close!(dh)
 
-    apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -P_pc / 4)))
+# assembly
+n_el   = ndofs_per_cell(dh)
+K  = allocate_matrix(dh)
+f  = zeros(ndofs(dh))
+asmb = start_assemble(K, zeros(ndofs(dh)))
+ke = zeros(n_el, n_el); re = zeros(n_el)
 
-    dbc = ConstraintHandler(dh)
-    add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"),  x -> zeros(2), [2, 3]))
-    add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_axial"),  x -> 0.0,      [1]))
-    add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta0"), x -> 0.0,      [2]))
-    add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta90"), x -> 0.0,     [3]))
-    close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
-
-    u_sol = K \ f
-
-    load_nodes = collect(getnodeset(grid, "load_point"))
-    @assert length(load_nodes) == 1 "Expected exactly one load-point node"
-    for cell in CellIterator(dh)
-        for (I, gid) in enumerate(getnodes(cell))
-            if gid == load_nodes[1]
-                cd = celldofs(cell)
-                return u_sol[cd[3I]]  # z-component (radial at θ=0)
-            end
-        end
-    end
-    error("load_point node not found in any cell")
+for cell in CellIterator(dh)
+    fill!(ke, 0.0); fill!(re, 0.0)
+    reinit!(scv, cell)
+    u0 = zeros(n_el)
+    membrane_tangent_KL!(ke, scv, u0, mat)
+    bending_tangent_KL!(ke, scv, u0, mat)
+    assemble!(asmb, celldofs(cell), ke, re)
 end
 
-δ = pinched_cylinder_solve(16, 16)
-println("Pinched cylinder (KL, 16×16): u_z at load point = $(δ)  (reference: -1.8248e-5)")
+apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -1/4)))
+
+dbc = ConstraintHandler(dh)
+add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"),  x -> zeros(2), [2, 3]))
+add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_axial"),  x -> 0.0,      [1]))
+add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta0"), x -> 0.0,      [2]))
+add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta90"), x -> 0.0,     [3]))
+close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
+
+u_sol = K \ f
+
+# extract solution at point
+ph     = PointEvalHandler(grid, [Vec{3}(([300.0, 0.0, 300.0]))])
+u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
+
+println("Pinched cylinder (KL, 16×16): u_z at load point = $(u_eval[3])  (reference: -1.8248e-5)")
