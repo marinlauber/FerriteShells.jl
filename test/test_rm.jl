@@ -205,7 +205,7 @@ end
     addnodeset!(grid3d, "left",  x -> isapprox(x[1], 0.0, atol=1e-10))
     addfacetset!(grid3d, "right", x -> isapprox(x[1], L,  atol=1e-10))
 
-    ip_b  = Serendipity{RefQuadrilateral,2}()
+    ip_b  = Lagrange{RefQuadrilateral,2}()
     scv_b = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_b, ip_b)
     dh_b  = DofHandler(grid3d); add!(dh_b, :u, ip_b^5); close!(dh_b)
 

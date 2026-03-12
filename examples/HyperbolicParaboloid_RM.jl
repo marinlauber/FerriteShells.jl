@@ -26,7 +26,7 @@ addfacetset!(grid, "clamped",  x -> x[1] ≈  50.0)
 addfacetset!(grid, "traction", x -> x[1] ≈ -50.0)
 
 # interpolation order
-ip = Serendipity{RefQuadrilateral, 2}() # Q8
+ip = Lagrange{RefQuadrilateral, 2}() # Q9
 qr = QuadratureRule{RefQuadrilateral}(3)
 
 # cell (shell) values

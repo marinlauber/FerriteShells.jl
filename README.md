@@ -6,7 +6,7 @@ This package provides helper functions to assemble the different terms in the we
 Specifically, this package provides helper function to assemble the classical membrane, bending and shear contribution to the residuals and the consistent tangent stiffness matrix.
 Proper assembly of these different terms lead to the different formulation mentioned above.
 
-We refer to the reader to the specific weak form for each of these shell and their numerical an implementation limitiations.
+We refer to the reader to the specific weak form for each of these shell and their numerical an implementation limitations.
 
 Some formulation that can be assembled with this package
 
@@ -14,14 +14,16 @@ Function | Membrane | Kirchhoff-Love | Reissner-Mindlin
 :------------ | :-------------| :-------------| :-------------
 linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
-Q4 | :white_check_mark: |  :x: | :white_check_mark:
-Q8 | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
-Q9 | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
+`Lagrange{RefTriangle, 1}` (Q3) | :white_check_mark: |  :x: | :white_check_mark:
+`Lagrange{RefQuadrilateral, 1}` (Q4) | :white_check_mark: |  :x: | :white_check_mark:
+`Lagrange{RefTriangle, 2}` (Q6) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
+`Serendipity{RefQuadrilateral, 2}` (Q8) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
+`Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 MITC |  |   | :white_check_mark:
 
 ## 1. `ShellCellValues`
 
-Since most wak forms use in shell analysis are specified by specializing the classical weak form to the curvilinear system of the mid-plane of the shell, classical continuum mechanics quantities, such as the deformation gradient tensor $\bf{F}$ change when expressed in curvilinear coordinates.
+Since most weak forms use in shell analysis are specified by specializing the classical weak form to the curvilinear system of the mid-plane of the shell, classical continuum mechanics quantities, such as the deformation gradient tensor $\bf{F}$ change when expressed in curvilinear coordinates.
 To help assemble these specific quantities, this package provides a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but hold covariant basis vector, metric tensors and surface Jacobian at the integration points.
 ```julia
 structure ShellCellValues <: AbstractCellValues
@@ -72,8 +74,9 @@ Why Q9 is preferred over Q8 for KL:
 Q9 adds the center node with mode $(1-ξ²)(1-η²)$, which is a richer bubble function. It gives better accuracy and a cleaner zero-mode spectrum (as the n_zero == 21 test verifies).
 
 For RM:
-Q9 is also fine — the center bubble mode doesn't cause any harm and actually gives slightly more kinematic flexibility. The reason the cantilever test uses
-Q8 is purely practical: `generate_grid(QuadraticQuadrilateral, ...) gives Q8 directly, while Q9 requires manually constructing the mesh. No second derivatives of shape functions are needed in RM (curvature comes from the director field d), so the Q8 vs Q9 distinction for KL doesn't apply.
+Q9 is also fine — the center bubble mode doesn't cause any harm and actually gives slightly more kinematic flexibility. The reason the cantilever test uses Q9 is purely practical: `generate_grid(QuadraticQuadrilateral, ...) gives Q9 directly, while Q8 requires manually constructing the mesh. No second derivatives of shape functions are needed in RM (curvature comes from the director field d), so the Q8 vs Q9 distinction for KL doesn't apply.
+
+In practice Q9 (what the code already uses) is generally preferred over Q8 — it has the center node which gives better accuracy for bending and avoids the parasitic zero-energy modes that Q8 can exhibit with reduced integration.
 
 The real dividing line is Q4 vs quadratic (Q8/Q9):
 - KL: Q4 is fundamentally broken (missing curvature components), Q8/Q9 both work
