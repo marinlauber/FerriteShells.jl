@@ -1,4 +1,3 @@
-
 using ForwardDiff
 
 # Compute (cos(√θ²), sin(√θ²)/√θ²) from θ² = φ₁²+φ₂² without calling sqrt at 0.
