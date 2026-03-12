@@ -1,6 +1,19 @@
 
 using ForwardDiff
 
+# Compute (cos(√θ²), sin(√θ²)/√θ²) from θ² = φ₁²+φ₂² without calling sqrt at 0.
+# ForwardDiff-safe: the branch is on the primal value only, so dual perturbations
+# flow through whichever branch is active.  In the else branch √θ² > 0 so the
+# sqrt gradient (1/2√θ²) is finite.
+@inline function _cos_sinc_sq(θ²::T) where T
+    if θ² < 1e-6
+        return one(T) - θ²/2 + θ²^2/24,  one(T) - θ²/6 + θ²^2/120
+    else
+        θ = sqrt(θ²)
+        return cos(θ), sin(θ)/θ
+    end
+end
+
 """
     membrane_residuals_KL!(re, scv, u_e, mat)
 
@@ -150,9 +163,11 @@ function rm_bending_shear_energy(u_flat, scv, mat)
         d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
         for I in 1:n_nodes
             φ₁  = u_flat[5I-1]; φ₂ = u_flat[5I]
-            d_I = Vec{3,T}((G₃[1] + φ₁*T₁[1] + φ₂*T₂[1],
-                            G₃[2] + φ₁*T₁[2] + φ₂*T₂[2],
-                            G₃[3] + φ₁*T₁[3] + φ₂*T₂[3]))
+            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
+            cosθ, sincθ = _cos_sinc_sq(θ²)
+            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
+            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
+            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
             d  += scv.N[I, qp]      * d_I
             d₁ += scv.dNdξ[I, qp][1] * d_I
             d₂ += scv.dNdξ[I, qp][2] * d_I
