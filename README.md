@@ -1,10 +1,12 @@
 [![Test](https://github.com/marinlauber/FerriteShells.jl/actions/workflows/test.yml/badge.svg)](https://github.com/marinlauber/FerriteShells.jl/actions/workflows/test.yml)
+[![codecov.io](https://codecov.io/github/marinlauber/FerriteShells.jl/coverage.svg?branch=master)](https://codecov.io/github/marinlauber/FerriteShells.jl?branch=master)
+[![][docs-stable-img]][docs-stable-url]
 
 # FerriteShells.jl
 
-Assemblers for shells in Ferrite.jl
+---
 
-This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff--Love linear, C⁰ Koiter (non-linear Kirchhoff-Love), Reissner-Mindlin, and Naghi (non-linear Reissner-Mindlin) shells.
+This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff–Love linear, C⁰ Koiter (non-linear Kirchhoff–Love), Reissner–Mindlin, and Naghi (non-linear Reissner–Mindlin) shells.
 Specifically, this package provides a helper function to assemble the classical membrane, bending, and shear contributions to the residuals and the consistent tangent stiffness matrix.
 Proper assembly of these different terms leads to the different formulation mentioned above.
 
@@ -12,7 +14,7 @@ We refer the reader to the specific weak form for each of these shells and their
 
 Some formulation that can be assembled with this package
 
-Function | Membrane | Kirchhoff-Love | Reissner-Mindlin
+Function | Membrane | Kirchhoff–Love | Reissner–Mindlin
 :------------ | :-------------| :-------------| :-------------
 linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
@@ -24,7 +26,7 @@ non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 MITC |  |   | :construction_worker:
 
 > [!WARNING]
-> Kirchhoff-Love shells with $C^0$ continuity between elements are very ill-posed; it works in some specific cases with small deformations and specific boundary conditions. I would suggest using the Reissner-Mindlin shell instead.
+> Kirchhoff–Love shells with C⁰ continuity between elements is fundamentally wrong; it works in some cases with small deformations and specific boundary conditions. I would suggest using the Reissner–Mindlin shell instead.
 
 ### `ShellCellValues`
 
@@ -51,6 +53,20 @@ end
 > [!WARNING]
 > For now, the residual and consistent tangent construction use `ForwardDiff.gradient` and `ForwardDiff.hessian`, so simplify implementation. This will be slow on large meshes (>1000 elements), in the future, explicit expressions should replace those. Medium term, we can start with the membrane term only for the Reissner-Mindlin shell.
 
+### Shell obstacle course
+
+#### Cook's membrane
+
+#### Scordelis-Lo roof
+
+#### Pinched cylinder
+
+#### Cantilever roll-up
+
+#### Hyperbolic paraboloid
+
+#### Square airbag
+
 ### Authors
 
 - Marin Lauber, Delft University of Technology, The Netherlands.
@@ -62,10 +78,13 @@ have ideas, nice applications, or code contributions, then we would be happy to
 help you get them included. We ask you to follow the FerriteShells git
 workflow.
 
-## #Issues and Support
+### Issues and Support
 
 Please use the GitHub issue tracker to report any issues.
 
 ### License
 
 FerriteShells is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+[docs-stable-img]: https://img.shields.io/badge/docs-latest%20release-blue
+[docs-stable-url]: https://FerriteShells.github.io/FerriteShells.jl/
