@@ -1,3 +1,5 @@
+[![Test](https://github.com/marinlauber/FerriteShells.jl/actions/workflows/test.yml/badge.svg)](https://github.com/marinlauber/FerriteShells.jl/actions/workflows/test.yml)
+
 # FerriteShells.jl
 
 Assemblers for shells in Ferrite.jl

@@ -17,10 +17,10 @@ makedocs(
     ]
 )
 
-# deploydocs(
-#     repo = "github.com/marinlauber/FerriteShells.jl.git",
-#     target = "build",
-#     branch = "gh-pages",
-#     push_preview = true,
-#     versions = ["stable" => "v^", "v#.#" ],
-# )
+deploydocs(
+    repo = "github.com/marinlauber/FerriteShells.jl.git",
+    target = "build",
+    branch = "gh-pages",
+    push_preview = true,
+    versions = ["stable" => "v^", "v#.#" ],
+)
