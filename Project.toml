@@ -23,4 +23,4 @@ Tensors = "1.16.2"
 Test = "1"
 
 [targets]
-test = ["Test", "LinearAlgebra", "Random"]
+test = ["FerriteShells", "Test", "LinearAlgebra", "Random"]
