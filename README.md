@@ -21,19 +21,26 @@ non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 `Lagrange{RefTriangle, 2}` (Q6) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 `Serendipity{RefQuadrilateral, 2}` (Q8) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 `Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
-MITC |  |   | :white_check_mark:
+MITC |  |   | :construction_worker:
 
 ## 1. `ShellCellValues`
 
 Since most weak forms use in shell analysis are specified by specializing the classical weak form to the curvilinear system of the mid-plane of the shell, classical continuum mechanics quantities, such as the deformation gradient tensor $\bf{F}$ change when expressed in curvilinear coordinates.
 To help assemble these specific quantities, this package provides a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but hold covariant basis vector, metric tensors and surface Jacobian at the integration points.
 ```julia
-structure ShellCellValues <: AbstractCellValues
-    qr :: QR
+struct ShellCellValues <: AbstractCellValues
     ...
-    a_αβ ::
-    A_αβ ::
-    d_ ::
+end
+```
+
+## 2. Kinemtiics
+
+```julia
+for qp in 1:getnquadpoints(scv)
+    a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
+    E = 0.5 * (a_metric - A_metric) # half the increment in the metric tensor
+    C = contravariant_elasticity(mat, A_metric)
+    N = C ⊡ E
 end
 ```
 
