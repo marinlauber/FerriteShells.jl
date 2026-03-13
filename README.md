@@ -187,7 +187,70 @@ function assemble_global_shell!(K, re, u, dh, scv::ShellCellValues, mat)
 end
 ```
 
-## 3. General virtual work for a solid in a curvilinear coordinate system
+## 3. Linear solver strategies
+
+Each Newton iteration requires solving one or two linear systems with the same stiffness matrix K_eff (two for the bordering method used in displacement-controlled path following). The cost breakdown matters because for large shell problems the linear solve — not the assembly — becomes the bottleneck.
+
+### 3.1 Direct solvers (UMFPACK)
+
+Julia's default sparse solver is UMFPACK (via SuiteSparse). A factorisation has two phases:
+
+- **Symbolic**: analyses the sparsity pattern, computes a fill-reducing column permutation (e.g. AMD/COLAMD). Cost: 10–30% of total, depends only on the pattern.
+- **Numeric**: factorises the actual values. Cost: 70–90% of total, must be repeated when values change.
+
+In a Newton loop on a fixed mesh the sparsity pattern never changes. The three-argument form `lu!(F::UmfpackLU, K)` refactorises numerically while reusing the symbolic analysis from a previous `lu(K)` call. Combined with updating K_eff values in-place (exploiting the fact that K_int and K_pres share the same pattern), this avoids all redundant work:
+
+```julia
+# Outside the Newton loop — one-time setup:
+K_eff = allocate_matrix(dh)           # same sparsity pattern as K_int, K_pres
+assemble_all!(K_int, ..., u0, mat)
+K_eff.nzval .= K_int.nzval            # initial values (p=0)
+apply_zero!(K_eff, rhs_dummy, ch)
+F_lu = lu(K_eff)                      # symbolic + numeric factorisation
+
+# Inside the Newton loop:
+K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval   # update values in-place
+apply_zero!(K_eff, rhs, ch)
+lu!(F_lu, K_eff)                      # numeric only — reuses symbolic analysis
+ldiv!(v1, F_lu, rhs1)                 # two back-substitutions, one factorisation
+ldiv!(v2, F_lu, F_p)
+```
+
+The `.nzval .= ...` trick is valid because K_int, K_pres and K_eff all come from `allocate_matrix(dh)` and therefore have identical sparsity structure (same column pointers and row indices).
+
+Cost comparison per Newton step:
+
+| Pattern | Symbolic factorisations | Numeric factorisations | Back-substitutions |
+|---|---|---|---|
+| `K \ rhs` twice | 2 | 2 | 2 |
+| `lu(K)` then `ldiv!` twice | 1 | 1 | 2 |
+| `lu!(F, K)` then `ldiv!` twice | **0** | 1 | 2 |
+
+### 3.2 Iterative solvers
+
+For meshes beyond ~10⁵ DOFs, direct solvers become memory-limited (LU fill-in scales as O(N^1.5) for 2D problems). Iterative solvers avoid this but require a good preconditioner — shell problems are notoriously ill-conditioned.
+
+**Condition number**: K_eff mixes membrane stiffness (~Et/L²) and bending stiffness (~Et³/L⁴), giving
+
+$$\kappa(K_\text{eff}) \sim \frac{Et/L^2}{Et^3/L^4} = \left(\frac{L}{t}\right)^2$$
+
+For t/L = 10⁻³ this is κ ~ 10⁶; unpreconditioned GMRES or CG would need O(κ) iterations.
+
+**Practical options** (Julia packages):
+
+| Package | Method | When suitable |
+|---|---|---|
+| [`IterativeSolvers.jl`](https://github.com/JuliaLinearAlgebra/IterativeSolvers.jl) | GMRES, BiCGSTAB | Needs a preconditioner; entry point for experimentation |
+| [`IncompleteLU.jl`](https://github.com/haampie/IncompleteLU.jl) | ILU(k) preconditioner | Moderate t/L (≥ 0.01); fill level k=1–2 usually sufficient |
+| [`AlgebraicMultigrid.jl`](https://github.com/JuliaLinearAlgebra/AlgebraicMultigrid.jl) | Ruge–Stüben AMG | Membrane-dominated problems; needs near-null-space vectors (6 rigid-body modes) |
+| [`Pardiso.jl`](https://github.com/JuliaSparse/Pardiso.jl) | MKL Pardiso (direct) | Drop-in replacement for UMFPACK; faster for large problems, supports multithreading |
+| [`MUMPS.jl`](https://github.com/JuliaSparse/MUMPS.jl) | MUMPS (direct, MPI) | Distributed memory; relevant for > 10⁶ DOFs |
+
+For the thin-shell regime (t/L ≤ 10⁻²) standard AMG struggles because the near-null space contains both translational and rotational rigid-body modes, and the bending/membrane stiffness ratio spans many orders of magnitude. Purpose-built shell AMG (e.g. BoomerAMG in Hypre with proper near-null-space injection via [`Hypre.jl`](https://github.com/JuliaParallel/Hypre.jl)) is required to achieve mesh-independent convergence.
+
+For the problem sizes typical in this package (n ≤ 32, DOFs ≤ 50k) UMFPACK with symbolic reuse is faster than any iterative alternative.
+
+## 4. General virtual work for a solid in a curvilinear coordinate system
 
 The key: virtual work is a scalar
 
@@ -263,7 +326,7 @@ Residual linearization:
 >- **B-matrix**: classical, hides geometry, geometric stiffness must be derived separately, large matrices
 >- **Explicit variation**: continuum mechanics directly implemented, geometric stiffness emerges naturally, tensor contractions, better for geometrically exact shells
 
-## 4. Contravariant Elasticity
+## 5. Contravariant Elasticity
 
 As seen in ... the covariant surface measures are combined with the contravariant material tensors to form the weak form.
 We must expresse the classical 4th order material tensors in this contravariant frame.
@@ -272,7 +335,7 @@ We must expresse the classical 4th order material tensors in this contravariant 
 > On a surface, we have: $a^{αβ}$ = inv($a_{αβ}$)
 > To change from covariant to contravariant frame, Tensors.jl defines this inverse for any `inv(A::SymmetricTensor{2,2})`.
 
-## 5. Examples
+## 6. Examples
 
 ### 5.1 Patch test
 
@@ -330,7 +393,7 @@ following.
 
 The singularity: At $u=0$ (flat), $z$-DOFs have zero stiffness so $K_\text{eff}$ is singular. A small initial $z$-perturbation satisfying the BCs is required.
 
-## 6. Kirchhoff–Love Limitations on Curved Shells
+## 7. Kirchhoff–Love Limitations on Curved Shells
 
 ### 6.1 The C⁰ continuity problem
 

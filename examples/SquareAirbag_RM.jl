@@ -3,7 +3,7 @@ using ForwardDiff
 using LinearAlgebra
 using Printf
 using WriteVTK
-
+using TimerOutputs
 # Square airbag: flat square plate [0,L]×[0,L], simply-supported at edges (u_z=0, φ=0),
 # inflated by follower pressure. Quarter-domain symmetry model [0,L/2]×[0,L/2].
 # Reissner–Mindlin (5 DOF/node) with geometrically exact Rodrigues directors.
@@ -31,32 +31,32 @@ function make_quarter_pillow_grid(n; L=1.0)
     return grid
 end
 
-# Follower pressure residual for the RM 5-DOF interleaved layout.
-function assemble_pressure_RM!(re, scv, u_e, p)
-    T = eltype(u_e)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    for qp in 1:getnquadpoints(scv)
-        w = scv.qr.weights[qp]
-        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-        for I in 1:n_nodes
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-            Δa₁ += u_I * scv.dNdξ[I, qp][1]
-            Δa₂ += u_I * scv.dNdξ[I, qp][2]
-        end
-        a₁ = scv.A₁[qp] + Δa₁
-        a₂ = scv.A₂[qp] + Δa₂
-        n_w = cross(a₁, a₂)
-        for I in 1:n_nodes
-            @views re[5I-4:5I-2] .+= p * scv.N[I, qp] * n_w * w
-        end
-    end
-end
+# # Follower pressure residual for the RM 5-DOF interleaved layout.
+# function assemble_pressure_RM!(re, scv, u_e, p)
+#     T = eltype(u_e)
+#     n_nodes = getnbasefunctions(scv.ip_shape)
+#     for qp in 1:getnquadpoints(scv)
+#         w = scv.qr.weights[qp]
+#         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+#         for I in 1:n_nodes
+#             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+#             Δa₁ += u_I * scv.dNdξ[I, qp][1]
+#             Δa₂ += u_I * scv.dNdξ[I, qp][2]
+#         end
+#         a₁ = scv.A₁[qp] + Δa₁
+#         a₂ = scv.A₂[qp] + Δa₂
+#         n_w = cross(a₁, a₂)
+#         for I in 1:n_nodes
+#             @views re[5I-4:5I-2] .+= p * scv.N[I, qp] * n_w * w
+#         end
+#     end
+# end
 
-# Load-stiffness K_pres = ∂F_p/∂u via ForwardDiff (for unit pressure p=1).
-function assemble_pressure_tangent_RM!(ke, scv, u_e, p)
-    pressure_res(u) = (re = zeros(eltype(u), length(u)); assemble_pressure_RM!(re, scv, u, p); re)
-    ke .+= ForwardDiff.jacobian(pressure_res, u_e)
-end
+# # Load-stiffness K_pres = ∂F_p/∂u via ForwardDiff (for unit pressure p=1).
+# function assemble_pressure_tangent_RM!(ke, scv, u_e, p)
+#     pressure_res(u) = (re = zeros(eltype(u), length(u)); assemble_pressure_RM!(re, scv, u, p); re)
+#     ke .+= ForwardDiff.jacobian(pressure_res, u_e)
+# end
 
 # Assemble K_int, R_int, K_pres and F_p (all for unit pressure p=1) in one cell loop.
 function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
@@ -72,12 +72,12 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = shelldofs(cell)
         u_e = u[sd]
-        membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        membrane_residuals_RM!(re_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
-        assemble_pressure_RM!(re_p, scv, u_e, 1.0)
-        assemble_pressure_tangent_RM!(ke_p, scv, u_e, 1.0)
+        @timeit "membrane tangent" membrane_tangent_RM!(ke_i, scv, u_e, mat)
+        @timeit "membrane residual" membrane_residuals_RM!(re_i, scv, u_e, mat)
+        @timeit "bending tangent" bending_tangent_RM!(ke_i, scv, u_e, mat)
+        @timeit "bending residual" bending_residuals_RM!(re_i, scv, u_e, mat)
+        @timeit "pressure tangent" assemble_pressure!(re_p, scv, u_e, 1.0)
+        @timeit "pressure residual" assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
         assemble!(asm_i, sd, ke_i, re_i)
         assemble!(asm_p, sd, ke_p)
         F_p[sd] .+= re_p
@@ -136,8 +136,11 @@ N = ndofs(dh)
 
 K_int  = allocate_matrix(dh)
 K_pres = allocate_matrix(dh)
+K_eff  = allocate_matrix(dh)   # preallocated; values updated in-place each Newton step
 r_int  = zeros(N)
 F_p    = zeros(N)
+v1     = zeros(N)
+v2     = zeros(N)
 
 println("Square airbag RM (Q9, n=$n, p_max=$p_max, Δw=$(round(Δw;digits=4)) m)")
 println("  step |    p    | w_center | iters")
@@ -146,27 +149,39 @@ pvd = paraview_collection("square_airbag")
 
 # Use a let block so that p and u are unambiguously local (avoids Julia soft-scope warning
 # when assigning to variables that also exist at global scope).
+reset_timer!()
 let u = zeros(N), p = 0.0
     VTKGridFile("square_airbag-0", dh) do vtk
         write_solution(vtk, dh, u); pvd[0.0] = vtk
     end
+
+    # Initialise symbolic LU factorisation from the linearised system at u=0, p=0.
+    # lu!(F_lu, K) reuses this symbolic analysis (sparsity pattern) and only redoes
+    # the numeric phase, which is the dominant cost for Newton on a fixed mesh.
+    @timeit "assembly" assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
+    K_eff.nzval .= K_int.nzval
+    let rhs_dummy = zeros(N); apply_zero!(K_eff, rhs_dummy, ch); end
+    F_lu = lu(K_eff)
 
     for step in 1:n_steps
         w_target = step * Δw
 
         converged = false; n_iter = 0
         for iter in 1:max_iter
-            assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
-            K_eff = K_int - p * K_pres
-            rhs1  = p .* F_p .- r_int          # −R(u,p): negative equilibrium residual
+            @timeit "assembly" assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
+            # Update K_eff values in-place (same sparsity pattern as K_int and K_pres).
+            K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval
+            rhs1 = p .* F_p .- r_int           # −R(u,p): negative equilibrium residual
             apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
             if norm(rhs1) < tol && abs(u[w_center_dof] - w_target) < tol
                 converged = true; n_iter = iter - 1; break
             end
             n_iter = iter
-            K_fact = lu(K_eff)
-            v1 = K_fact \ rhs1   # equilibrium correction (free DOFs correct due to BC structure)
-            v2 = K_fact \ F_p    # load-direction vector  (free DOF solution is correct)
+            @timeit "linear solve" begin
+                @timeit "lu " lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
+                @timeit "ldiv!-1" ldiv!(v1, F_lu, rhs1)   # equilibrium correction
+                @timeit "ldiv!-2" ldiv!(v2, F_lu, F_p)    # load-direction vector
+            end
             δp = (w_target - u[w_center_dof] - v1[w_center_dof]) / v2[w_center_dof]
             u .+= v1 .+ δp .* v2
             p  += δp
@@ -185,5 +200,5 @@ let u = zeros(N), p = 0.0
         p ≥ p_max && (@printf("  Reached p_max = %.1f at step %d (w = %.4f m).\n", p_max, step, u[w_center_dof]); break)
     end
 end
-
-vtk_save(pvd)
+vtk_save(pvd);
+print_timer(title = "Analysis with $(getncells(grid)) elements", linechars = :ascii)

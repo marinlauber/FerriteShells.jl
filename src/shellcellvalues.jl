@@ -14,7 +14,7 @@ On reinit!(scv, x):
    - Computes reference metric A_metric and curvature tensor B
    - Computes the area-weighted integration weight detJdV
 """
-struct ShellCellValues{QR, IPG, IPS, T <: AbstractFloat} <: AbstractCellValues
+struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure} <: AbstractCellValues
     qr       :: QR
     ip_geo   :: IPG
     ip_shape :: IPS
@@ -40,7 +40,7 @@ Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 @propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_geo)
 
-function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation)
+function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; E=GreenLagrangeStrain)
     n_qp    = length(qr.weights)
     n_shape = getnbasefunctions(ip_shape)
     T       = Float64
@@ -58,7 +58,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         end
     end
 
-    ShellCellValues(
+    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, E}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2,
         zeros(T, n_qp),
@@ -100,5 +100,4 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃[q]        = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
         scv.B[q]         = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
-    return nothing
 end

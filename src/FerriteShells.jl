@@ -8,11 +8,16 @@ using Base: @propagate_inbounds
 
 import Ferrite: reinit!
 
+abstract type AbstractStrainMeasure end
+struct LinearStrain <: AbstractStrainMeasure end
+struct GreenLagrangeStrain <: AbstractStrainMeasure end
+export LinearStrain, GreenLagrangeStrain
+
 include("shellcellvalues.jl")
 export ShellCellValues
 
 include("kinematics.jl")
-export kinematics
+export kinematics, kinematics_strains
 
 include("material.jl")
 export LinearElastic, contravariant_elasticity

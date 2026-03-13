@@ -21,8 +21,9 @@ Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·n_nodes:
 function membrane_residuals_KL!(re, scv, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
-        E = 0.5 * (a_metric - A_metric)
+        # a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
+        # E = 0.5 * (a_metric - A_metric)
+        a₁, a₂, E = kinematics_strains(scv, qp, u_e)
         N = contravariant_elasticity(mat, A_metric) ⊡ E
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
@@ -42,8 +43,9 @@ Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·n_nodes.
 function membrane_tangent_KL!(ke, scv, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
-        E = 0.5 * (a_metric - A_metric)
+        # a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
+        # E = 0.5 * (a_metric - A_metric)
+        a₁, a₂, E = kinematics_strains(scv, qp, u_e)
         C = contravariant_elasticity(mat, A_metric)
         N = C ⊡ E
         dΩ = scv.detJdV[qp]

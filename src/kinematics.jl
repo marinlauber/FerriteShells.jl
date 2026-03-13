@@ -24,12 +24,7 @@ function kinematics(scv, qp, u_e::AbstractVector{T}) where T
     return a₁, a₂, scv.A_metric[qp], a_metric
 end
 
-
-abstract type AbstractStrainMeasure end
-struct LinearStrain <: AbstractStrainMeasure end
-struct GreenLagrangeStrain <: AbstractStrainMeasure end
-
-@inline function kinematics_strains(scv::ShellCellValues{QR, IPG, IPS, T, E}, qp, u_e) where E<:LinearStrain
+@inline function kinematics_strains(scv::ShellCellValues{QR,IPG,IPS,T,E}, qp, u_e) where {QR,IPG,IPS,T,E<:LinearStrain}
     n_nodes = getnbasefunctions(scv.ip_shape)
     Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
     for i in 1:n_nodes
@@ -39,9 +34,10 @@ struct GreenLagrangeStrain <: AbstractStrainMeasure end
     end
     a₁ = scv.A₁[qp] + Δa₁
     a₂ = scv.A₂[qp] + Δa₂
-    return a₁, a₂, SymmetricTensor{2,2,T}((dot(scv.A₁[qp],Δa₁), dot(scv.A₁[qp],Δa₂), dot(scv.A₂[qp],Δa₂)))
+    e12 = 0.5 * (dot(scv.A₁[qp],Δa₂) + dot(scv.A₂[qp],Δa₁))
+    return a₁, a₂, SymmetricTensor{2,2,T}((dot(scv.A₁[qp],Δa₁), e12, dot(scv.A₂[qp],Δa₂)))
 end
-@inline function kinematics_strains(scv::ShellCellValues{QR, IPG, IPS, T, E}, qp, u_e) where E<:GreenLagrangeStrain
+@inline function kinematics_strains(scv::ShellCellValues{QR,IPG,IPS,T,E}, qp, u_e) where {QR,IPG,IPS,T,E<:GreenLagrangeStrain}
     n_nodes = getnbasefunctions(scv.ip_shape)
     Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
     for i in 1:n_nodes
