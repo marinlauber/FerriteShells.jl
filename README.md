@@ -23,17 +23,21 @@ non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 `Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 MITC |  |   | :construction_worker:
 
-## 1. `ShellCellValues`
+> [!WARNING]
+> Kirchhoff-Love shells with $C^0$ continuity between elements is very ill-posed, it works in some specific case with small deformations and spefici boundary cindtions, I would suggest using the Reissner-Mindlin shell instead.
 
-Since most weak forms use in shell analysis are specified by specializing the classical weak form to the curvilinear system of the mid-plane of the shell, classical continuum mechanics quantities, such as the deformation gradient tensor $\bf{F}$ change when expressed in curvilinear coordinates.
-To help assemble these specific quantities, this package provides a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but hold covariant basis vector, metric tensors and surface Jacobian at the integration points.
+### `ShellCellValues`
+
+Since most weak forms used in shell analysis are specified by specializing the classical weak form to the curvilinear system of the mid-plane of the shell, classical continuum mechanics quantities, such as the deformation gradient tensor $\bf{F}$ change when expressed in curvilinear coordinates.
+To help assemble these specific quantities, this package provides a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but hold covariant basis vector, metric tensors and surface Jacobian at the integration points, which are used in the assembly of the different terms in the different formulations.
+
 ```julia
 struct ShellCellValues <: AbstractCellValues
     ...
 end
 ```
 
-## 2. Kinemtiics
+### Kinematics
 
 ```julia
 for qp in 1:getnquadpoints(scv)
@@ -47,21 +51,21 @@ end
 > [!WARNING]
 > For now, the residual and consistent tangent construction use `ForwardDiff.gradient` and `ForwardDiff.hessian`, so simplify implementation. This will be slow on large meshes (>1000 elements), in the future explicit expressions should replace those. Medium term, we can start with the membrane term only for the Reissner-Mindlin shell.
 
-## Authors
+### Authors
 
 - Marin Lauber, Delft University of Technology, The Netherlands.
 
-## Contributing
+### Contributing
 
 We are always looking for contributions and help with FerriteShells. If you
 have ideas, nice applications or code contributions then we would be happy to
 help you get them included. We ask you to follow the FerriteShells git
 workflow.
 
-## Issues and Support
+## #Issues and Support
 
 Please use the GitHub issue tracker to report any issues.
 
-## License
+### License
 
 FerriteShells is released under the MIT License. See the [LICENSE](LICENSE) file for details.
