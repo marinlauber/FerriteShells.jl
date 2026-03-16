@@ -107,6 +107,33 @@ end
           FerriteShells.rm_bending_shear_energy(u_pert, scv, mat) rtol=1e-8
 end
 
+@testset "ForwardDiff and explicit residuals/tangent" begin
+    mat   = LinearElastic(1.0e6, 0.3, 0.01)
+    scv   = make_rm_scv()
+    reinit!(scv, X_Q9_UNIT_RM)
+    n_dof = 45   # 9 nodes × 5 DOFs
+    # test that the implicit ForwardDiff implemntation of the residuals and the tangent
+    # membrane term is the same for the RM shell
+    re_fd = zeros(n_dof)
+    re_impl = zeros(n_dof)
+    Random.seed!(42)
+    u_pert = zeros(n_dof)
+    for I in 1:9
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
+        u_pert[5I-1] = 1e-3 * randn()
+        u_pert[5I  ] = 1e-3 * randn()
+    end
+    membrane_residuals_RM!(re_fd, scv, u_pert, mat)
+    FerriteShells.membrane_residuals_RM_impl!(re_impl, scv, u_pert, mat)
+    @test norm(re_fd .- re_impl) / (norm(re_impl) + 1e-14) < 1e-12
+    # same for tangent
+    Ke_fd = zeros(n_dof, n_dof)
+    Ke_impl = zeros(n_dof, n_dof)
+    membrane_tangent_RM!(Ke_fd, scv, u_pert, mat)
+    FerriteShells.membrane_tangent_RM_impl!(Ke_impl, scv, u_pert, mat)
+    @test norm(Ke_fd .- Ke_impl) / (norm(Ke_impl) + 1e-14) < 1e-12
+end
+
 @testset "RM membrane patch test" begin
     nodes_p = [Vec{3}(( 0.0,  0.0, 0.0)), Vec{3}((10.0,  0.0, 0.0)),
                Vec{3}((10.0, 10.0, 0.0)), Vec{3}(( 0.0, 10.0, 0.0)),

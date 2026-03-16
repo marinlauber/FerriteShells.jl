@@ -21,7 +21,17 @@ Classical RM (additive director, ‖**d**‖≠1) is not implemented; the `_RM` 
 
 ### Kirchhoff-Love / Koiter shell
 
-### Reissner-Minlin / Nagdhi shell
+The Kirchhoff-Love kinematic assumption
+$$
+\Phi(\xi^1,\xi^2,\xi^3) = \phi(\xi^1,\xi^2) + \xi^3\vec{a}_3(\xi^1,\xi^2)
+$$
+
+### Reissner-Mindlin / Naghdi shell
+
+The Reissner-Mindlin kinematic assumption
+$$
+\Phi(\xi^1,\xi^2,\xi^3) = \phi(\xi^1,\xi^2) + \xi^3\theta^\lambda(\xi^1,\xi^2) \vec{a}_\lambda(\xi^1,\xi^2)
+$$
 
 ### 1.1 Element choice
 
@@ -30,18 +40,18 @@ RM without MITC (mixed interpolation) or reduced integration suffers from shear 
 For Reissner-Mindlin you can use Q4 (`Lagrange{RefQuadrilateral, 1}()`) the Q8/Q9 choice only matters when you have thin-shell bending-dominated problems with small $t/h$.
 
 For a flat plate, the RM shear constraint (zero shear = Kirchhoff limit) requires:
-\[
-γ₁ = φ₁ + ∂u₃/∂x = 0
-γ₂ = φ₂ + ∂u₃/∂y = 0
-\]
+$$
+\gamma_1 = \psi_1 + \frac{∂ u_3}{∂ x} = 0
+\gamma_2 = \psi_2 + \frac{∂ u_3}{∂ y} = 0
+$$
 Q4 (bilinear):
-- $u₃ ∈ {1, x, y, xy}$ → $∂u₃/∂x ∈ {1, y}$ (only constant + linear-in-y)
-- $φ₁ ∈ {1, x, y, xy}$ — has 4 DOFs, but must match $∂u₃/∂x$ which has no x-dependence
-- The xy term in $φ₁$ can't be independently absorbed — it couples to the bending modes and over-constrains them
+- $u_3 ∈ {1, x, y, xy}$ → $∂u_3/∂x ∈ {1, y}$ (only constant + linear-in-y)
+- $\psi_1 ∈ {1, x, y, xy}$ — has 4 DOFs, but must match $∂u_3/∂x$ which has no x-dependence
+- The xy term in $\psi_1$ can't be independently absorbed — it couples to the bending modes and over-constrains them
 
 Q8 (serendipity, quadratic): https://defelement.org/elements/examples/quadrilateral-lagrange-equispaced-2.html
-- $u₃ ∈ {1, x, y, xy, x², y², x²y, xy²}$ → $∂u₃/∂x ∈ {1, y, x, y², xy, x²}$ — much richer
-- $φ₁$ also quadratic, so both sides of $φ₁ + ∂u₃/∂x = 0$ live in the same polynomial space
+- $u_3 ∈ {1, x, y, xy, x², y², x²y, xy²}$ → $∂u₃/∂x ∈ {1, y, x, y², xy, x²}$ — much richer
+- $\psi_1$ also quadratic, so both sides of $\psi_1 + ∂u₃/∂x = 0$ live in the same polynomial space
 - The constraint can be satisfied approximately without locking the bending modes
 
 For a cantilever under tip load, the exact solution has $u₃ \sim x²(3L-x)$ (cubic) and $φ \sim x(L - x/2)$ (quadratic). Q4 can only represent linear variation within each element so the Kirchhoff constraint produces large spurious shear energy. Q8 can represent quadratic within each element, so it matches the constraint far more accurately.
@@ -222,32 +232,32 @@ The key: virtual work is a scalar
 
 The internal virtual work is a scalar contraction in the covariant frame:
 
-\[
+$$
 δW_\text{int} = ∫ S^{αβ} δE_{αβ} dA  +  ∫ M^{αβ} δκ_{αβ} dA
-\]
+$$
 where $S^{αβ}$ and $M^{αβ}$ are contravariant stress/moment resultants, and $E_{αβ}$, $κ_{αβ}$ are covariant strain/curvature measures. The double contraction is
 coordinate-invariant — it gives the same scalar regardless of frame.
 
 Where the "frame" lives
 
 The DOFs $\bm{u}$ are Cartesian displacements. The covariant strains are functions of those Cartesian DOFs:
-\[
+$$
 E_{αβ} = E_{αβ}(\bm{u}),   κ_{αβ} = κ_{αβ}(\bm{u})
-\]
+$$
 The nodal residual force is the derivative of the scalar energy $W$ w.r.t. each Cartesian DOF:
-\[
+$$
 r_{I,i} = ∂W/∂u_{I,i} = ∫ S^{αβ}  (∂E_{αβ}/∂u_{I,i})  dA
-\]
+$$
 The chain rule is the back-transformation.
 
 For the membrane, $\partial E_{αβ}/\partial u_{I,i}$ expands via the chain rule through the covariant base vectors:
-\[
+$$
 \partial E_{αβ}/\partial u_{I,i} = ½ (g_α · eᵢ · N_{I,β}  +  g_β · eᵢ · N_{I,α})
-\]
+$$
 where $g_α = ∂x/∂ξ^α$ are the Cartesian components of the surface tangents. Contracting with $S^{αβ}$ gives:
-\[
+$$
 r_{I,i} = ∫ (S^{αβ} g_α)ᵢ · N_{I,β} dA
-\]
+$$
 The factor $S^{αβ} g_α$ is the Cauchy stress vector expressed in Cartesian coordinates — the base vectors $g_α$ carry the covariant-to-Cartesian map. No explicit rotation matrix is ever applied; the geometry of the surface (encoded in $g_α$) provides the transformation automatically.
 For the bending terms, ForwardDiff.gradient differentiates the scalar bending energy with respect to the flat Cartesian DOF vector, which gives the same result algorithmically.
 
@@ -269,18 +279,18 @@ The covariant quantities are intermediate values in a scalar energy computation.
 
 Residual for node I:
 
-\[
+$$
 R_I = \int \partial_\alpha N_I \, N_{\alpha\beta} \, a_\beta \, dA
-\]
+$$
 
 
 #### 3.1.2 Consistent Tangent Derivation
 
 Residual linearization:
 
-\[
+$$
 \delta R_I = \int \partial_\alpha N_I ( \delta N_{\alpha\beta} a_\beta + N_{\alpha\beta} \delta a_\beta ) dA
-\]
+$$
 
 - **Material stiffness**: $δN_{αβ} a_β$ term
 - **Geometric stiffness**: $N_{αβ} δa_β$ term
@@ -350,9 +360,10 @@ Linear elastic pure membrane problem.
 
 The ODE formulation:
 Differentiating the equilibrium constraint $R_\text{int}(u) = p \cdot F(u)$ w.r.t. the load parameter $p$:
-\[
+
+$$
 K_\text{eff} \cdot \frac{du}{dp} = F(u)
-\]
+$$
 
 where $K_\text{eff} = K_\text{membrane}(u) - K_\text{pressure\_tangent}(u, p)$. This is a first-order ODE in $u$ with $p$ as "time" — exactly what OrdinaryDiffEq solves. No Newton iterations needed; the ODE solver handles the path
 following.
@@ -365,7 +376,9 @@ The singularity: At $u=0$ (flat), $z$-DOFs have zero stiffness so $K_\text{eff}$
 
 The current KL bending implementation computes the curvature change as
 
-$$\kappa_{\alpha\beta} = b_{\alpha\beta} - B_{\alpha\beta}$$
+$$
+\kappa_{\alpha\beta} = b_{\alpha\beta} - B_{\alpha\beta}
+$$
 
 where $b_{\alpha\beta} = \mathbf{x}_{,\alpha\beta} \cdot \mathbf{n}$ and $B_{\alpha\beta} = \mathbf{X}_{,\alpha\beta} \cdot \mathbf{N}$ are the current and reference second fundamental forms, computed from the within-element second derivatives of position.
 This is mathematically correct inside each element. The problem is inter-element continuity.
@@ -408,11 +421,15 @@ Instead of computing $\kappa_{\alpha\beta}$ pointwise from $u_{3,\alpha\beta}$, 
 
 Alternatively, the mixed (Hellinger–Reissner) formulation introduces the moment tensor $M_{\alpha\beta}$ as an independent field and rewrites the energy:
 
-$$W = \int \left( M_{\alpha\beta} \kappa_{\alpha\beta} - \tfrac{1}{2} M_{\alpha\beta} D^{-1}_{\alpha\beta\gamma\delta} M_{\gamma\delta} \right) dA$$
+$$
+W = \int \left( M_{\alpha\beta} \kappa_{\alpha\beta} - \tfrac{1}{2} M_{\alpha\beta} D^{-1}_{\alpha\beta\gamma\delta} M_{\gamma\delta} \right) dA
+$$
 
 Integration by parts shifts the second derivative from $u_3$ onto $M$:
 
-$$\int M_{\alpha\beta} \kappa_{\alpha\beta} \, dA = \int M_{\alpha\beta,\beta} \, u_{3,\alpha} \, dA - [\text{boundary terms}]$$
+$$
+\int M_{\alpha\beta} \kappa_{\alpha\beta} \, dA = \int M_{\alpha\beta,\beta} \, u_{3,\alpha} \, dA - [\text{boundary terms}]
+$$
 
 Now only first derivatives of $u_3$ appear — $C^0$ is sufficient. The cost is extra DOFs for $M_{\alpha\beta}$ and a saddle-point system that must satisfy an inf-sup condition.
 
@@ -424,3 +441,309 @@ NURBS basis functions are globally $C^{p-1}$ continuous for degree $p$. Quadrati
 - No special element formulation needed
 
 The main challenge is multi-patch coupling at $C^0$ or $C^1$ junctions, which requires additional constraint enforcement.
+
+
+### Reissner–Mindlin / Naghdi Shell: Explicit Residual Derivation
+---
+1. Reference geometry
+The shell midsurface is parameterized by convective coordinates (ξ¹, ξ²). The reference configuration is:
+Covariant base vectors:
+$$\mathbf{A}_\alpha = \frac{\partial \mathbf{X}}{\partial \xi^\alpha}, \quad \alpha = 1,2$$
+
+Reference unit normal (director):
+$$\mathbf{G}_3 = \frac{\mathbf{A}_1 \times \mathbf{A}_2}{|\mathbf{A}_1 \times \mathbf{A}_2|}$$
+
+Reference metric:
+$$A_{\alpha\beta} = \mathbf{A}_\alpha \cdot \mathbf{A}_\beta, \quad A = \det(A_{\alpha\beta}), \quad \sqrt{A} = |\mathbf{A}_1
+\times \mathbf{A}_2|$$
+
+Contravariant base vectors $\mathbf{A}^\alpha$ defined by $\mathbf{A}^\alpha \cdot \mathbf{A}_\beta = \delta^\alpha_\beta$, with
+contravariant metric $A^{\alpha\beta} = \mathbf{A}^\alpha \cdot \mathbf{A}^\beta = (A_{\alpha\beta})^{-1}$.
+
+Reference second fundamental form:
+$$B_{\alpha\beta} = \mathbf{G}_3 \cdot \mathbf{A}_{\alpha,\beta}$$
+
+Note: $\mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} = -B_{\alpha\beta}$ (follows from differentiating $\mathbf{A}_\alpha \cdot
+\mathbf{G}_3 = 0$).
+
+---
+2. Kinematic assumption
+
+The 3D position of a material point in the deformed body:
+$$\mathbf{x}(\xi^1, \xi^2, \xi^3) = \underbrace{\mathbf{X}(\xi^1,\xi^2) + \mathbf{u}(\xi^1,\xi^2)}_{\boldsymbol{\varphi}:
+\text{ deformed midsurface}} + \xi^3 \mathbf{d}(\xi^1,\xi^2)$$
+
+with $\xi^3 \in [-h/2, h/2]$ the through-thickness coordinate.
+
+Assumptions:
+- Straight fiber: The fiber through each midsurface point remains straight after deformation (no warping).
+- Inextensible director: $|\mathbf{d}| = 1$ — the fiber does not stretch through the thickness ($E_{33} = 0$).
+- Independent director: $\mathbf{d}$ is independent of $\mathbf{u}$ — it has its own DOFs (the rotations $\phi_1, \phi_2$).
+This is what distinguishes RM/Naghdi from Kirchhoff–Love.
+
+The reference body is parameterized by:
+$$\mathbf{X}(\xi^1,\xi^2,\xi^3) = \mathbf{X}(\xi^1,\xi^2) + \xi^3 \mathbf{G}_3(\xi^1,\xi^2)$$
+
+---
+3. Deformed geometry
+
+Deformed midsurface base vectors:
+$$\mathbf{a}_\alpha = \frac{\partial \boldsymbol{\varphi}}{\partial \xi^\alpha} = \mathbf{A}_\alpha + \mathbf{u}_{,\alpha}$$
+
+3D deformed covariant base vectors:
+$$\mathbf{g}_\alpha = \frac{\partial \mathbf{x}}{\partial \xi^\alpha} = \mathbf{a}_\alpha + \xi^3 \mathbf{d}_{,\alpha}, \qquad
+\mathbf{g}_3 = \frac{\partial \mathbf{x}}{\partial \xi^3} = \mathbf{d}$$
+
+Reference 3D base vectors:
+$$\mathbf{G}_\alpha = \mathbf{A}_\alpha + \xi^3 \mathbf{G}_{3,\alpha} \qquad \mathbf{G}_3$$
+
+---
+4. Green–Lagrange strains and shell truncation
+
+The 3D Green–Lagrange strain components in the convected frame:
+$$2E_{ij} = \mathbf{g}_i \cdot \mathbf{g}_j - \mathbf{G}_i \cdot \mathbf{G}_j$$
+
+In-plane components ($\alpha,\beta = 1,2$):
+
+$$2E_{\alpha\beta} = \mathbf{g}_\alpha \cdot \mathbf{g}_\beta - \mathbf{G}_\alpha \cdot \mathbf{G}_\beta$$
+$$= (\mathbf{a}_\alpha + \xi^3 \mathbf{d}_{,\alpha}) \cdot (\mathbf{a}_\beta + \xi^3 \mathbf{d}_{,\beta}) - (\mathbf{A}_\alpha +
+\xi^3 \mathbf{G}_{3,\alpha}) \cdot (\mathbf{A}_\beta + \xi^3 \mathbf{G}_{3,\beta})$$
+$$= \underbrace{(a_{\alpha\beta} - A_{\alpha\beta})}{\text{order 1}} + \xi^3 \underbrace{(\mathbf{a}_\alpha \cdot
+\mathbf{d}_{,\beta} + \mathbf{a}_\beta \cdot \mathbf{d}_{,\alpha} - \mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} - \mathbf{A}_\beta
+\cdot \mathbf{G}_{3,\alpha})}{\text{order } \xi^3} + \underbrace{(\xi^3)^2(\mathbf{d}_{,\alpha} \cdot \mathbf{d}_{,\beta} -
+\mathbf{G}_{3,\alpha} \cdot \mathbf{G}_{3,\beta})}_{\text{neglected}}$$
+
+Assumption: Truncate at $(\xi^3)^1$ — the Love–Kirchhoff hypothesis on the strain field (not on kinematics). Valid for $h \ll
+R$ (radius of curvature) and $h \ll L$ (characteristic length).
+
+This gives the shell strain decomposition:
+
+$$2E_{\alpha\beta} \approx 2\varepsilon_{\alpha\beta} + 2\xi^3 \kappa_{\alpha\beta}$$
+
+with:
+
+$$\boxed{\varepsilon_{\alpha\beta} = \tfrac{1}{2}(a_{\alpha\beta} - A_{\alpha\beta})}$$
+
+$$\boxed{\kappa_{\alpha\beta} = \tfrac{1}{2}(\mathbf{a}_\alpha \cdot \mathbf{d}_{,\beta} + \mathbf{a}_\beta \cdot
+\mathbf{d}_{,\alpha}) - \tfrac{1}{2}(\mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} + \mathbf{A}_\beta \cdot
+\mathbf{G}_{3,\alpha})}$$
+
+Using $\mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} = -B_{\alpha\beta}$:
+$$\kappa_{\alpha\beta} = \tfrac{1}{2}(\mathbf{a}\alpha \cdot \mathbf{d}{,\beta} + \mathbf{a}\beta \cdot \mathbf{d}{,\alpha}) -
+B_{\alpha\beta}$$
+
+Verification: at the reference state $\mathbf{d} = \mathbf{G}_3$, $\mathbf{a}_\alpha = \mathbf{A}_\alpha$: $\kappa_{\alpha\beta} =
+\frac{1}{2}(\mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} + \mathbf{A}_\beta \cdot \mathbf{G}_{3,\alpha}) - B_{\alpha\beta} =
+-B_{\alpha\beta} - B_{\alpha\beta}/... $
+
+Wait — more carefully: $\frac{1}{2}(\mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} + \mathbf{A}_\beta \cdot \mathbf{G}_{3,\alpha}) =
+\frac{1}{2}(-B_{\alpha\beta} - B_{\beta\alpha}) = -B_{\alpha\beta}$. So $\kappa_{\alpha\beta}|\text{ref} = -B_{\alpha\beta} -
+B_{\alpha\beta}$... this is not zero?
+
+This is the sign convention issue. The formula $-B_{\alpha\beta}$ in scv.B corresponds to $B_{\alpha\beta}^\text{code} =
+-B_{\alpha\beta}^\text{standard}$, so with the code convention $\kappa = 0$ at reference. For this derivation, take
+$B_{\alpha\beta}$ as defined by $\kappa_{\alpha\beta}|_\text{ref} = 0$, i.e.:
+
+$$\kappa_{\alpha\beta} = \tfrac{1}{2}(\mathbf{a}_\alpha \cdot \mathbf{d}_{,\beta} + \mathbf{a}_\beta \cdot \mathbf{d}_{,\alpha}) -
+B_{\alpha\beta}, \qquad B_{\alpha\beta} \equiv \tfrac{1}{2}(\mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta} + \mathbf{A}_\beta
+\cdot \mathbf{G}_{3,\alpha}) = \mathbf{A}_\alpha \cdot \mathbf{G}_{3,\beta}$$
+Transverse shear components ($E_{\alpha 3}$):
+
+$$2E_{\alpha 3} = \mathbf{g}_\alpha \cdot \mathbf{g}_3 - \mathbf{G}_\alpha \cdot \mathbf{G}_3$$
+$$= (\mathbf{a}_\alpha + \xi^3 \mathbf{d}_{,\alpha}) \cdot \mathbf{d} - (\mathbf{A}_\alpha + \xi^3 \mathbf{G}_{3,\alpha}) \cdot
+\mathbf{G}_3$$
+
+Using $|\mathbf{d}|=1 \Rightarrow \mathbf{d} \cdot \mathbf{d}_{,\alpha} = 0$, and $|\mathbf{G}_3|=1 \Rightarrow \mathbf{G}_3
+\cdot \mathbf{G}_{3,\alpha}=0$, and $\mathbf{A}_\alpha \cdot \mathbf{G}_3 = 0$:
+
+$$\boxed{\gamma_\alpha \equiv 2E_{\alpha 3} = \mathbf{a}_\alpha \cdot \mathbf{d}}$$
+
+Verification: at reference: $\gamma_\alpha|\text{ref} = \mathbf{A}_\alpha \cdot \mathbf{G}_3 = 0$ ✓
+
+Thickness strain $E_{33} = \frac{1}{2}(\mathbf{d}\cdot\mathbf{d} - \mathbf{G}_3\cdot\mathbf{G}_3) = \frac{1}{2}(1-1) = 0$ by
+director inextensibility.
+
+---
+5. Constitutive law and stress resultants
+
+Plane stress ($S^{33} = 0$), linear elastic. The second Piola–Kirchhoff stress resultants are obtained by integrating through
+the thickness.
+
+Contravariant elasticity tensor (plane stress, in the covariant basis):
+
+$$\mathbb{C}^{\alpha\beta\gamma\delta} = \frac{E\nu}{1-\nu^2} A^{\alpha\beta}A^{\gamma\delta} +
+\frac{E}{2(1+\nu)}\left(A^{\alpha\gamma}A^{\beta\delta} + A^{\alpha\delta}A^{\beta\gamma}\right)$$
+
+Membrane force resultant ($t$-integrated):
+$$N^{\alpha\beta} = t \mathbb{C}^{\alpha\beta\gamma\delta} \varepsilon_{\gamma\delta}$$
+
+Bending moment resultant ($t^3/12$-integrated):
+$$M^{\alpha\beta} = \frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta} \kappa_{\gamma\delta}$$
+
+Transverse shear resultant (with shear correction $\kappa_s = 5/6$):
+$$Q^\alpha = \kappa_s \frac{Et}{2(1+\nu)} A^{\alpha\beta} \gamma_\beta$$
+
+Note that all resultants are contravariant — they pair naturally with the covariant strain variations
+$\delta\varepsilon_{\alpha\beta}$, $\delta\kappa_{\alpha\beta}$, $\delta\gamma_\alpha$.
+
+---
+6. Virtual work and residual
+
+The internal virtual work for a displacement variation $\delta\mathbf{u}$ and director variation $\delta\mathbf{d}$:
+
+$$\delta W_\text{int} = \int_\Omega \left[ N^{\alpha\beta} \delta\varepsilon_{\alpha\beta} + M^{\alpha\beta}
+\delta\kappa_{\alpha\beta} + Q^\alpha \delta\gamma_\alpha \right] \sqrt{A} d\Omega$$
+
+The residual is $\delta W_\text{int} - \delta W_\text{ext} = 0$ for all admissible variations.
+
+Discretize with shape functions $N_I(\xi^1,\xi^2)$:
+$$\mathbf{u} = \sum_I N_I \mathbf{u}_I, \qquad \mathbf{d} = \sum_I N_I \mathbf{d}_I(\boldsymbol{\phi}_I)$$
+
+where $\mathbf{d}_I$ is the director at node $I$ parametrized by rotations $\boldsymbol{\phi}_I = (\phi_1^I, \phi_2^I)$ via
+Rodrigues (Section 8). The residual at node $I$ splits into a displacement part and a rotation part.
+
+---
+7. Variations of strain measures
+
+Variation of $\varepsilon_{\alpha\beta}$ w.r.t. displacement:
+
+$$\delta\varepsilon_{\alpha\beta} = \tfrac{1}{2}(\delta a_{\alpha\beta}) = \tfrac{1}{2}(\delta\mathbf{a}\alpha \cdot
+\mathbf{a}\beta + \mathbf{a}\alpha \cdot \delta\mathbf{a}\beta)$$
+
+Since $\delta\mathbf{a}\alpha = \delta\mathbf{u}{,\alpha} = \sum_I N_{I,\alpha} \delta\mathbf{u}_I$:
+
+$$\delta^{(I)}\varepsilon_{\alpha\beta} = \tfrac{1}{2}(N_{I,\alpha} \mathbf{a}\beta + N{I,\beta} \mathbf{a}_\alpha) \cdot
+\frac{\delta\mathbf{u}_I}{|\delta\mathbf{u}_I|}$$
+
+(as a 3-vector contribution in the $\delta\mathbf{u}I$ direction). $\varepsilon{\alpha\beta}$ does not depend on
+$\boldsymbol{\phi}$.
+
+Variation of $\kappa_{\alpha\beta}$ w.r.t. displacement (holding $\mathbf{d}$ fixed):
+
+$$\delta_u \kappa_{\alpha\beta}^{(I)} = \tfrac{1}{2}(N_{I,\alpha} \mathbf{d}{,\beta} + N{I,\beta} \mathbf{d}_{,\alpha}) \cdot
+\delta\mathbf{u}_I$$
+
+Variation of $\kappa_{\alpha\beta}$ w.r.t. rotation at node $I$ (holding $\mathbf{a}_\alpha$ fixed):
+
+$$\delta_\phi \kappa_{\alpha\beta}^{(I)} = \tfrac{1}{2}(\mathbf{a}\alpha \cdot \delta\mathbf{d}{,\beta} + \mathbf{a}\beta
+\cdot \delta\mathbf{d}{,\alpha})$$
+
+with $\delta\mathbf{d}{,\beta} = N{I,\beta} \frac{\partial \mathbf{d}_I}{\partial \phi_r} \delta\phi_r^I$ (variation of the
+interpolated director gradient).
+
+$$\delta_\phi \kappa_{\alpha\beta}^{(I)} = \tfrac{1}{2}(N_{I,\alpha} \mathbf{a}\beta + N{I,\beta} \mathbf{a}_\alpha) \cdot
+\frac{\partial \mathbf{d}_I}{\partial \phi_r} \delta\phi_r^I$$
+
+(using symmetry).
+
+Variation of $\gamma_\alpha$ w.r.t. displacement:
+$$\delta_u \gamma_\alpha^{(I)} = N_{I,\alpha} , \mathbf{d} \cdot \delta\mathbf{u}_I$$
+
+Variation of $\gamma_\alpha$ w.r.t. rotation at node $I$:
+$$\delta_\phi \gamma_\alpha^{(I)} = \mathbf{a}_\alpha \cdot N_I \frac{\partial \mathbf{d}_I}{\partial \phi_r} \delta\phi_r^I$$
+
+---
+8. Explicit residuals
+
+Displacement residual (3-vector at node $I$):
+
+Substituting the variations into $\delta W_\text{int}$ and collecting terms at $\delta\mathbf{u}_I$:
+
+$$\mathbf{r}I^u = \int\Omega \left[ N^{\alpha\beta} \tfrac{1}{2}(N_{I,\alpha}\mathbf{a}\beta + N{I,\beta}\mathbf{a}\alpha) +
+M^{\alpha\beta} \tfrac{1}{2}(N{I,\alpha}\mathbf{d}{,\beta} + N{I,\beta}\mathbf{d}{,\alpha}) + Q^\alpha N{I,\alpha} \mathbf{d}
+\right] \sqrt{A} , d\Omega$$
+
+Using the symmetry of $N^{\alpha\beta}$ and $M^{\alpha\beta}$ (both equal their transposes), each pair of terms collapses:
+
+$$\boxed{\mathbf{r}I^u = \int\Omega N_{I,\alpha} \left[ N^{\alpha\beta} \mathbf{a}\beta + M^{\alpha\beta} \mathbf{d}{,\beta} +
+Q^\alpha \mathbf{d} \right] \sqrt{A} , d\Omega}$$
+
+(summed over $\alpha$ and $\beta$). This is a 3-vector. Define the shell stress vector:
+
+$$\mathbf{S}^\alpha \equiv N^{\alpha\beta} \mathbf{a}\beta + M^{\alpha\beta} \mathbf{d}{,\beta} + Q^\alpha \mathbf{d}$$
+
+Then $\mathbf{r}I^u = \int\Omega N_{I,\alpha} \mathbf{S}^\alpha \sqrt{A} , d\Omega$ — a divergence form identical in structure
+to the membrane-only case, but now $\mathbf{S}^\alpha$ carries bending and shear contributions through $\mathbf{d}_{,\beta}$
+and $\mathbf{d}$.
+
+Rotation residual (scalar at node $I$, for rotation $\phi_r$, $r=1,2$):
+
+Collecting terms at $\delta\phi_r^I$:
+
+$$r_I^{\phi_r} = \int_\Omega \left[ M^{\alpha\beta} N_{I,\alpha} \mathbf{a}\beta + Q^\alpha N_I \mathbf{a}\alpha \right] \cdot
+\frac{\partial \mathbf{d}_I}{\partial \phi_r} \sqrt{A} , d\Omega$$
+
+Define the moment vector at the quadrature point:
+$$\mathbf{m}I \equiv N{I,\alpha} M^{\alpha\beta} \mathbf{a}\beta + N_I Q^\alpha \mathbf{a}\alpha$$
+
+Then:
+$$\boxed{r_I^{\phi_r} = \int_\Omega \mathbf{m}_I \cdot \frac{\partial \mathbf{d}_I}{\partial \phi_r} \sqrt{A} , d\Omega}$$
+
+The quantity $\partial \mathbf{d}_I / \partial \phi_r$ is the director tangent — it depends only on the Rodrigues
+parametrisation at node $I$ and is derived next.
+
+---
+9. Rodrigues director tangent
+
+The director at node $I$ (dropping node subscript):
+
+$$\mathbf{d} = \cos\theta , \mathbf{G}_3 + \text{sinc}(\theta)(\phi_1 \mathbf{T}_1 + \phi_2 \mathbf{T}_2), \qquad \theta =
+\sqrt{\phi_1^2 + \phi_2^2}$$
+
+where $\text{sinc}(\theta) = \sin\theta/\theta$ (with $\text{sinc}(0) = 1$).
+
+Define for brevity: $c \equiv \cos\theta$, $\sigma \equiv \sin\theta/\theta$, $\mathbf{v} \equiv \phi_1\mathbf{T}_1 +
+\phi_2\mathbf{T}_2$.
+
+Differentiating with respect to $\phi_r$ (using $\partial\theta/\partial\phi_r = \phi_r/\theta$):
+
+$$\frac{\partial c}{\partial \phi_r} = -\sin\theta \cdot \frac{\phi_r}{\theta} = -\sigma \phi_r$$
+
+$$\frac{\partial \sigma}{\partial \phi_r} = \frac{c - \sigma}{\theta^2} \phi_r$$
+
+$$\frac{\partial \mathbf{d}}{\partial \phi_r} = -\sigma \phi_r , \mathbf{G}_3 + \frac{c - \sigma}{\theta^2} \phi_r ,
+\mathbf{v} + \sigma , \mathbf{T}_r$$
+
+$$\boxed{\frac{\partial \mathbf{d}}{\partial \phi_r} = \sigma , \mathbf{T}_r + \phi_r \left[ \frac{c - \sigma}{\theta^2} ,
+\mathbf{v} - \sigma , \mathbf{G}_3 \right]}$$
+
+Limit at $\theta \to 0$: Using Taylor expansions $c \to 1$, $\sigma \to 1$, $(c-\sigma)/\theta^2 \to -1/3$:
+$$\left.\frac{\partial \mathbf{d}}{\partial \phi_r}\right|_{\phi=0} = \mathbf{T}_r$$
+
+As expected: an infinitesimal rotation $\delta\phi_r$ tilts $\mathbf{G}_3$ toward $\mathbf{T}_r$.
+
+---
+10. Summary
+
+The full RM/Naghdi residual at node $I$ is:
+
+┌──────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│         DOF          │                                             Residual                                             │
+├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ $\mathbf{u}_I$       │ $\mathbf{r}I^u = \int\Omega N_{I,\alpha} \left( N^{\alpha\beta} \mathbf{a}\beta +                │
+│ (3-vector)           │ M^{\alpha\beta} \mathbf{d}{,\beta} + Q^\alpha \mathbf{d} \right) \sqrt{A} , d\Omega$             │
+├──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ $\phi_r^I$ (scalar,  │ $r_I^{\phi_r} = \int_\Omega \left( N_{I,\alpha} M^{\alpha\beta} \mathbf{a}\beta + N_I Q^\alpha   │
+│ $r=1,2$)             │ \mathbf{a}\alpha \right) \cdot \dfrac{\partial \mathbf{d}_I}{\partial \phi_r} \sqrt{A} ,         │
+│                      │ d\Omega$                                                                                         │
+└──────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Inputs needed at each quadrature point — all available from ShellCellValues and the current solution:
+
+┌───────────────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────┐
+│                     Quantity                      │                               Source                                │
+├───────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+│ $N_{I,\alpha}$, $N_I$                             │ scv.dNdξ, scv.N                                                     │
+├───────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+│ $\mathbf{a}\alpha = \mathbf{A}\alpha +            │ scv.A₁/A₂ + $\sum_I N_{I,\alpha} \mathbf{u}_I$                      │
+│ \mathbf{u}_{,\alpha}$                             │                                                                     │
+├───────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+│ $\mathbf{d}$, $\mathbf{d}_{,\alpha}$              │ interpolated from nodal $\mathbf{d}_I(\boldsymbol{\phi}_I)$         │
+├───────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+│ $N^{\alpha\beta}$, $M^{\alpha\beta}$, $Q^\alpha$  │ constitutive law applied to $\varepsilon_{\alpha\beta}$,            │
+│                                                   │ $\kappa_{\alpha\beta}$, $\gamma_\alpha$                             │
+├───────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+│ $\partial\mathbf{d}_I/\partial\phi_r$             │ Rodrigues formula above                                             │
+└───────────────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────┘
+
+Nothing here requires ForwardDiff — every term is an explicit expression in the current displacement and rotation DOFs.

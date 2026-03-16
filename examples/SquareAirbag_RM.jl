@@ -31,33 +31,6 @@ function make_quarter_pillow_grid(n; L=1.0)
     return grid
 end
 
-# # Follower pressure residual for the RM 5-DOF interleaved layout.
-# function assemble_pressure_RM!(re, scv, u_e, p)
-#     T = eltype(u_e)
-#     n_nodes = getnbasefunctions(scv.ip_shape)
-#     for qp in 1:getnquadpoints(scv)
-#         w = scv.qr.weights[qp]
-#         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-#         for I in 1:n_nodes
-#             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-#             Δa₁ += u_I * scv.dNdξ[I, qp][1]
-#             Δa₂ += u_I * scv.dNdξ[I, qp][2]
-#         end
-#         a₁ = scv.A₁[qp] + Δa₁
-#         a₂ = scv.A₂[qp] + Δa₂
-#         n_w = cross(a₁, a₂)
-#         for I in 1:n_nodes
-#             @views re[5I-4:5I-2] .+= p * scv.N[I, qp] * n_w * w
-#         end
-#     end
-# end
-
-# # Load-stiffness K_pres = ∂F_p/∂u via ForwardDiff (for unit pressure p=1).
-# function assemble_pressure_tangent_RM!(ke, scv, u_e, p)
-#     pressure_res(u) = (re = zeros(eltype(u), length(u)); assemble_pressure_RM!(re, scv, u, p); re)
-#     ke .+= ForwardDiff.jacobian(pressure_res, u_e)
-# end
-
 # Assemble K_int, R_int, K_pres and F_p (all for unit pressure p=1) in one cell loop.
 function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
     n_e = ndofs_per_cell(dh)

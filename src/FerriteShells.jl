@@ -25,9 +25,9 @@ export LinearElastic, contravariant_elasticity
 include("assembly.jl")
 export membrane_residuals_KL!, membrane_tangent_KL!, bending_residuals_KL!, bending_tangent_KL!
 export membrane_residuals_RM!, membrane_tangent_RM!, bending_residuals_RM!, bending_tangent_RM!
+export assemble_pressure!, assemble_pressure_tangent!, assemble_traction!, apply_pointload!
 
 include("utils.jl")
-export shell_grid, shelldofs, assemble_traction!, apply_pointload!
-export assemble_pressure!, assemble_pressure_tangent!
+export shell_grid, shelldofs, get_ferrite_grid
 
 end # module FerriteShells
