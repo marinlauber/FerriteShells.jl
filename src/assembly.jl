@@ -134,63 +134,6 @@ function rm_membrane_energy(u_flat, scv, mat)
 end
 
 """
-Reissner–Mindlin bending + transverse shear strain energy.
-DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vector of length 5·n_nodes).
-
-Director parametrization: d_I = G₃ + φ₁_I·T₁ + φ₂_I·T₂
-where G₃ is the reference unit normal and T₁, T₂ are reference tangents from scv.
-
-Bending strain:  κ_{αβ} = ½(a_α·d,β + a_β·d,α) - B_{αβ}
-Transverse shear: γ_α = a_α·d
-
-Shear correction factor κ_s = 5/6 is applied.
-"""
-function rm_bending_shear_energy(u_flat, scv, mat)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    W = zero(T)
-    for qp in 1:getnquadpoints(scv)
-        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-        for I in 1:n_nodes
-            dN  = scv.dNdξ[I, qp]
-            u_I = Vec{3,T}((u_flat[5I-4], u_flat[5I-3], u_flat[5I-2]))
-            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
-        end
-        a₁ = scv.A₁[qp] + Δa₁
-        a₂ = scv.A₂[qp] + Δa₂
-        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
-        d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
-        for I in 1:n_nodes
-            φ₁  = u_flat[5I-1]; φ₂ = u_flat[5I]
-            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
-            cosθ, sincθ = _cos_sinc_sq(θ²)
-            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
-            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
-            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
-            d  += scv.N[I, qp]      * d_I
-            d₁ += scv.dNdξ[I, qp][1] * d_I
-            d₂ += scv.dNdξ[I, qp][2] * d_I
-        end
-        B   = scv.B[qp]
-        κ₁₁ = dot(a₁, d₁) - B[1,1]
-        κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
-        κ₂₂ = dot(a₂, d₂) - B[2,2]
-        κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
-        γ₁  = dot(a₁, d)
-        γ₂  = dot(a₂, d)
-        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
-        Aup  = inv(scv.A_metric[qp])
-        G_sh = mat.E / (2*(1 + mat.ν))
-        κ_s  = 5.0/6.0
-        W_bend  = 0.5 * (κ ⊡ D ⊡ κ)
-        W_shear = 0.5 * κ_s * G_sh * mat.thickness *
-                  (Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
-        W += (W_bend + W_shear) * scv.detJdV[qp]
-    end
-    return W
-end
-
-"""
     membrane_residuals_RM!(re, scv, u_e, mat)
 
 Reissner–Mindlin membrane residual. `u_e` is a flat vector of length 5·n_nodes.
@@ -269,12 +212,112 @@ function membrane_tangent_RM_impl!(ke, scv, u_e::AbstractVector{T}, mat) where T
 end # 19.969 μs (0 allocations: 0 bytes) on a 45x45 matrix (50x speedup)
 
 """
+Reissner–Mindlin bending + transverse shear strain energy.
+DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vector of length 5·n_nodes).
+
+Director parametrization: d_I = G₃ + φ₁_I·T₁ + φ₂_I·T₂
+where G₃ is the reference unit normal and T₁, T₂ are reference tangents from scv.
+
+Bending strain:  κ_{αβ} = ½(a_α·d,β + a_β·d,α) - B_{αβ}
+Transverse shear: γ_α = a_α·d
+
+Shear correction factor κ_s = 5/6 is applied.
+"""
+function rm_bending_shear_energy(u_flat, scv, mat)
+    T       = eltype(u_flat)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    W = zero(T)
+    for qp in 1:getnquadpoints(scv)
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            dN  = scv.dNdξ[I, qp]
+            u_I = Vec{3,T}((u_flat[5I-4], u_flat[5I-3], u_flat[5I-2]))
+            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁
+        a₂ = scv.A₂[qp] + Δa₂
+        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
+        d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            φ₁  = u_flat[5I-1]; φ₂ = u_flat[5I]
+            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
+            cosθ, sincθ = _cos_sinc_sq(θ²)
+            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
+            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
+            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
+            d  += scv.N[I, qp]      * d_I
+            d₁ += scv.dNdξ[I, qp][1] * d_I
+            d₂ += scv.dNdξ[I, qp][2] * d_I
+        end
+        B   = scv.B[qp]
+        κ₁₁ = dot(a₁, d₁) - B[1,1]
+        κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
+        κ₂₂ = dot(a₂, d₂) - B[2,2]
+        κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
+        γ₁  = dot(a₁, d)
+        γ₂  = dot(a₂, d)
+        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        Aup  = inv(scv.A_metric[qp])
+        G_sh = mat.E / (2*(1 + mat.ν))
+        κ_s  = 5.0/6.0
+        W_bend  = 0.5 * (κ ⊡ D ⊡ κ)
+        W_shear = 0.5 * κ_s * G_sh * mat.thickness *
+                  (Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
+        W += (W_bend + W_shear) * scv.detJdV[qp]
+    end
+    return W
+end
+
+"""
     bending_residuals_RM!(re, scv, u_e, mat)
 
 Reissner–Mindlin bending + transverse shear residual. `u_e` is a flat vector of length 5·n_nodes.
 """
 function bending_residuals_RM!(re, scv, u_e, mat)
     re .+= ForwardDiff.gradient(u -> rm_bending_shear_energy(u, scv, mat), u_e)
+end
+function bending_residuals_RM_impl!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat::AbstractMaterial) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            dN  = scv.dNdξ[I, qp]
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁
+        a₂ = scv.A₂[qp] + Δa₂
+        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
+        d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            φ₁  = u_e[5I-1]; φ₂ = u_e[5I]
+            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
+            cosθ, sincθ = _cos_sinc_sq(θ²)
+            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
+            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
+            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
+            d  += scv.N[I, qp]      * d_I
+            d₁ += scv.dNdξ[I, qp][1] * d_I
+            d₂ += scv.dNdξ[I, qp][2] * d_I
+        end
+        B   = scv.B[qp]
+        κ₁₁ = dot(a₁, d₁) - B[1,1]
+        κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
+        κ₂₂ = dot(a₂, d₂) - B[2,2]
+        κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
+        γ₁  = dot(a₁, d)
+        γ₂  = dot(a₂, d)
+        γ   = SymmetricTensor{2,2,T}((γ₁, 0.0, γ₂))
+        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        Aup  = inv(scv.A_metric[qp])
+        G_sh = mat.E / (2*(1 + mat.ν))
+        κ_s  = 5.0/6.0
+        for I in 1:n_nodes
+            # bending ans shear term
+            v = 0.5 * D ⊡ κ + 0.5 * κ_s * G_sh * mat.thickness * (Aup ⊡ γ)
+            @views res[5I-4:5I-2] .+= v * dΩ
+        end
+    end
 end
 
 """
@@ -284,6 +327,49 @@ Reissner–Mindlin bending + transverse shear tangent. `u_e` is a flat vector of
 """
 function bending_tangent_RM!(ke, scv, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> rm_bending_shear_energy(u, scv, mat), u_e)
+end
+function bending_tangent_RM_impl!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat::AbstractMaterial) where T
+    @warn "not implemented"
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            dN  = scv.dNdξ[I, qp]
+            u_I = Vec{3,T}((u_flat[5I-4], u_flat[5I-3], u_flat[5I-2]))
+            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁
+        a₂ = scv.A₂[qp] + Δa₂
+        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
+        d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            φ₁  = u_flat[5I-1]; φ₂ = u_flat[5I]
+            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
+            cosθ, sincθ = _cos_sinc_sq(θ²)
+            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
+            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
+            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
+            d  += scv.N[I, qp]      * d_I
+            d₁ += scv.dNdξ[I, qp][1] * d_I
+            d₂ += scv.dNdξ[I, qp][2] * d_I
+        end
+        B   = scv.B[qp]
+        κ₁₁ = dot(a₁, d₁) - B[1,1]
+        κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
+        κ₂₂ = dot(a₂, d₂) - B[2,2]
+        κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
+        γ₁  = dot(a₁, d)
+        γ₂  = dot(a₂, d)
+        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        for I in 1:n_nodes
+            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
+            for J in 1:n_nodes
+                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
+                # Kmat +=
+                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= Kmat * dΩ
+            end
+        end
+    end
 end
 
 """
