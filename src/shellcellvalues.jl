@@ -14,7 +14,7 @@ On reinit!(scv, x):
    - Computes reference metric A_metric and curvature tensor B
    - Computes the area-weighted integration weight detJdV
 """
-struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure} <: AbstractCellValues
+struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure, M} <: AbstractCellValues
     qr       :: QR
     ip_geo   :: IPG
     ip_shape :: IPS
@@ -32,15 +32,15 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure}
     T₁       :: Vector{Vec{3, T}}
     T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
+    mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
 end
-export ShellCellValues
 
 Ferrite.getdetJdV(scv::ShellCellValues, q::Int) = scv.detJdV[q]
 Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 @propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_geo)
 
-function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; E=GreenLagrangeStrain)
+function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; E=GreenLagrangeStrain, mitc=nothing)
     n_qp    = length(qr.weights)
     n_shape = getnbasefunctions(ip_shape)
     T       = Float64
@@ -58,7 +58,8 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         end
     end
 
-    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, E}(
+    m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
+    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, E, typeof(m)}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2,
         zeros(T, n_qp),
@@ -72,6 +73,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp),
         fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
+        m
     )
 end
 
@@ -100,4 +102,5 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃[q]        = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
         scv.B[q]         = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
+    reinit!(scv.mitc, scv.ip_geo, x)
 end

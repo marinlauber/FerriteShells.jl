@@ -2,6 +2,7 @@
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+FerriteGmsh = "4f95f4f8-b27c-4ae5-9a39-ea55e634e36b"
 FerriteMeshParser = "0f8c756f-80dd-4a75-85c6-b0a5ab9d4620"
 FerriteShells = "39bd9e63-70f9-4eb3-975d-f599ce62130a"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"

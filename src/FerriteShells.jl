@@ -13,6 +13,9 @@ struct LinearStrain <: AbstractStrainMeasure end
 struct GreenLagrangeStrain <: AbstractStrainMeasure end
 export LinearStrain, GreenLagrangeStrain
 
+include("mitc.jl")
+export AbstractMITC, NoMITC, MITC, MITC9
+
 include("shellcellvalues.jl")
 export ShellCellValues
 

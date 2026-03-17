@@ -18,7 +18,7 @@ end
 
 Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
 """
-function membrane_residuals_KL!(re, scv, u_e, mat)
+function membrane_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
@@ -39,7 +39,7 @@ end
 
 Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
 """
-function membrane_tangent_KL!(ke, scv, u_e, mat)
+function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂, A_metric, a_metric = kinematics(scv, qp, u_e)
@@ -75,7 +75,7 @@ Curvature change κ_{αβ} = b_{αβ} - B_{αβ} (current minus reference second
 Requires Q2+ elements for full κ (Q4 only captures twist κ₁₂).
 `u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
 """
-function bending_energy_KL(u_flat, scv, mat)
+function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     u_e     = [Vec{3,T}((u_flat[3i-2], u_flat[3i-1], u_flat[3i])) for i in 1:n_nodes]
@@ -99,11 +99,11 @@ function bending_energy_KL(u_flat, scv, mat)
     return W
 end
 
-function bending_residuals_KL!(re, scv, u_e, mat)
+function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
 end
 
-function bending_tangent_KL!(ke, scv, u_e, mat)
+function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> bending_energy_KL(u, scv, mat), u_e)
 end
 
@@ -112,7 +112,7 @@ Reissner–Mindlin membrane strain energy.
 DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vector of length 5·n_nodes).
 Only the displacement DOFs (indices 5I-4:5I-2) contribute to membrane energy.
 """
-function rm_membrane_energy(u_flat, scv, mat)
+function rm_membrane_energy(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
@@ -418,7 +418,7 @@ cross(a₁, a₂) already has magnitude ‖a₁ × a₂‖ (current area per par
 multiplying by w integrates over the parameter domain
 """
 # Follower pressure residual
-function assemble_pressure!(re, scv, u_e, p)
+function assemble_pressure!(re, scv::ShellCellValues, u_e, p)
     T = eltype(u_e)
     n_nodes = getnbasefunctions(scv.ip_shape)
     ndofs_per_node = length(u_e) ÷ n_nodes
@@ -444,7 +444,7 @@ end
 # Load-stiffness K_pres = ∂F_p/∂u via ForwardDiff (for unit pressure p=1).
 # `K_IJ^p = p * ∂(a₁ × a₂)/∂u_J * N_I`
 """
-function assemble_pressure_tangent!(ke, scv, u_e, p)
+function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e, p)
     pressure_residual(u) = (re = zeros(eltype(u), length(u)); assemble_pressure!(re, scv, u, p); re)
     ke .+= ForwardDiff.jacobian(pressure_residual, u_e)
 end

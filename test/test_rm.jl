@@ -24,14 +24,14 @@ end
 
 function rm_residual(scv, u5, mat)
     re = zeros(length(u5))
-    membrane_residuals_RM!(re, scv, u5, mat)
+    FerriteShells.membrane_residuals_RM_impl!(re, scv, u5, mat)
     bending_residuals_RM!(re, scv, u5, mat)
     return re
 end
 
 function rm_tangent_mat(scv, u5, mat)
     ke = zeros(length(u5), length(u5))
-    membrane_tangent_RM!(ke, scv, u5, mat)
+    FerriteShells.membrane_tangent_RM_impl!(ke, scv, u5, mat)
     bending_tangent_RM!(ke, scv, u5, mat)
     return ke
 end
@@ -170,7 +170,7 @@ end
     for cell in CellIterator(dh_p)
         fill!(re_p, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u_e = u_ex[celldofs(cell)]
-        membrane_residuals_RM!(re_p, scv_p, u_e, mat_p)
+        FerriteShells.membrane_residuals_RM_impl!(re_p, scv_p, u_e, mat_p)
         bending_residuals_RM!(re_p, scv_p, u_e, mat_p)
         r_p[celldofs(cell)] .+= re_p
     end
@@ -187,7 +187,7 @@ end
     for cell in CellIterator(dh_p)
         fill!(ke_p, 0.0); fill!(re_p2, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u0 = zeros(ndofs_per_cell(dh_p))
-        membrane_tangent_RM!(ke_p, scv_p, u0, mat_p)
+        FerriteShells.membrane_tangent_RM_impl!(ke_p, scv_p, u0, mat_p)
         bending_tangent_RM!(ke_p, scv_p, u0, mat_p)
         assemble!(asmb_p, celldofs(cell), ke_p, re_p2)
     end
@@ -244,7 +244,7 @@ end
     for cell in CellIterator(dh_b)
         fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
         x = getcoordinates(cell); u0 = zeros(n_el_b)
-        membrane_tangent_RM!(ke_b, scv_b, u0, mat_b)
+        FerriteShells.membrane_tangent_RM_impl!(ke_b, scv_b, u0, mat_b)
         bending_tangent_RM!(ke_b, scv_b, u0, mat_b)
         assemble!(asmb_b, celldofs(cell), ke_b, re_b)
     end
@@ -300,7 +300,7 @@ end
     # 1. Membrane residual is exactly zero (membrane energy depends only on stretch,
     #    which is zero at u=0 by construction).
     re_mem = zeros(45)
-    membrane_residuals_RM!(re_mem, scv, zeros(45), mat)
+    FerriteShells.membrane_residuals_RM_impl!(re_mem, scv, zeros(45), mat)
     @test norm(re_mem) ≤ 1e-12
 
     # 2. Initial bending/shear residual is small: O(h²/R) per unit shear stiffness.
@@ -370,7 +370,7 @@ end
             reinit!(scv_h, cell)
             x   = getcoordinates(cell)
             u_e = zeros(n_el)
-            membrane_tangent_RM!(ke, scv_h, u_e, mat_h)
+            FerriteShells.membrane_tangent_RM_impl!(ke, scv_h, u_e, mat_h)
             bending_tangent_RM!(ke, scv_h, u_e, mat_h)
             assemble!(asmb, shelldofs(cell), ke, re)
             # z-body force in interleaved layout; scatter via shelldofs mapping

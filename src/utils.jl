@@ -51,7 +51,24 @@ using OrderedCollections
 
 Loads the `*.inp` file into ferrite an return the `Grid`
 """
-function get_ferrite_grid(fname; T=Float64)
+# Reverse the winding order of a shell element from CW to CCW (or vice versa).
+# Permutation: corners 1,2,3,4 → 1,4,3,2; edge midpoints follow their new corners.
+@inline function _flip_shell_nodes!(ns::Vector{Int})
+    N = length(ns)
+    if N == 3        # Tri3: swap 2↔3
+        ns[2], ns[3] = ns[3], ns[2]
+    elseif N == 4    # Quad4: swap 2↔4
+        ns[2], ns[4] = ns[4], ns[2]
+    elseif N == 6    # Tri6: swap 2↔3, 4↔6
+        ns[2], ns[3] = ns[3], ns[2]; ns[4], ns[6] = ns[6], ns[4]
+    elseif N == 8    # Quad8 (serendipity): swap 2↔4, 5↔8, 6↔7
+        ns[2], ns[4] = ns[4], ns[2]; ns[5], ns[8] = ns[8], ns[5]; ns[6], ns[7] = ns[7], ns[6]
+    elseif N == 9    # Quad9: swap 2↔4, 5↔8, 6↔7; node 9 (centre) unchanged
+        ns[2], ns[4] = ns[4], ns[2]; ns[5], ns[8] = ns[8], ns[5]; ns[6], ns[7] = ns[7], ns[6]
+    end
+end
+
+function get_ferrite_grid(fname; T=Float64, orient=true)
     #INP file format
     @assert endswith(fname,".inp") "file type not supported"
     fs = open(fname)
@@ -82,6 +99,15 @@ function get_ferrite_grid(fname; T=Float64)
             nodes = parse.(Int,split(line,",")[2:end])
             # this returns the index, so it maps to the correct first node
             face_nodes = [findfirst(==(node),node_idx) for node in nodes]
+            if orient && length(face_nodes) >= 3
+                # Use first two corners and corner 3 (tri) or 4 (quad) to detect winding.
+                # If A₁×A₂ points in −z, element is CW → flip to CCW so G₃ = +ê_z.
+                x1 = points[face_nodes[1]]; x2 = points[face_nodes[2]]
+                x3 = points[face_nodes[length(face_nodes) >= 4 ? 4 : 3]]
+                if ((x2-x1) × (x3-x1))[3] < 0
+                    _flip_shell_nodes!(face_nodes)
+                end
+            end
             push!(faces, ntuple(i->face_nodes[i], length(face_nodes))) # parse the face
         elseif BlockType == Val{:ElSetBlock}()
             # push!(set, parse.(Int64,split(line,",")[1]))
