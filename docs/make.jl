@@ -1,4 +1,7 @@
-using Documenter, FerriteShells
+using Documenter, DocumenterCitations
+using FerriteShells
+
+bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"), style=:numeric)
 
 makedocs(
     modules = [FerriteShells],
@@ -7,14 +10,22 @@ makedocs(
         prettyurls=get(ENV, "CI", nothing) == "true",
         canonical="https://FerriteShells.github.io/FerriteShells.jl/",
         assets=String[],
-        mathengine = MathJax3()
+        mathengine = mathengine = MathJax3(Dict(
+            :loader => Dict("load" => ["[tex]/physics"]),
+            :tex => Dict(
+                "inlineMath" => [["\$","\$"], ["\\(","\\)"]],
+                "tags" => "ams",
+                "packages" => ["base", "ams", "autoload", "physics"])
+            )
+        )
     ),
     authors = "Marin Lauber",
     pages = Any[
         "Introduction"      => "index.md",
-        "Formulations"      => "formulations.md",
+        "Formulations"      => "shell.md",
         "API reference"     => "reference/index.md",
-    ]
+    ],
+    plugins=[bib]
 )
 
 deploydocs(
