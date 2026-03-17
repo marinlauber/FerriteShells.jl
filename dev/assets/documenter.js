@@ -35,7 +35,7 @@ window.MathJax = {
       "base",
       "ams",
       "autoload",
-      "mhchem"
+      "physics"
     ],
     "inlineMath": [
       [
@@ -48,6 +48,11 @@ window.MathJax = {
       ]
     ],
     "tags": "ams"
+  },
+  "loader": {
+    "load": [
+      "[tex]/physics"
+    ]
   },
   "options": {
     "ignoreHtmlClass": "tex2jax_ignore",
