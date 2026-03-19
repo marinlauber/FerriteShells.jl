@@ -1,5 +1,4 @@
 using FerriteShells
-using ForwardDiff
 using LinearAlgebra
 using Printf
 using WriteVTK
@@ -40,26 +39,34 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
     asm_p = start_assemble(K_pres)
     fill!(F_p, 0.0)
     for cell in CellIterator(dh)
-        fill!(ke_i, 0.0); fill!(re_i, 0.0)
-        fill!(ke_p, 0.0); fill!(re_p, 0.0)
-        reinit!(scv, cell)
-        sd  = shelldofs(cell)
-        u_e = u[sd]
-        @timeit "membrane tangent" membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        @timeit "membrane residual" membrane_residuals_RM!(re_i, scv, u_e, mat)
-        @timeit "bending tangent" bending_tangent_RM!(ke_i, scv, u_e, mat)
-        @timeit "bending residual" bending_residuals_RM!(re_i, scv, u_e, mat)
-        @timeit "pressure tangent" assemble_pressure!(re_p, scv, u_e, 1.0)
-        @timeit "pressure residual" assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
-        assemble!(asm_i, sd, ke_i, re_i)
-        assemble!(asm_p, sd, ke_p)
-        F_p[sd] .+= re_p
+        @timeit "reinit" begin
+            fill!(ke_i, 0.0); fill!(re_i, 0.0)
+            fill!(ke_p, 0.0); fill!(re_p, 0.0)
+            reinit!(scv, cell)
+            sd  = shelldofs(cell)
+            u_e = u[sd]
+        end
+        @timeit "residuals" begin
+            @timeit "membrane residual" FerriteShells.membrane_residuals_RM_explicit!(re_i, scv, u_e, mat)
+            @timeit "bending residual"  FerriteShells.bending_residuals_RM_explicit!(re_i, scv, u_e, mat)
+            @timeit "pressure residual" assemble_pressure!(re_p, scv, u_e, 1.0)
+        end
+        @timeit "tangent" begin
+            @timeit "membrane tangent" FerriteShells.membrane_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+            @timeit "bending tangent"  FerriteShells.bending_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+            @timeit "pressure tangent" assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
+        end
+        @timeit "global assembly" begin
+            assemble!(asm_i, sd, ke_i, re_i)
+            assemble!(asm_p, sd, ke_p)
+            F_p[sd] .+= re_p
+        end
     end
 end
 
-n   = 8
+n   = 16
 L   = 1.0
-mat = LinearElastic(1.0e6, 0.3, 1e-3)
+mat = LinearElastic(1.0e6, 0.3, 1e-2)
 
 grid = make_quarter_pillow_grid(n; L)
 ip   = Lagrange{RefQuadrilateral, 2}()
@@ -99,7 +106,7 @@ end
 # Displacement steps: trace p vs w_center from w=0 up to p=p_max.
 # Membrane theory: w ~ (p·L⁴/(E·t))^(1/3) → at p=500: w ≈ 0.63 m.
 p_max   = 500.0
-w_max   = 0.8         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
+w_max   = 0.65         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
 n_steps = 160
 Δw      = w_max / n_steps   # = 0.005 m = 5·t per step
 tol     = 1e-6
@@ -116,7 +123,7 @@ v1     = zeros(N)
 v2     = zeros(N)
 
 println("Square airbag RM (Q9, n=$n, p_max=$p_max, Δw=$(round(Δw;digits=4)) m)")
-println("  step |    p    | w_center | iters")
+println("  step |    p    | w_center   | iters")
 
 pvd = paraview_collection("square_airbag")
 
@@ -151,7 +158,7 @@ let u = zeros(N), p = 0.0
             end
             n_iter = iter
             @timeit "linear solve" begin
-                @timeit "lu " lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
+                @timeit "lu! " lu!(F_lu, K_eff)           # numeric refactorisation only; reuses symbolic analysis
                 @timeit "ldiv!-1" ldiv!(v1, F_lu, rhs1)   # equilibrium correction
                 @timeit "ldiv!-2" ldiv!(v2, F_lu, F_p)    # load-direction vector
             end
