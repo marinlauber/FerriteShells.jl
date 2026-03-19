@@ -18,6 +18,64 @@ using Printf
 # beyond the radius of convergence of any line search. Displacement control avoids
 # this by keeping the linearisation always at a membrane-dominated inflated state.
 
+function addcustomnodeset!(grid, cellset, name, f)
+    node_indices = Int64[]
+    for cell in cellset
+        for node_idx in cell.nodes
+            f(get_node_coordinate(grid, node_idx)) && push!(node_indices, node_idx)
+        end
+    end
+    addnodeset!(grid, name, unique(node_indices))
+end
+
+using QuadGK
+function bisect(f, θ_lo, θ_hi; tolerance=1e-8)
+    # bisection
+    θ_mid = (θ_lo + θ_hi) / 2 # initial guess
+    while θ_hi - θ_lo > tolerance
+        θ_mid = (θ_lo + θ_hi) / 2
+        f(θ_mid) * f(θ_lo) < 0 ? (θ_hi = θ_mid) : (θ_lo = θ_mid)
+    end
+    return θ_mid
+end
+function find_points(x, y, A, B, L)
+    N = length(x)
+    x_new = similar(x)
+    y_new = similar(y)
+
+    x_min = minimum(x)
+    for i in (1, N)
+        θ = (x[i] - x_min) * π / L
+        x_new[i] = -A * cos(θ)
+        y_new[i] = -B * sin(θ)
+    end
+    lengths = @views sqrt.((x[2:end] .- x[1:end-1]) .^ 2 .+ (y[2:end] .- y[1:end-1]) .^ 2)
+    θ0 = 0.0
+    for i in 1:N-2
+        x0, y0, d = x_new[N-i+1], y_new[N-i+1], lengths[N-i]
+        θ0 = bisect(θ0, π) do θ
+            sqrt((A * cos(θ) - x0)^2 + (B * sin(θ) - y0)^2) - d
+        end
+        x_new[N-i] = A * cos(θ0)
+        y_new[N-i] = B * sin(θ0)
+    end
+    x_new, y_new
+end
+function map_initial(x, y, Ar)
+    L = maximum(x) - minimum(x)
+    # find the minor/major axis that result in this length
+    ds(θ, a) = sqrt(a^2 * sin(θ)^2 + (a / Ar)^2 * cos(θ)^2)
+    function find_a(a)
+        quadgk(θ -> ds(θ, a), 0, π)[1] - L
+    end
+    a0 = bisect(find_a, 0.0, L)
+    a = bisect(0.98 * a0, 1.08 * a0) do a
+        xi, yi = find_points(x, y, a, a / Ar, L)
+        @views sum(sqrt.((xi[2:end] .- xi[1:end-1]) .^ 2 .+ (yi[2:end] .- yi[1:end-1]) .^ 2)) - L
+    end
+    find_points(x, y, a, a / Ar, L)
+end
+
 
 function make_quarter_pillow_grid(n; L=1.0)
     corners = [Vec{2}((0.0, 0.0)), Vec{2}((L/2, 0.0)), Vec{2}((L/2, L/2)), Vec{2}((0.0, L/2))]
@@ -26,6 +84,8 @@ function make_quarter_pillow_grid(n; L=1.0)
     addfacetset!(grid, "sym_x", x -> isapprox(x[1], 0.0, atol=1e-10))
     addfacetset!(grid, "sym_y", x -> isapprox(x[2], 0.0, atol=1e-10))
     addnodeset!(grid, "center", x -> norm(x) < 1e-10)
+    addnodeset!(grid, "target", x -> isapprox(x[1], 0.25, atol=1e-6) && isapprox(x[2], 0.25, atol=1e-6))
+    addcellset!(grid, "all", x -> true)
     return grid
 end
 
@@ -38,6 +98,8 @@ function get_pillow_grid()
     addfacetset!(grid, "sym_x", x -> isapprox(x[1], 0.0, atol=1e-10))
     addfacetset!(grid, "sym_y", x -> isapprox(x[2], 0.0, atol=1e-10))
     addnodeset!(grid, "center", x -> norm(x) < 1e-10)
+    addnodeset!(grid, "target", x -> isapprox(x[1], 0.25, atol=1e-6) && isapprox(x[2], 0.25, atol=1e-6))
+    addcellset!(grid, "all", x -> true)
     return grid
 end
 
@@ -65,21 +127,23 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = shelldofs(cell)
         u_e = u[sd]
-        @timeit "membrane tangent" FerriteShells.membrane_tangent_RM_impl!(ke_i, scv, u_e, mat)
-        @timeit "membrane residual" FerriteShells.membrane_residuals_RM_impl!(re_i, scv, u_e, mat)
-        @timeit "bending tangent" bending_tangent_RM!(ke_i, scv, u_e, mat)
-        @timeit "bending residual" bending_residuals_RM!(re_i, scv, u_e, mat)
-        @timeit "pressure tangent" assemble_pressure!(re_p, scv, u_e, 1.0)
-        @timeit "pressure residual" assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
+        @timeit "membrane tangent" FerriteShells.membrane_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+        @timeit "membrane residual" FerriteShells.membrane_residuals_RM_explicit!(re_i, scv, u_e, mat)
+        @timeit "bending tangent" FerriteShells.bending_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+        @timeit "bending residual" FerriteShells.bending_residuals_RM_explicit!(re_i, scv, u_e, mat)
+        @timeit "pressure residual" assemble_pressure!(re_p, scv, u_e, 1.0)
+        @timeit "pressure tangent" assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
         assemble!(asm_i, sd, ke_i, re_i)
         assemble!(asm_p, sd, ke_p)
         F_p[sd] .+= re_p
     end
 end
 
-mat = LinearElastic(1.0e6, 0.3, 1e-3)
-# grid = make_quarter_pillow_grid(2; L=1.0)
-grid = get_pillow_grid()
+mat = LinearElastic(1.0e5, 0.3, 1e-2)
+grid = make_quarter_pillow_grid(16; L=1.0)
+# grid = get_pillow_grid()
+
+addcustomnodeset!(grid, getcells(grid, "all"), "edge_top", x -> x[1] ≈ 0)
 
 ip   = Lagrange{RefQuadrilateral, 2}()
 qr   = QuadratureRule{RefQuadrilateral}(3)
@@ -90,17 +154,42 @@ add!(dh, :u, ip^3)
 add!(dh, :θ, ip^2)
 close!(dh)
 
+function generate_boundary_function(grid, nodeset)
+    top_nodes = get_node_coordinate.(getnodes(grid, nodeset))
+    idx = sortperm(top_nodes)
+    node_sorted = top_nodes[idx]
+    Ar = 80.2 / 55.2 # from Nienke
+    x, y = getindex.(node_sorted, 1), getindex.(node_sorted, 3)
+    x_new, y_new = map_initial(x, y, Ar)
+    Xs = vcat(x', y'); dXs = vcat(x_new' .- x', y_new' .- y')
+    return function prescribed_u(x, t)
+        idx = findmin(dropdims(sum(abs2, Xs .- [x[1], x[2]], dims=1), dims=1))[2]
+        return min(t,1).*dXs[:, idx] # linear ramp
+    end
+end
+
+prescribed_u_top = generate_boundary_function(grid, "edge_top")
+
 ch = ConstraintHandler(dh)
+# add!(ch, Dirichlet(:u, getfacetset(grid, "edge"),  x -> 0.0, [3]))          # u_z=0 at boundary
+# add!(ch, Dirichlet(:θ, getfacetset(grid, "edge"),  x -> zeros(2), [1,2]))   # φ=0 at boundary
+# add!(ch, Dirichlet(:u, getfacetset(grid, "sym_x"), x -> 0.0, [1]))          # u_x=0 at x=0
+# add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_x"), x -> 0.0, [1]))          # φ₁=0 at x=0 (∂w/∂x=0)
+# add!(ch, Dirichlet(:u, getfacetset(grid, "sym_y"), x -> 0.0, [2]))          # u_y=0 at y=0
+# add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_y"), x -> 0.0, [2]))          # φ₂=0 at y=0 (∂w/∂y=0)
+
+# all edges fixed
 add!(ch, Dirichlet(:u, getfacetset(grid, "edge"),  x -> 0.0, [3]))          # u_z=0 at boundary
+add!(ch, Dirichlet(:u, getfacetset(grid, "sym_x"), x -> 0.0, [3]))          # u_z=0 at boundary
+add!(ch, Dirichlet(:u, getfacetset(grid, "sym_y"), x -> 0.0, [3]))          # u_z=0 at boundary
 add!(ch, Dirichlet(:θ, getfacetset(grid, "edge"),  x -> zeros(2), [1,2]))   # φ=0 at boundary
-add!(ch, Dirichlet(:u, getfacetset(grid, "sym_x"), x -> 0.0, [1]))          # u_x=0 at x=0
-add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_x"), x -> 0.0, [1]))          # φ₁=0 at x=0 (∂w/∂x=0)
-add!(ch, Dirichlet(:u, getfacetset(grid, "sym_y"), x -> 0.0, [2]))          # u_y=0 at y=0
-add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_y"), x -> 0.0, [2]))          # φ₂=0 at y=0 (∂w/∂y=0)
+add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_x"), x -> zeros(2), [1,2]))          # φ₁=0 at x=0 (∂w/∂x=0)
+add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_y"), x -> zeros(2), [1,2]))          # φ₂=0 at y=0 (∂w/∂y=0)
+add!(ch, Dirichlet(:u, getnodeset(grid, "center"), x -> zero(x), [1,2,3]))          # u_z=0 at center node
 close!(ch); Ferrite.update!(ch, 0.0)
 
 # Global DOF index for u_z at the center node (free DOF — used as displacement control).
-center_node = only(getnodeset(grid, "center"))
+center_node = only(getnodeset(grid, "target"))
 w_center_dof = let
     dof = 0
     for cell in CellIterator(dh)
@@ -118,7 +207,7 @@ end
 # Displacement steps: trace p vs w_center from w=0 up to p=p_max.
 # Membrane theory: w ~ (p·L⁴/(E·t))^(1/3) → at p=500: w ≈ 0.63 m.
 p_max   = 500.0
-w_max   = 0.8         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
+w_max   = 0.5         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
 n_steps = 160
 Δw      = w_max / n_steps   # = 0.005 m = 5·t per step
 tol     = 1e-6
@@ -133,9 +222,10 @@ r_int  = zeros(N)
 F_p    = zeros(N)
 v1     = zeros(N)
 v2     = zeros(N)
+u_final = zeros(N)
 
 println("Square airbag RM (Q9, p_max=$p_max, Δw=$(round(Δw;digits=4)) m)")
-println("  step |    p    | w_center | iters")
+println("  step |    p    |  w_center  | iters")
 
 pvd = paraview_collection("square_airbag")
 
@@ -165,19 +255,19 @@ let u = zeros(N), p = 0.0
             K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval
             rhs1 = p .* F_p .- r_int           # −R(u,p): negative equilibrium residual
             apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
-            @show norm(rhs1)
+            # @show norm(rhs1)
             if norm(rhs1) < tol && abs(u[w_center_dof] - w_target) < tol
                 converged = true; n_iter = iter - 1; break
             end
             n_iter = iter
             @timeit "linear solve" begin
-                @timeit "lu " lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
+                @timeit "lu!" lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
                 @timeit "ldiv!-1" ldiv!(v1, F_lu, rhs1)   # equilibrium correction
                 @timeit "ldiv!-2" ldiv!(v2, F_lu, F_p)    # load-direction vector
             end
             δp = (w_target - u[w_center_dof] - v1[w_center_dof]) / v2[w_center_dof]
-            @show δp, w_target, u[w_center_dof]
-            @show v1[w_center_dof], v2[w_center_dof]
+            # @show δp, w_target, u[w_center_dof]
+            # @show v1[w_center_dof], v2[w_center_dof]
             u .+= v1 .+ δp .* v2
             p  += δp
             apply!(u, ch)                       # reset BC DOFs to zero
@@ -194,6 +284,9 @@ let u = zeros(N), p = 0.0
         @printf("  %4d | %7.2f | %8.4e | %d\n", step, p, u[w_center_dof], n_iter)
         p ≥ p_max && (@printf("  Reached p_max = %.1f at step %d (w = %.4f m).\n", p_max, step, u[w_center_dof]); break)
     end
+    u_final .= u
 end
 vtk_save(pvd);
 print_timer(title = "Analysis with $(getncells(grid)) elements", linechars = :ascii)
+# volume of 1/2 the pillow
+vol = compute_volume(dh, scv, u_final)

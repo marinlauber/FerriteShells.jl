@@ -24,14 +24,14 @@ end
 
 function rm_residual(scv, u5, mat)
     re = zeros(length(u5))
-    FerriteShells.membrane_residuals_RM_impl!(re, scv, u5, mat)
+    FerriteShells.membrane_residuals_RM_explicit!(re, scv, u5, mat)
     bending_residuals_RM!(re, scv, u5, mat)
     return re
 end
 
 function rm_tangent_mat(scv, u5, mat)
     ke = zeros(length(u5), length(u5))
-    FerriteShells.membrane_tangent_RM_impl!(ke, scv, u5, mat)
+    FerriteShells.membrane_tangent_RM_explicit!(ke, scv, u5, mat)
     bending_tangent_RM!(ke, scv, u5, mat)
     return ke
 end
@@ -54,8 +54,8 @@ end
     n_dof = 45   # 9 nodes × 5 DOFs
 
     # 1. Zero energy and residual at reference state (u=0, φ=0).
-    @test FerriteShells.rm_membrane_energy(zeros(n_dof), scv, mat) == 0.0
-    @test FerriteShells.rm_bending_shear_energy(zeros(n_dof), scv, mat) == 0.0
+    @test FerriteShells.membrane_energy_RM(zeros(n_dof), scv, mat) == 0.0
+    @test FerriteShells.bending_shear_energy_RM(zeros(n_dof), scv, mat) == 0.0
     @test rm_residual(scv, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
 
     # 2. Tangent FD consistency at a non-trivial displacement.
@@ -84,10 +84,10 @@ end
         u_trans[5I-3] += -1.2
         u_trans[5I-2] += 0.5
     end
-    @test FerriteShells.rm_membrane_energy(u_trans, scv, mat) ≈
-          FerriteShells.rm_membrane_energy(u_pert,  scv, mat) rtol=1e-10
-    @test FerriteShells.rm_bending_shear_energy(u_trans, scv, mat) ≈
-          FerriteShells.rm_bending_shear_energy(u_pert,  scv, mat) rtol=1e-10
+    @test FerriteShells.membrane_energy_RM(u_trans, scv, mat) ≈
+          FerriteShells.membrane_energy_RM(u_pert,  scv, mat) rtol=1e-10
+    @test FerriteShells.bending_shear_energy_RM(u_trans, scv, mat) ≈
+          FerriteShells.bending_shear_energy_RM(u_pert,  scv, mat) rtol=1e-10
 
     # In-plane rotation (about z-axis): rotate both node positions and DOFs.
     θ = π / 7
@@ -101,10 +101,10 @@ end
         # for a z-rotation the in-plane frame rotates too, but since
         # G₃ = ẑ is unchanged the bending/shear energy is frame-invariant.
     end
-    @test FerriteShells.rm_membrane_energy(u_rot, scv_rot, mat) ≈
-          FerriteShells.rm_membrane_energy(u_pert, scv, mat) rtol=1e-8
-    @test FerriteShells.rm_bending_shear_energy(u_rot, scv_rot, mat) ≈
-          FerriteShells.rm_bending_shear_energy(u_pert, scv, mat) rtol=1e-8
+    @test FerriteShells.membrane_energy_RM(u_rot, scv_rot, mat) ≈
+          FerriteShells.membrane_energy_RM(u_pert, scv, mat) rtol=1e-8
+    @test FerriteShells.bending_shear_energy_RM(u_rot, scv_rot, mat) ≈
+          FerriteShells.bending_shear_energy_RM(u_pert, scv, mat) rtol=1e-8
 end
 
 @testset "RM bending explicit residual" begin
@@ -198,13 +198,13 @@ end
         u_pert[5I  ] = 1e-3 * randn()
     end
     membrane_residuals_RM!(re_fd, scv, u_pert, mat)
-    FerriteShells.membrane_residuals_RM_impl!(re_impl, scv, u_pert, mat)
+    FerriteShells.membrane_residuals_RM_explicit!(re_impl, scv, u_pert, mat)
     @test norm(re_fd .- re_impl) / (norm(re_impl) + 1e-14) < 1e-12
     # same for tangent
     Ke_fd = zeros(n_dof, n_dof)
     Ke_impl = zeros(n_dof, n_dof)
     membrane_tangent_RM!(Ke_fd, scv, u_pert, mat)
-    FerriteShells.membrane_tangent_RM_impl!(Ke_impl, scv, u_pert, mat)
+    FerriteShells.membrane_tangent_RM_explicit!(Ke_impl, scv, u_pert, mat)
     @test norm(Ke_fd .- Ke_impl) / (norm(Ke_impl) + 1e-14) < 1e-12
 end
 
@@ -244,7 +244,7 @@ end
     for cell in CellIterator(dh_p)
         fill!(re_p, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u_e = u_ex[celldofs(cell)]
-        FerriteShells.membrane_residuals_RM_impl!(re_p, scv_p, u_e, mat_p)
+        FerriteShells.membrane_residuals_RM_explicit!(re_p, scv_p, u_e, mat_p)
         bending_residuals_RM!(re_p, scv_p, u_e, mat_p)
         r_p[celldofs(cell)] .+= re_p
     end
@@ -261,7 +261,7 @@ end
     for cell in CellIterator(dh_p)
         fill!(ke_p, 0.0); fill!(re_p2, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u0 = zeros(ndofs_per_cell(dh_p))
-        FerriteShells.membrane_tangent_RM_impl!(ke_p, scv_p, u0, mat_p)
+        FerriteShells.membrane_tangent_RM_explicit!(ke_p, scv_p, u0, mat_p)
         bending_tangent_RM!(ke_p, scv_p, u0, mat_p)
         assemble!(asmb_p, celldofs(cell), ke_p, re_p2)
     end
@@ -291,7 +291,7 @@ end
         u_rm5[5I  ] = -α * xI   # φ₂ = -∂u₃/∂y = -α·x
     end
     W_kl = FerriteShells.bending_energy_KL(u_kl, scv_kl, mat_kl)
-    W_rm = FerriteShells.rm_bending_shear_energy(u_rm5, scv_kl, mat_kl)
+    W_rm = FerriteShells.bending_shear_energy_RM(u_rm5, scv_kl, mat_kl)
     @test W_rm > 0.0
     @test W_rm ≈ W_kl rtol=1e-4
 end
@@ -318,7 +318,7 @@ end
     for cell in CellIterator(dh_b)
         fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
         x = getcoordinates(cell); u0 = zeros(n_el_b)
-        FerriteShells.membrane_tangent_RM_impl!(ke_b, scv_b, u0, mat_b)
+        FerriteShells.membrane_tangent_RM_explicit!(ke_b, scv_b, u0, mat_b)
         bending_tangent_RM!(ke_b, scv_b, u0, mat_b)
         assemble!(asmb_b, celldofs(cell), ke_b, re_b)
     end
@@ -374,7 +374,7 @@ end
     # 1. Membrane residual is exactly zero (membrane energy depends only on stretch,
     #    which is zero at u=0 by construction).
     re_mem = zeros(45)
-    FerriteShells.membrane_residuals_RM_impl!(re_mem, scv, zeros(45), mat)
+    FerriteShells.membrane_residuals_RM_explicit!(re_mem, scv, zeros(45), mat)
     @test norm(re_mem) ≤ 1e-12
 
     # 2. Initial bending/shear residual is small: O(h²/R) per unit shear stiffness.
@@ -444,7 +444,7 @@ end
             reinit!(scv_h, cell)
             x   = getcoordinates(cell)
             u_e = zeros(n_el)
-            FerriteShells.membrane_tangent_RM_impl!(ke, scv_h, u_e, mat_h)
+            FerriteShells.membrane_tangent_RM_explicit!(ke, scv_h, u_e, mat_h)
             bending_tangent_RM!(ke, scv_h, u_e, mat_h)
             assemble!(asmb, shelldofs(cell), ke, re)
             # z-body force in interleaved layout; scatter via shelldofs mapping

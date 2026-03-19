@@ -146,40 +146,42 @@ function get_cell_type(faces)
     error("Unsupported cell type")
 end
 
-function compute_volume(dh, scv, u::AbstractVector{T}) where T
-    volume = 0.0
-    h::Vec{3, T} = Vec((0.0, 0.0, 1.0))
-    b::Vec{3, T} = Vec((0.0, 0.0, -0.1))
+"""
+    compute_volume()
+
+Computes the volume of a shell in the configuration `u`.
+The vectors ``h`` and ``b`` define the reference and base positions, respectively. These can be used for open shells to remove 
+contribution to the volume. For example, an inflated membrane on the x-y plane with +z deformation would be measured as
+```Julia
+vol = compute_volume(dh, scv, u; h=Vec((0.0,0.0,1.0)), b=Vec((0.0,0.0,0.0)))
+```
+"""
+function compute_volume(dh, scv, u::AbstractVector{T}; h::Vec{3, T}=Vec((0.0,0.0,1.0)), b::Vec{3, T}=Vec((0.0,0.0,0.0))) where T
+    volume = zero(T)
     for cell in CellIterator(dh)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         uₑ = u[shelldofs(cell)] # arranged as [u₁,u₂,u₃,φ₁,φ₂,…]
-        for qp in 1:getnquadpoints(scv)
-            d = function_value(scv, qp, uₑ)
-            n = getnormal(scv, qp)
-            x = spatial_coordinate(scv, qp, coords)
-            ∇u = function_gradient(scv, qp, uₑ)
-            F = one(∇u) + ∇u
-            volume -=  det(F) * ((h ⊗ h) ⋅ (x + d - b)) ⋅ (transpose(inv(F)) ⋅ n) * getdetJdV(scv, qp)
-        end
+        volume += volume_residual(scv, coords, uₑ, h, b)
     end
     return volume
 end
 
-function volume_residual!(scv, coords, uₑ)
-    h::Vec{3, T} = Vec((0.0, 0.0, 1.0))
-    b::Vec{3, T} = Vec((0.0, 0.0, -0.1))
+function volume_residual(scv, coords, uₑ::AbstractVector{T}, h, b) where T
+    val = zero(T)
     for qp in 1:getnquadpoints(scv)
         d = function_value(scv, qp, uₑ)
         n = getnormal(scv, qp)
         x = spatial_coordinate(scv, qp, coords)
         ∇u = function_gradient(scv, qp, uₑ)
         F = one(∇u) + ∇u
-        volume -=  det(F) * ((h ⊗ h) ⋅ (x + d - b)) ⋅ (transpose(inv(F)) ⋅ n) * getdetJdV(scv, qp)
+        val +=  det(F) * ((h ⊗ h) ⋅ (x + d - b)) ⋅ (transpose(inv(F)) ⋅ n) * getdetJdV(scv, qp)
     end
+    return val
 end
 
-function volume_tangent!(ke, scv::ShellCellValues, u_e)
-    volume(u) = (re = zeros(eltype(u), length(u)); volume_residual!(re, scv, u); re)
-    ke .+= ForwardDiff.jacobian(volume, u_e)
+function volume_tangent!(ke, scv::ShellCellValues, u_e::AbstractVector{T}) where T
+    # volume(u) = (re = zeros(eltype(u), length(u)); volume_residual!(re, scv, u); re)
+    # ke .+= ForwardDiff.jacobian(volume, u_e)
+    nothing
 end

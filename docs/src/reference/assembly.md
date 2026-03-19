@@ -20,8 +20,8 @@ membrane_residuals_RM!
 bending_residuals_RM!
 membrane_residuals_RM_explicit!
 bending_residuals_RM_explicit!
-rm_bending_shear_energy
-rm_membrane_energy
+bending_shear_energy_rm
+membrane_energy_rm
 membrane_tangent_RM!
 bending_tangent_RM!
 membrane_tangent_RM_explicit!

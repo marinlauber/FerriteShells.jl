@@ -129,7 +129,7 @@ Reissner–Mindlin membrane strain energy.
 DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vector of length 5·n_nodes).
 Only the displacement DOFs (indices 5I-4:5I-2) contribute to membrane energy.
 """
-function rm_membrane_energy(u_flat, scv::ShellCellValues, mat)
+function membrane_energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
@@ -156,31 +156,38 @@ end
 Reissner–Mindlin membrane residual. `u_e` is a flat vector of length 5·n_nodes.
 """
 function membrane_residuals_RM!(re, scv, u_e, mat)
-    re .+= ForwardDiff.gradient(u -> rm_membrane_energy(u, scv, mat), u_e)
+    re .+= ForwardDiff.gradient(u -> membrane_energy_RM(u, scv, mat), u_e)
 end
-function membrane_residuals_RM_impl!(re, scv, u_e::AbstractVector{T}, mat) where T
+
+"""
+    membrane_residuals_RM_explicit!(re, scv, u_e, mat)
+
+RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta dΩ``.
+Stress resultant rows ``P_\\alpha = N^{\\alpha\\beta} a_\\beta`` are precomputed once per QP.
+"""
+function membrane_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
-            dN  = scv.dNdξ[I, qp]
+            dN = scv.dNdξ[I, qp]
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
         end
-        a₁       = scv.A₁[qp] + Δa₁
-        a₂       = scv.A₂[qp] + Δa₂
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
         a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        E        = 0.5 * (a_metric - scv.A_metric[qp])
-        N        = contravariant_elasticity(mat, scv.A_metric[qp]) ⊡ E
+        E = 0.5 * (a_metric - scv.A_metric[qp])
+        N = contravariant_elasticity(mat, scv.A_metric[qp]) ⊡ E
+        P₁ = N[1,1]*a₁ + N[1,2]*a₂
+        P₂ = N[2,1]*a₁ + N[2,2]*a₂
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
-            v = ∂NI1 * (N[1,1]*a₁ + N[1,2]*a₂) +
-                ∂NI2 * (N[2,1]*a₁ + N[2,2]*a₂)
-            @views re[5I-4:5I-2] .+= v * dΩ
+            @views re[5I-4:5I-2] .+= (∂NI1*P₁ + ∂NI2*P₂) * dΩ
         end
     end
 end
+
 
 """
     membrane_tangent_RM!(ke, scv, u_e, mat)
@@ -188,41 +195,51 @@ end
 Reissner–Mindlin membrane tangent. `u_e` is a flat vector of length 5·n_nodes.
 """
 function membrane_tangent_RM!(ke, scv, u_e, mat)
-    ke .+= ForwardDiff.hessian(u -> rm_membrane_energy(u, scv, mat), u_e)
+    ke .+= ForwardDiff.hessian(u -> membrane_energy_RM(u, scv, mat), u_e)
 end # 1050 μs (26 allocations: 115.21 KiB) on a 45x45 matrix
-function membrane_tangent_RM_impl!(ke, scv, u_e::AbstractVector{T}, mat) where T
+
+# Precompute per-QP "frame stiffness" tensors M_{\\alphaδ} = C^{\\alpha\\betaγδ} a_\\beta⊗a_γ.
+# The material tangent is then K^mat_IJ = ∂N_I^\\alpha ∂N_J^δ M_{\\alphaδ} (summed over \\alpha,δ ∈ {1,2}).
+# Uses C's full symmetry to reduce to 3 unique tensors (M₂₁ = transpose(M₁₂)).
+@inline function frame_stiffness(C::SymmetricTensor{4,2,T}, a₁::Vec{3,T}, a₂::Vec{3,T}) where T
+    M₁₁ = C[1,1,1,1]*(a₁⊗a₁) + C[1,1,1,2]*(a₁⊗a₂ + a₂⊗a₁) + C[1,2,1,2]*(a₂⊗a₂)
+    M₁₂ = C[1,1,1,2]*(a₁⊗a₁) + C[1,1,2,2]*(a₁⊗a₂) + C[1,2,1,2]*(a₂⊗a₁) + C[1,2,2,2]*(a₂⊗a₂)
+    M₂₂ = C[1,2,1,2]*(a₁⊗a₁) + C[1,2,2,2]*(a₁⊗a₂ + a₂⊗a₁) + C[2,2,2,2]*(a₂⊗a₂)
+    M₁₁, M₁₂, M₂₂
+end
+
+"""
+    membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
+
+RM membrane tangent.
+Material part: ``K^\\text{mat}_{IJ} = \\partial N_I^\\alpha \\partial N_J^\\delta M_{\\alpha\\delta}`` where
+``M_{\\alpha\\delta} = C^{\\alpha\\beta\\gamma\\delta} a_\\beta\\otimes a_\\gamma``.
+Geometric part: ``K^\\text{geo}_{IJ} = (\\partial N_I^\\alpha N^{\\alpha\\beta} \\partial N_J^\\beta) \\mathbb{h}_3``.
+Both M_{\\alphaδ} and N are precomputed once per QP outside the node loops.
+"""
+function membrane_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
-            dN  = scv.dNdξ[I, qp]
+            dN = scv.dNdξ[I, qp]
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
         end
-        a₁       = scv.A₁[qp] + Δa₁
-        a₂       = scv.A₂[qp] + Δa₂
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
         a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        E        = 0.5 * (a_metric - scv.A_metric[qp])
-        C        = contravariant_elasticity(mat, scv.A_metric[qp])
-        N        = C ⊡ E
+        E = 0.5 * (a_metric - scv.A_metric[qp])
+        C = contravariant_elasticity(mat, scv.A_metric[qp])
+        N = C ⊡ E
+        M₁₁, M₁₂, M₂₂ = frame_stiffness(C, a₁, a₂)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
             for J in 1:n_nodes
                 ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
-                geo_scalar = ∂NI1*(N[1,1]*∂NJ1 + N[1,2]*∂NJ2) +
-                             ∂NI2*(N[2,1]*∂NJ1 + N[2,2]*∂NJ2)
-                Kgeo = geo_scalar * one(SymmetricTensor{2,3})
-                H1 = SymmetricTensor{2,2}((∂NJ1, 0.5∂NJ2, 0.0))
-                H2 = SymmetricTensor{2,2}((0.0, 0.5∂NJ1, ∂NJ2))
-                D1 = C ⊡ H1
-                D2 = C ⊡ H2
-                Kmat = zero(Tensor{2,3})
-                for (α,∂NIα) in enumerate((∂NI1, ∂NI2)), (β,aβ) in enumerate((a₁, a₂))
-                    v = D1[α,β]*a₁ + D2[α,β]*a₂
-                    Kmat += ∂NIα * (aβ ⊗ v)
-                end
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (Kgeo + Kmat) * dΩ
+                K_mat = ∂NI1*∂NJ1*M₁₁ + ∂NI1*∂NJ2*M₁₂ + ∂NI2*∂NJ1*transpose(M₁₂) + ∂NI2*∂NJ2*M₂₂
+                K_geo = (∂NI1*(N[1,1]*∂NJ1 + N[1,2]*∂NJ2) + ∂NI2*(N[2,1]*∂NJ1 + N[2,2]*∂NJ2)) * one(SymmetricTensor{2,3})
+                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (K_mat + K_geo) * dΩ
             end
         end
     end
@@ -240,7 +257,7 @@ Transverse shear: γ_\\alpha = a_\\alpha·d
 
 Shear correction factor κ_s = 5/6 is applied.
 """
-function rm_bending_shear_energy(u_flat, scv::ShellCellValues, mat)
+function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
@@ -291,7 +308,7 @@ end
 Reissner–Mindlin bending + transverse shear residual. `u_e` is a flat vector of length 5·n_nodes.
 """
 function bending_residuals_RM!(re, scv, u_e, mat)
-    re .+= ForwardDiff.gradient(u -> rm_bending_shear_energy(u, scv, mat), u_e)
+    re .+= ForwardDiff.gradient(u -> bending_shear_energy_RM(u, scv, mat), u_e)
 end
 """
     bending_residuals_RM_explicit!(re, scv, u_e, mat)
@@ -365,8 +382,9 @@ end
 Reissner–Mindlin bending + transverse shear tangent. `u_e` is a flat vector of length 5·n_nodes.
 """
 function bending_tangent_RM!(ke, scv, u, mat)
-    ke .+= ForwardDiff.hessian(u -> rm_bending_shear_energy(u, scv, mat), u)
+    ke .+= ForwardDiff.hessian(u -> bending_shear_energy_RM(u, scv, mat), u)
 end
+
 """
     bending_tangent_RM_explicit!(ke, scv, u_e, mat)
 
@@ -564,83 +582,6 @@ function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVecto
             for J in 1:n_nodes
                 ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
                 @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (pw * NI) * (∂NJ1 * neg_sp_a₂ + ∂NJ2 * sp_a₁)
-            end
-        end
-    end
-end
-
-
-# Precompute per-QP "frame stiffness" tensors M_{\\alphaδ} = C^{\\alpha\\betaγδ} a_\\beta⊗a_γ.
-# The material tangent is then K^mat_IJ = ∂N_I^\\alpha ∂N_J^δ M_{\\alphaδ} (summed over \\alpha,δ ∈ {1,2}).
-# Uses C's full symmetry to reduce to 3 unique tensors (M₂₁ = transpose(M₁₂)).
-@inline function frame_stiffness(C::SymmetricTensor{4,2,T}, a₁::Vec{3,T}, a₂::Vec{3,T}) where T
-    M₁₁ = C[1,1,1,1]*(a₁⊗a₁) + C[1,1,1,2]*(a₁⊗a₂ + a₂⊗a₁) + C[1,2,1,2]*(a₂⊗a₂)
-    M₁₂ = C[1,1,1,2]*(a₁⊗a₁) + C[1,1,2,2]*(a₁⊗a₂) + C[1,2,1,2]*(a₂⊗a₁) + C[1,2,2,2]*(a₂⊗a₂)
-    M₂₂ = C[1,2,1,2]*(a₁⊗a₁) + C[1,2,2,2]*(a₁⊗a₂ + a₂⊗a₁) + C[2,2,2,2]*(a₂⊗a₂)
-    M₁₁, M₁₂, M₂₂
-end
-
-"""
-    membrane_residuals_RM_explicit!(re, scv, u_e, mat)
-
-RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta dΩ``.
-Stress resultant rows ``P_\\alpha = N^{\\alpha\\beta} a_\\beta`` are precomputed once per QP.
-"""
-function membrane_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    for qp in 1:getnquadpoints(scv)
-        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-        for I in 1:n_nodes
-            dN = scv.dNdξ[I, qp]
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
-        end
-        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
-        a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        E = 0.5 * (a_metric - scv.A_metric[qp])
-        N = contravariant_elasticity(mat, scv.A_metric[qp]) ⊡ E
-        P₁ = N[1,1]*a₁ + N[1,2]*a₂
-        P₂ = N[2,1]*a₁ + N[2,2]*a₂
-        dΩ = scv.detJdV[qp]
-        for I in 1:n_nodes
-            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
-            @views re[5I-4:5I-2] .+= (∂NI1*P₁ + ∂NI2*P₂) * dΩ
-        end
-    end
-end
-
-"""
-    membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
-
-RM membrane tangent.
-Material part: ``K^\\text{mat}_{IJ} = \\partial N_I^\\alpha \\partial N_J^\\delta M_{\\alpha\\delta}`` where
-``M_{\\alpha\\delta} = C^{\\alpha\\beta\\gamma\\delta} a_\\beta\\otimes a_\\gamma``.
-Geometric part: ``K^\\text{geo}_{IJ} = (\\partial N_I^\\alpha N^{\\alpha\\beta} \\partial N_J^\\beta) \\mathbb{h}_3``.
-Both M_{\\alphaδ} and N are precomputed once per QP outside the node loops.
-"""
-function membrane_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    for qp in 1:getnquadpoints(scv)
-        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-        for I in 1:n_nodes
-            dN = scv.dNdξ[I, qp]
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
-        end
-        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
-        a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        E = 0.5 * (a_metric - scv.A_metric[qp])
-        C = contravariant_elasticity(mat, scv.A_metric[qp])
-        N = C ⊡ E
-        M₁₁, M₁₂, M₂₂ = frame_stiffness(C, a₁, a₂)
-        dΩ = scv.detJdV[qp]
-        for I in 1:n_nodes
-            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
-            for J in 1:n_nodes
-                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
-                K_mat = ∂NI1*∂NJ1*M₁₁ + ∂NI1*∂NJ2*M₁₂ + ∂NI2*∂NJ1*transpose(M₁₂) + ∂NI2*∂NJ2*M₂₂
-                K_geo = (∂NI1*(N[1,1]*∂NJ1 + N[1,2]*∂NJ2) + ∂NI2*(N[2,1]*∂NJ1 + N[2,2]*∂NJ2)) * one(SymmetricTensor{2,3})
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (K_mat + K_geo) * dΩ
             end
         end
     end
