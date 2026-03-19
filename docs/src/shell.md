@@ -1,6 +1,6 @@
-## 1. Shell formulations
+# 1. Shell formulations
 
-### 1.1 Shell theory comparison
+## 1.1 Shell theory comparison
 
 | | Linear KL | Koiter | Reissner–Mindlin | Naghdi |
 |---|---|---|---|---|
@@ -19,7 +19,7 @@ Koiter has no director DOFs; the normal is always implicit from the surface geom
 
 Classical RM (additive director, ``\|\mathbf{d}\|\neq 1``) is not implemented; the `_RM` functions go directly to the geometrically exact Naghdi form via Rodrigues parametrisation.
 
-## 2. Shells kinematics
+# 2. Shells kinematics
 
 Curvilinear covariant basis vector (3D)
 ```math
@@ -51,7 +51,7 @@ which satisfies ``\mathbf{a}_3\cdot\mathbf{a}_\alpha=0``, and thus the second fu
 b_{\alpha\beta} = \hat{\mathbf{a}}_3\cdot \mathbf{a}_{\alpha,\beta} = -\mathbf{a}_\alpha\cdot \hat{\mathbf{a}}_{3,\beta}
 ```
 
-#### 2.1 Green-Lagrange strain tensor
+## 2.1 Green-Lagrange strain tensor
 
 The Green-Lagrange strain tensor is given by half the increment in the metric tensor [chapelle2011](@cite)
 ```math
@@ -62,7 +62,7 @@ Subsituting the definition of ``g_{ij}``, we get
 e_{ij} = \frac{1}{2}\left(\mathbf{g}_i\cdot\mathbf{g}_j - \mathbf{G}_j\cdot\mathbf{G}_i\right)
 ```
 
-### 2.2 Kirchhoff-Love / Koiter shell
+## 2.2 Kirchhoff-Love / Koiter shell
 
 The Kirchhoff-Love kinematic assumption prevents transverse shear strain by constraining the cross-section to remain normal the the shell's midsurface during defomation.
 ```math
@@ -108,29 +108,86 @@ where we can clearly identify the ``\gamma_{\alpha\beta}`` and ``\kappa_{\alpha\
 > [!NOTE]
 > Something interesting happened, we specialized 3D continuum strains onto the curvilinear coordinate of the shell, the Kirchhoff-Love kinematic and the plane stress assumption result in surface strains only since only ``e_{\alpha\beta}`` are non-zero.
 
-#### 2.2.1 Weak form, residual and consistent tangent
+### 2.2.1 Internal energy
 
 The internal energy of the shell is given by
 ```math
-\mathcal{W}_\text{int} =\int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}e_{\gamma\delta} e_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y = \int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta} \gamma_{\alpha\beta} +  \frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta} \kappa_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y = \int_\omega p^\alpha\eta_\alpha \, \sqrt{a}\,\mathrm{d}y
+\mathcal{W}_\text{int} =\int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}e_{\gamma\delta} e_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y = \int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta} \gamma_{\alpha\beta} +  \frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta} \kappa_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y
 ```
 where ``\mathbb{C}^{\alpha\beta\gamma\delta}`` is the contravariant elasticity tensor
 ```math
 \mathbb{C}^{\alpha\beta\gamma\delta} = \frac{4\lambda\mu}{\lambda + 2\mu}a^{\alpha\beta}a^{\gamma\delta} + 2\mu\left( a^{\alpha\gamma}a^{\beta\delta} + a^{\alpha\delta}a^{\beta\gamma} \right)
 ```
 
+### 2.2.2 Residual and first variation
+
 To obtain the residual equation, we apply the principal of stationnary action in the internal energy of the system
 ```math
-\delta\mathcal{W}_\text{int} = \int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta} \delta\gamma_{\alpha\beta} +  \frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta} \delta\kappa_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y = \int_\omega \delta p^\alpha\eta_\alpha \, \sqrt{a}\,\mathrm{d}y
+\delta\mathcal{W}_\text{int} = \int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta} \delta\gamma_{\alpha\beta} +  \frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta} \delta\kappa_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y
 ```
 
-### 2.3 Reissner-Mindlin / Naghdi shell
-The Reissner-Mindlin kinematic assumption
+> [!NOTE]
+> Why only the second term varies?
+
+The variation of the membrane term is given by
 ```math
-\Phi(\xi^1,\xi^2,\xi^3) = \phi(\xi^1,\xi^2) + \xi^3\theta^\lambda(\xi^1,\xi^2) \mathbf{a}_\lambda(\xi^1,\xi^2) = \phi(\xi^1,\xi^2) + \xi^3\mathbf{d}(\xi^1,\xi^2)
+\delta\gamma_{\alpha\beta} = \frac{1}{2}\delta\left(\mathbf{a}_\alpha\cdot\mathbf{a}_\beta - \mathbf{A}_\alpha\cdot\mathbf{A}_\beta\right) = \frac{1}{2}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta + \mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right)
+```
+where we have used the fact that the reference configuration is fixed, so its variation is zero. For the bending part, we get a similar expression
+```math
+\delta\kappa_{\alpha\beta} = \delta\left(B_{\alpha\beta} - b_{\alpha\beta}\right) = -\delta b_{\alpha\beta} = -\delta\hat{\mathbf{a}}_3\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}
+```
+where we have used the fact that the reference curvature is fixed, so its variation is zero. The second term is relatively easy to evaluate since it only depends on the variation of the surface basis vector, but the first term is more tricky as it depends on the variation of the normal vector, which is a function of the surface basis vector. We can use the fact that the normal vector is unitary to get
+```math
+\hat{\mathbf{a}}_3 \cdot \hat{\mathbf{a}}_3 = 1 \implies \delta\hat{\mathbf{a}}_3 \cdot \hat{\mathbf{a}}_3 = 0
+```
+This can be used to transform the variation of the normal vector into a variation of the surface basis vector, which is easier to evaluate. Substituting these variations back into the first variation of the internal energy, we get
+```math
+\delta\kappa_{\alpha\beta} = \left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}.
+```
+Where the contravariant basis can be obtained as ``\mathbf{a}^\gamma = a^{\gamma\delta}\mathbf{a}_\delta=[a_{\gamma\delta}]^{-1}\mathbf{a}_\delta``. Combining these term together, we arrive at the variational problem for the Kirchhoff-Love shell
+```math
+\begin{split}
+\delta\mathcal{W}_\text{int} =& \int_\omega \mathbb{N}^{\alpha\beta} \frac{1}{2}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta + \mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right) + \\
+& \mathbb{M}^{\alpha\beta}\left[\left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right] \, \sqrt{a}\,\mathrm{d}y
+\end{split}
+```
+where we have substituted ``\mathbb{N}^{\alpha\beta} = \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta}`` and ``\mathbb{M}^{\alpha\beta}=\frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta}``, the membrane and bending stress resultant, respectively. Since this is a symmetric tensor, we ``\mathbb{N}^{\alpha\beta}=\mathbb{N}^{\beta\alpha}`` which simplifies our expression to
+```math
+\delta\mathcal{W}_\text{int} = \int_\omega \mathbb{N}^{\alpha\beta}(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta) + \mathbb{M}^{\alpha\beta}\left[\left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right] \sqrt{a}\,\mathrm{d}y
 ```
 
-## References
+### 2.2.3 Consistent tangent and second variation
+
+The consistent tangent is obtained by taking the second variation of the internal energy, which gives us
+```math
+\delta\delta\mathcal{W}_\text{int} = \int_\omega \delta\left[\mathbb{N}^{\alpha\beta}(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta)\right] + \delta\left[\mathbb{M}^{\alpha\beta}\left(\delta\hat{\mathbf{a}}_3\cdot\mathbf{a}_{\alpha,\beta}+ \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right)\right] \sqrt{a}\,\mathrm{d}y
+```
+The second variation of the first term can de decomposed as
+```math
+\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right) + \mathbb{N}^{\alpha\beta}\left(\delta\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta + \delta\mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right)
+```
+since the variation of the variation is zero, we get
+```math
+\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\delta\mathbb{N}^{\alpha\beta}\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right)
+```
+The first term (**material stiffness**) can be obtain by substituting ``\mathbb{N}^{\alpha\beta}=\mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta}``
+```math
+\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}\delta\gamma_{\gamma\delta}\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right)
+```
+the variation of ``\delta\gamma_{\gamma\delta}`` is available from the first variation (see above), and using the minor symmetries of ``\mathbb{C}^{\alpha\beta\gamma\delta}=\mathbb{C}^{\alpha\beta\delta\gamma}``, we can combine the two terms in the parenthesis
+```math
+\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\delta\mathbf{a}_\gamma\cdot\mathbf{a}_\delta)\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right)
+```
+
+The bending term is more involved.
+
+Subtituting these two final terms back into the second variation, we get
+```math
+\delta\delta\mathcal{W}_\text{int} = \int_\omega \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\delta\mathbf{a}_\gamma\cdot\mathbf{a}_\delta)\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right) + \delta\left[...\right] \sqrt{a}\,\mathrm{d}y
+```
+
+# References
 
 ```@bibliography
 ```
