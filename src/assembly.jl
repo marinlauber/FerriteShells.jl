@@ -13,6 +13,23 @@ using ForwardDiff
     end
 end
 
+# Returns (cosθ, sinc(θ), s_cc) where s_cc = (cosθ - sinc(θ))/θ².
+# s_cc is the coefficient in ∂d_I/∂φ_k (Rodrigues director Jacobian).
+# Taylor at θ²→0: s_cc → -1/3 + θ²/30. ForwardDiff-safe: branch on primal only.
+@inline function _cos_sinc_sincc_sq(θ²::T) where T
+    if θ² < 1e-6
+        cosθ  = one(T) - θ²/2  + θ²^2/24
+        sincθ = one(T) - θ²/6  + θ²^2/120
+        sccθ  = -one(T)/3 + θ²/30
+    else
+        θ     = sqrt(θ²)
+        cosθ  = cos(θ)
+        sincθ = sin(θ) / θ
+        sccθ  = (cosθ - sincθ) / θ²
+    end
+    cosθ, sincθ, sccθ
+end
+
 """
     membrane_residuals_KL!(re, scv, u_e, mat)
 
@@ -223,7 +240,7 @@ Transverse shear: γ_α = a_α·d
 
 Shear correction factor κ_s = 5/6 is applied.
 """
-function rm_bending_shear_energy(u_flat, scv, mat)
+function rm_bending_shear_energy(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
@@ -276,8 +293,20 @@ Reissner–Mindlin bending + transverse shear residual. `u_e` is a flat vector o
 function bending_residuals_RM!(re, scv, u_e, mat)
     re .+= ForwardDiff.gradient(u -> rm_bending_shear_energy(u, scv, mat), u_e)
 end
-function bending_residuals_RM_impl!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat::AbstractMaterial) where T
+"""
+    bending_residuals_RM_explicit!(re, scv, u_e, mat)
+
+RM bending + transverse shear residual, explicit index-notation form.
+
+Displacement DOFs: `r_I^u = (∂₁N_I P¹ + ∂₂N_I P²) dΩ`
+where `P^α = M^{αβ} d_{,β} + Q^α d`, M = D⊡κ (bending moment), Q^α = κ_s G t A^{αβ} γ_β.
+
+Rotation DOFs: `r_{I,k}^φ = F_I · (∂d_I/∂φ_k) dΩ`
+where `F_I = ∂₁N_I S¹ + ∂₂N_I S² + N_I (Q₁ a₁ + Q₂ a₂)`, S^α = M^{αβ} a_β.
+"""
+function bending_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    G_sh = mat.E / (2*(1 + mat.ν))
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
@@ -285,37 +314,47 @@ function bending_residuals_RM_impl!(re, scv::ShellCellValues, u_e::AbstractVecto
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
         end
-        a₁ = scv.A₁[qp] + Δa₁
-        a₂ = scv.A₂[qp] + Δa₂
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
         G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
         d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
         for I in 1:n_nodes
-            φ₁  = u_e[5I-1]; φ₂ = u_e[5I]
-            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
+            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            θ²  = φ₁*φ₁ + φ₂*φ₂
             cosθ, sincθ = _cos_sinc_sq(θ²)
-            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
-            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
-            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
-            d  += scv.N[I, qp]      * d_I
-            d₁ += scv.dNdξ[I, qp][1] * d_I
-            d₂ += scv.dNdξ[I, qp][2] * d_I
+            d_I = cosθ*G₃ + sincθ*(φ₁*T₁ + φ₂*T₂)
+            d  += scv.N[I, qp]         * d_I
+            d₁ += scv.dNdξ[I, qp][1]  * d_I
+            d₂ += scv.dNdξ[I, qp][2]  * d_I
         end
         B   = scv.B[qp]
         κ₁₁ = dot(a₁, d₁) - B[1,1]
         κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
         κ₂₂ = dot(a₂, d₂) - B[2,2]
         κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
-        γ₁  = dot(a₁, d)
-        γ₂  = dot(a₂, d)
-        γ   = SymmetricTensor{2,2,T}((γ₁, 0.0, γ₂))
-        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
-        Aup  = inv(scv.A_metric[qp])
-        G_sh = mat.E / (2*(1 + mat.ν))
-        κ_s  = 5.0/6.0
+        γ₁  = dot(a₁, d); γ₂ = dot(a₂, d)
+        D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        M   = D ⊡ κ
+        Aup = inv(scv.A_metric[qp])
+        cs  = 5.0/6.0 * G_sh * mat.thickness
+        Q₁  = cs * (Aup[1,1]*γ₁ + Aup[1,2]*γ₂)
+        Q₂  = cs * (Aup[2,1]*γ₁ + Aup[2,2]*γ₂)
+        P¹  = M[1,1]*d₁ + M[1,2]*d₂ + Q₁*d
+        P²  = M[2,1]*d₁ + M[2,2]*d₂ + Q₂*d
+        S¹  = M[1,1]*a₁ + M[1,2]*a₂
+        S²  = M[2,1]*a₁ + M[2,2]*a₂
+        dΩ  = scv.detJdV[qp]
         for I in 1:n_nodes
-            # bending ans shear term
-            v = 0.5 * D ⊡ κ + 0.5 * κ_s * G_sh * mat.thickness * (Aup ⊡ γ)
-            @views res[5I-4:5I-2] .+= v * dΩ
+            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
+            NI = scv.N[I, qp]
+            @views re[5I-4:5I-2] .+= (∂NI1*P¹ + ∂NI2*P²) * dΩ
+            F_I = ∂NI1*S¹ + ∂NI2*S² + NI*(Q₁*a₁ + Q₂*a₂)
+            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            θ² = φ₁*φ₁ + φ₂*φ₂
+            _, sincθ, sccθ = _cos_sinc_sincc_sq(θ²)
+            dd_dφ₁ = (sincθ + sccθ*φ₁*φ₁)*T₁ + sccθ*φ₁*φ₂*T₂ - sincθ*φ₁*G₃
+            dd_dφ₂ = sccθ*φ₁*φ₂*T₁ + (sincθ + sccθ*φ₂*φ₂)*T₂ - sincθ*φ₂*G₃
+            re[5I-1] += dot(F_I, dd_dφ₁) * dΩ
+            re[5I  ] += dot(F_I, dd_dφ₂) * dΩ
         end
     end
 end
@@ -325,49 +364,111 @@ end
 
 Reissner–Mindlin bending + transverse shear tangent. `u_e` is a flat vector of length 5·n_nodes.
 """
-function bending_tangent_RM!(ke, scv, u_e, mat)
-    ke .+= ForwardDiff.hessian(u -> rm_bending_shear_energy(u, scv, mat), u_e)
+function bending_tangent_RM!(ke, scv, u, mat)
+    ke .+= ForwardDiff.hessian(u -> rm_bending_shear_energy(u, scv, mat), u)
 end
-function bending_tangent_RM_impl!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat::AbstractMaterial) where T
-    @warn "not implemented"
+"""
+    bending_tangent_RM_explicit!(ke, scv, u_e, mat)
+
+RM bending + transverse shear tangent, explicit index-notation form. Four blocks per (I,J) pair:
+
+- **uu** (3×3): `∂_αN_I ∂_γN_J (D^{αβγδ} d_{,β}⊗d_{,δ}) + q_{IJ}(d⊗d)` — frame_stiffness with d₁,d₂.
+- **uφ** (3×2): `∂_αN_I[δM^{αβ}d_{,β} + δQ^α N_J d] + (g_{IJ}+q_I N_J)dd_{Jl}`.
+- **φu** (2×3): filled by transposing the uφ block for (I,J) into the (J,I) position.
+- **φφ** (2×2): material part `∂F_I/∂φ_{lJ}·dd_{Ik}` + geometric part `F_I·∂²d_I/∂φ_k∂φ_l` (J=I only).
+"""
+function bending_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    G_sh = mat.E / (2*(1 + mat.ν))
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
             dN  = scv.dNdξ[I, qp]
-            u_I = Vec{3,T}((u_flat[5I-4], u_flat[5I-3], u_flat[5I-2]))
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
         end
-        a₁ = scv.A₁[qp] + Δa₁
-        a₂ = scv.A₂[qp] + Δa₂
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
         G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
-        d  = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
+        d = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
         for I in 1:n_nodes
-            φ₁  = u_flat[5I-1]; φ₂ = u_flat[5I]
-            θ²  = φ₁*φ₁ + φ₂*φ₂                 # |φ|² without sqrt (avoids 0/0 ForwardDiff gradient)
+            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            θ² = φ₁*φ₁ + φ₂*φ₂
             cosθ, sincθ = _cos_sinc_sq(θ²)
-            # Geometrically exact: d = cos(|φ|)G₃ + sin(|φ|)/|φ|·(φ₁T₁+φ₂T₂).
-            # G₃⊥T₁,T₂ → |d|=cos²+sin²=1.  Matches additive at first order.
-            d_I = cosθ*G₃ + sincθ * (φ₁*T₁ + φ₂*T₂)
-            d  += scv.N[I, qp]      * d_I
+            d_I = cosθ*G₃ + sincθ*(φ₁*T₁ + φ₂*T₂)
+            d  += scv.N[I, qp]        * d_I
             d₁ += scv.dNdξ[I, qp][1] * d_I
             d₂ += scv.dNdξ[I, qp][2] * d_I
         end
         B   = scv.B[qp]
         κ₁₁ = dot(a₁, d₁) - B[1,1]
-        κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
+        κ₁₂ = 0.5*(dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
         κ₂₂ = dot(a₂, d₂) - B[2,2]
         κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
-        γ₁  = dot(a₁, d)
-        γ₂  = dot(a₂, d)
-        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        γ₁  = dot(a₁, d); γ₂ = dot(a₂, d)
+        D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        M   = D ⊡ κ
+        Aup = inv(scv.A_metric[qp])
+        cs  = 5.0/6.0 * G_sh * mat.thickness
+        Q₁  = cs*(Aup[1,1]*γ₁ + Aup[1,2]*γ₂)
+        Q₂  = cs*(Aup[2,1]*γ₁ + Aup[2,2]*γ₂)
+        S¹  = M[1,1]*a₁ + M[1,2]*a₂
+        S²  = M[2,1]*a₁ + M[2,2]*a₂
+        L₁₁, L₁₂, L₂₂ = frame_stiffness(D, d₁, d₂)
+        dΩ  = scv.detJdV[qp]
         for I in 1:n_nodes
-            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
+            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]; NI = scv.N[I, qp]
+            F_I = ∂NI1*S¹ + ∂NI2*S² + NI*(Q₁*a₁ + Q₂*a₂)
+            φ₁_I = u_e[5I-1]; φ₂_I = u_e[5I]
+            θ²_I  = φ₁_I^2 + φ₂_I^2
+            _, s_I, sc_I = _cos_sinc_sincc_sq(θ²_I)
+            dd_I1 = (s_I + sc_I*φ₁_I^2)*T₁ + sc_I*φ₁_I*φ₂_I*T₂ - s_I*φ₁_I*G₃
+            dd_I2 = sc_I*φ₁_I*φ₂_I*T₁ + (s_I + sc_I*φ₂_I^2)*T₂ - s_I*φ₂_I*G₃
             for J in 1:n_nodes
-                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
-                # Kmat +=
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= Kmat * dΩ
+                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]; NJ = scv.N[J, qp]
+                # uu block: frame_stiffness with d₁,d₂ + shear term
+                q_IJ = cs*(∂NI1*(Aup[1,1]*∂NJ1+Aup[1,2]*∂NJ2) + ∂NI2*(Aup[2,1]*∂NJ1+Aup[2,2]*∂NJ2))
+                K_uu = ∂NI1*∂NJ1*L₁₁ + ∂NI1*∂NJ2*L₁₂ + ∂NI2*∂NJ1*transpose(L₁₂) + ∂NI2*∂NJ2*L₂₂ + q_IJ*(d⊗d)
+                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= K_uu * dΩ
+                # uφ and φφ material blocks: loop over rotation directions l=1,2 of node J
+                φ₁_J = u_e[5J-1]; φ₂_J = u_e[5J]
+                θ²_J  = φ₁_J^2 + φ₂_J^2
+                _, s_J, sc_J = _cos_sinc_sincc_sq(θ²_J)
+                dd_J1 = (s_J + sc_J*φ₁_J^2)*T₁ + sc_J*φ₁_J*φ₂_J*T₂ - s_J*φ₁_J*G₃
+                dd_J2 = sc_J*φ₁_J*φ₂_J*T₁ + (s_J + sc_J*φ₂_J^2)*T₂ - s_J*φ₂_J*G₃
+                g_IJ  = ∂NI1*(M[1,1]*∂NJ1+M[1,2]*∂NJ2) + ∂NI2*(M[2,1]*∂NJ1+M[2,2]*∂NJ2)
+                q_I   = ∂NI1*Q₁ + ∂NI2*Q₂
+                for (l, dd_Jl) in zip(1:2, (dd_J1, dd_J2))
+                    c₁  = dot(a₁, dd_Jl); c₂ = dot(a₂, dd_Jl)
+                    δκ  = SymmetricTensor{2,2,T}((∂NJ1*c₁, 0.5*(∂NJ1*c₂+∂NJ2*c₁), ∂NJ2*c₂))
+                    δM  = D ⊡ δκ
+                    δQ₁ = cs*(Aup[1,1]*c₁ + Aup[1,2]*c₂)
+                    δQ₂ = cs*(Aup[2,1]*c₁ + Aup[2,2]*c₂)
+                    col = 5J - 2 + l
+                    # uφ block: material (bending+shear) + director contributions
+                    v_bend  = ∂NI1*(δM[1,1]*d₁+δM[1,2]*d₂) + ∂NI2*(δM[2,1]*d₁+δM[2,2]*d₂)
+                    v_shear = (∂NI1*δQ₁ + ∂NI2*δQ₂)*NJ*d
+                    v_dir   = (g_IJ + q_I*NJ)*dd_Jl
+                    Kuφ_col = v_bend + v_shear + v_dir
+                    @views ke[5I-4:5I-2, col] .+= Kuφ_col * dΩ
+                    @views ke[col, 5I-4:5I-2] .+= Kuφ_col * dΩ  # φu for (J,I) by symmetry
+                    # φφ material block: δF_I = ∂_αN_I δS^α + N_I N_J δQ^α a_α
+                    δS¹   = δM[1,1]*a₁ + δM[1,2]*a₂
+                    δS²   = δM[2,1]*a₁ + δM[2,2]*a₂
+                    δF_I  = ∂NI1*δS¹ + ∂NI2*δS² + NI*NJ*(δQ₁*a₁ + δQ₂*a₂)
+                    ke[5I-1, col] += dot(δF_I, dd_I1) * dΩ
+                    ke[5I,   col] += dot(δF_I, dd_I2) * dΩ
+                end
             end
+            # φφ geometric part (J = I only): F_I · ∂²d_I/∂φ_k∂φ_l
+            # sccc = (-sinc - 3scc)/θ², Taylor at θ²→0: 1/15
+            sccc_I = θ²_I < 1e-6 ? one(T)/15 : (-s_I - 3sc_I)/θ²_I
+            d2_11 = (3sc_I*φ₁_I + sccc_I*φ₁_I^3)*T₁ + (sc_I + sccc_I*φ₁_I^2)*φ₂_I*T₂ - (s_I + sc_I*φ₁_I^2)*G₃
+            d2_12 = (sc_I + sccc_I*φ₁_I^2)*φ₂_I*T₁ + (sc_I + sccc_I*φ₂_I^2)*φ₁_I*T₂ - sc_I*φ₁_I*φ₂_I*G₃
+            d2_22 = (sc_I + sccc_I*φ₂_I^2)*φ₁_I*T₁ + (3sc_I*φ₂_I + sccc_I*φ₂_I^3)*T₂ - (s_I + sc_I*φ₂_I^2)*G₃
+            ke[5I-1, 5I-1] += dot(F_I, d2_11) * dΩ
+            ke[5I-1, 5I  ] += dot(F_I, d2_12) * dΩ
+            ke[5I,   5I-1] += dot(F_I, d2_12) * dΩ
+            ke[5I,   5I  ] += dot(F_I, d2_22) * dΩ
         end
     end
 end
@@ -418,27 +519,25 @@ cross(a₁, a₂) already has magnitude ‖a₁ × a₂‖ (current area per par
 multiplying by w integrates over the parameter domain
 """
 # Follower pressure residual
-function assemble_pressure!(re, scv::ShellCellValues, u_e, p)
-    T = eltype(u_e)
+function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    ndofs_per_node = length(u_e) ÷ n_nodes
-    @inline block(I) = ndofs_per_node == 5 ? (5I-4:5I-2) : (3I-2:3I)
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
-            u_I = Vec{3,T}(tuple(u_e[block(I)]...))
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * scv.dNdξ[I, qp][1]
             Δa₂ += u_I * scv.dNdξ[I, qp][2]
         end
-        a₁ = scv.A₁[qp] + Δa₁
-        a₂ = scv.A₂[qp] + Δa₂
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
         n_w = cross(a₁, a₂)
         for I in 1:n_nodes
-            @views re[block(I)] .+= p * scv.N[I, qp] * n_w * w
+            @views re[5I-4:5I-2] .+= p * scv.N[I, qp] * n_w * w
         end
     end
 end
+# @inline get_displacements(u_e, I, ::Val{5}) = Vec{3}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+# @inline get_displacements(u_e, I, ::Val{3}) = Vec{3}((u_e[3I-2], u_e[3I-1], u_e[3I]))
 
 """
 # Load-stiffness K_pres = ∂F_p/∂u via ForwardDiff (for unit pressure p=1).
@@ -449,6 +548,81 @@ function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e, p)
     ke .+= ForwardDiff.jacobian(pressure_residual, u_e)
 end
 
+
+# Precompute per-QP "frame stiffness" tensors M_{αδ} = C^{αβγδ} a_β⊗a_γ.
+# The material tangent is then K^mat_IJ = ∂N_I^α ∂N_J^δ M_{αδ} (summed over α,δ ∈ {1,2}).
+# Uses C's full symmetry to reduce to 3 unique tensors (M₂₁ = transpose(M₁₂)).
+@inline function frame_stiffness(C::SymmetricTensor{4,2,T}, a₁::Vec{3,T}, a₂::Vec{3,T}) where T
+    M₁₁ = C[1,1,1,1]*(a₁⊗a₁) + C[1,1,1,2]*(a₁⊗a₂ + a₂⊗a₁) + C[1,2,1,2]*(a₂⊗a₂)
+    M₁₂ = C[1,1,1,2]*(a₁⊗a₁) + C[1,1,2,2]*(a₁⊗a₂) + C[1,2,1,2]*(a₂⊗a₁) + C[1,2,2,2]*(a₂⊗a₂)
+    M₂₂ = C[1,2,1,2]*(a₁⊗a₁) + C[1,2,2,2]*(a₁⊗a₂ + a₂⊗a₁) + C[2,2,2,2]*(a₂⊗a₂)
+    M₁₁, M₁₂, M₂₂
+end
+
+"""
+    membrane_residuals_RM_explicit!(re, scv, u_e, mat)
+
+RM membrane residual: `r_I = ∫ N^{αβ} ∂N_I^α a_β dΩ`.
+Stress resultant rows P_α = N^{αβ} a_β are precomputed once per QP.
+"""
+function membrane_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            dN = scv.dNdξ[I, qp]
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
+        a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        E = 0.5 * (a_metric - scv.A_metric[qp])
+        N = contravariant_elasticity(mat, scv.A_metric[qp]) ⊡ E
+        P₁ = N[1,1]*a₁ + N[1,2]*a₂
+        P₂ = N[2,1]*a₁ + N[2,2]*a₂
+        dΩ = scv.detJdV[qp]
+        for I in 1:n_nodes
+            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
+            @views re[5I-4:5I-2] .+= (∂NI1*P₁ + ∂NI2*P₂) * dΩ
+        end
+    end
+end
+
+"""
+    membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
+
+RM membrane tangent.
+Material part: `K^mat_IJ = ∂N_I^α ∂N_J^δ M_{αδ}` where `M_{αδ} = C^{αβγδ} a_β⊗a_γ`.
+Geometric part: `K^geo_IJ = (∂N_I^α N^{αβ} ∂N_J^β) I₃`.
+Both M_{αδ} and N are precomputed once per QP outside the node loops.
+"""
+function membrane_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            dN = scv.dNdξ[I, qp]
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
+        a_metric = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        E = 0.5 * (a_metric - scv.A_metric[qp])
+        C = contravariant_elasticity(mat, scv.A_metric[qp])
+        N = C ⊡ E
+        M₁₁, M₁₂, M₂₂ = frame_stiffness(C, a₁, a₂)
+        dΩ = scv.detJdV[qp]
+        for I in 1:n_nodes
+            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
+            for J in 1:n_nodes
+                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
+                K_mat = ∂NI1*∂NJ1*M₁₁ + ∂NI1*∂NJ2*M₁₂ + ∂NI2*∂NJ1*transpose(M₁₂) + ∂NI2*∂NJ2*M₂₂
+                K_geo = (∂NI1*(N[1,1]*∂NJ1 + N[1,2]*∂NJ2) + ∂NI2*(N[2,1]*∂NJ1 + N[2,2]*∂NJ2)) * one(SymmetricTensor{2,3})
+                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (K_mat + K_geo) * dΩ
+            end
+        end
+    end
+end
 
 """
     apply_pointload!(f, dh, nodeset_name, load)
