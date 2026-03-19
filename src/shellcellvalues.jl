@@ -5,14 +5,12 @@
 Stores precomputed shape function data and reference geometry for a shell element.
 Works with Vec{3} node coordinates — no manual 2D projection required.
 
-Shape function data (N, dNdξ, d2Ndξ2) is computed once at construction time
-from ip_shape and qr.
+Shape function data (N, dNdξ, d2Ndξ2) are computed once at construction time from `ip_shape` and `qr`.
+The reference coordinates in the physical space then computed on the fly using the geometric interpolation `ip_geo`
+``x(\\xi) = \\sum N_{i}^\\text{geo}(\\xi) x_{i}`` and the solution field are interpolated via the shape 
+functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
 
-On reinit!(scv, x):
-   - Computes reference tangent vectors A₁, A₂ and second derivatives A₁₁, A₁₂, A₂₂
-   - Computes reference unit normal G₃ and local frame T₁, T₂ (Gram–Schmidt)
-   - Computes reference metric A_metric and curvature tensor B
-   - Computes the area-weighted integration weight detJdV
+`reinit!` computes the reference geometry (A₁, A₂, G₃, B, …) by differentiating the coordinate map using `ip_geo`.
 """
 struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure, M} <: AbstractCellValues
     qr       :: QR
@@ -35,6 +33,7 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure,
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
 end
 
+Ferrite.getnormal(scv::ShellCellValues, q::Int) = scv.G₃[q]
 Ferrite.getdetJdV(scv::ShellCellValues, q::Int) = scv.detJdV[q]
 Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
@@ -77,7 +76,60 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
     )
 end
 
+"""
+    function_value(scv, qp, u_e)
+
+Interpolate the displacement field at quadrature point `qp` from a flat DOF vector ``u_e``.
+Works for both KL (3 DOFs/node: ``[u₁,u₂,u₃,…]``) and RM (5 DOFs/node: ``[u₁,u₂,u₃,φ₁,φ₂,…]``).
+The DOF stride is inferred from `length(u_e) ÷ n_nodes`; only the first 3 DOFs of each node
+(the displacement components) are used.
+"""
+@inline function Ferrite.function_value(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    stride  = length(u_e) ÷ n_nodes
+    val = zero(Vec{3, T})
+    @inbounds for I in 1:n_nodes
+        o = stride * (I - 1)
+        val += scv.N[I, qp] * Vec{3, T}((u_e[o + 1], u_e[o + 2], u_e[o + 3]))
+    end
+    val
+end
+
+@inline function Ferrite.function_gradient(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    stride  = length(u_e) ÷ n_nodes
+    val = zero(Tensor{2,3,T})
+    @inbounds for I in 1:n_nodes
+        o = stride * (I - 1)
+        N = scv.dNdξ[I, qp]
+        Nvec = Vec{3,T}((N[1], N[2], 0))
+        val += Vec{3, T}((u_e[o + 1], u_e[o + 2], u_e[o + 3])) ⊗ Nvec
+    end
+    val
+end
+
+# should overwrite ``geometric_value(::ShellCellValues, ::Any...)``
+@inline function Ferrite.spatial_coordinate(scv::ShellCellValues, qp::Int, x::AbstractVector{<:Vec})
+    n_nodes = getnbasefunctions(scv.ip_geo)
+    ξ = scv.qr.points[qp]
+    val = zero(Vec{3, eltype(ξ)})
+    @inbounds for I in 1:n_nodes
+        val += Ferrite.reference_shape_value(scv.ip_geo, ξ, I) * x[I]
+    end
+    val
+end
+
+"""
+    reinit!()
+
+Reinit the `ShellCellValues`
+"""
 reinit!(scv::ShellCellValues, cell) = reinit!(scv, getcoordinates(cell))
+"""
+    reinit!()
+
+Reinit the `ShellCellValues`
+"""
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     n_geo = getnbasefunctions(scv.ip_geo)
     for q in eachindex(scv.qr.weights)

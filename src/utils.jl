@@ -145,3 +145,23 @@ function get_cell_type(faces)
     Nnodes == 9 && return QuadraticQuadrilateral # S9
     error("Unsupported cell type")
 end
+
+function compute_volume(dh, scv, u::AbstractVector{T}) where T
+    volume = 0.0
+    h::Vec{3, T} = Vec((0.0, 0.0, 1.0))
+    b::Vec{3, T} = Vec((0.0, 0.0, -0.1))
+    for cell in CellIterator(dh)
+        reinit!(scv, cell)
+        coords = getcoordinates(cell)
+        uₑ = u[shelldofs(cell)] # arranged as [u₁,u₂,u₃,φ₁,φ₂,…]
+        for qp in 1:getnquadpoints(scv)
+            d = function_value(scv, qp, uₑ)
+            n = getnormal(scv, qp)
+            x = spatial_coordinate(scv, qp, coords)
+            ∇u = function_gradient(scv, qp, uₑ)
+            F = one(∇u) + ∇u
+            volume -=  det(F) * ((h ⊗ h) ⋅ (x + d - b)) ⋅ (transpose(inv(F)) ⋅ n) * getdetJdV(scv, qp)
+        end
+    end
+    return volume
+end
