@@ -90,8 +90,8 @@ since ``\hat{\mathbf{a}}_3 \cdot \mathbf{a}_\alpha = 0`` and ``\hat{\mathbf{a}}_
 
 A common assumtion made in shells is to ommit the ``(\xi^3)^2`` term in ``g_{\alpha\beta}``, this assumption is called the Love--Kirchhoff strain assumption and requires the smallest radius of curvature of the shell ``R_\text{min}>t/2`` where ``t`` is the shell's thickness, see [ciarlet2005](@cite).
 
-> [!WARNING]
-> The Love Kirchhoff **strain** assumption is not to be confused the the Kirchhoff-Love **kinematics** assumption.
+!!! info
+    The Love Kirchhoff **strain** assumption is not to be confused the the Kirchhoff-Love **kinematics** assumption.
 
 Using the components of the metric tensor, we can compute the Green-Lagrange strain tensor
 ```math
@@ -105,8 +105,8 @@ e_{33} &= 0
 ```
 where we can clearly identify the ``\gamma_{\alpha\beta}`` and ``\kappa_{\alpha\beta}`` as the membrane and bending strain components, respectively.
 
-> [!NOTE]
-> Something interesting happened, we specialized 3D continuum strains onto the curvilinear coordinate of the shell, the Kirchhoff-Love kinematic and the plane stress assumption result in surface strains only since only ``e_{\alpha\beta}`` are non-zero.
+!!! warning
+    Something interesting happened, we specialized 3D continuum strains onto the curvilinear coordinate of the shell, the Kirchhoff-Love kinematic and the plane stress assumption result in surface strains only since only ``e_{\alpha\beta}`` are non-zero.
 
 ### 2.2.1 Internal energy
 
@@ -126,8 +126,8 @@ To obtain the residual equation, we apply the principal of stationnary action in
 \delta\mathcal{W}_\text{int} = \int_\omega \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta} \delta\gamma_{\alpha\beta} +  \frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta} \delta\kappa_{\alpha\beta} \, \sqrt{a}\,\mathrm{d}y
 ```
 
-> [!NOTE]
-> Why only the second term varies?
+!!! info
+    Why only the second term varies?
 
 The variation of the membrane term is given by
 ```math
