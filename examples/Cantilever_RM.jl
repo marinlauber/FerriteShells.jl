@@ -142,7 +142,6 @@ let λᵢ=0; λ=0.1; @time while λ < 1.0
         # Compute residual and tangent for current guess
         assemble_global_shell!(K, g, u, dh, scv, mat)
         # compute the effective tangent and residual for the current guess
-        
         g .-= λ .* f_ext # apply external force
         # Apply boundary conditions
         apply_zero!(K, g, dbc)

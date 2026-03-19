@@ -88,7 +88,7 @@ end
 
 """
 Kirchhoff–Love bending strain energy.
-Curvature change κ_{αβ} = b_{αβ} - B_{αβ} (current minus reference second fundamental form).
+Curvature change κ_{\\alpha\\beta} = b_{\\alpha\\beta} - B_{\\alpha\\beta} (current minus reference second fundamental form).
 Requires Q2+ elements for full κ (Q4 only captures twist κ₁₂).
 `u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
 """
@@ -235,8 +235,8 @@ DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vect
 Director parametrization: d_I = G₃ + φ₁_I·T₁ + φ₂_I·T₂
 where G₃ is the reference unit normal and T₁, T₂ are reference tangents from scv.
 
-Bending strain:  κ_{αβ} = ½(a_α·d,β + a_β·d,α) - B_{αβ}
-Transverse shear: γ_α = a_α·d
+Bending strain:  κ_{\\alpha\\beta} = ½(a_\\alpha·d,\\beta + a_\\beta·d,\\alpha) - B_{\\alpha\\beta}
+Transverse shear: γ_\\alpha = a_\\alpha·d
 
 Shear correction factor κ_s = 5/6 is applied.
 """
@@ -299,10 +299,10 @@ end
 RM bending + transverse shear residual, explicit index-notation form.
 
 Displacement DOFs: `r_I^u = (∂₁N_I P¹ + ∂₂N_I P²) dΩ`
-where `P^α = M^{αβ} d_{,β} + Q^α d`, M = D⊡κ (bending moment), Q^α = κ_s G t A^{αβ} γ_β.
+where `P^\\alpha = M^{\\alpha\\beta} d_{,\\beta} + Q^\\alpha d`, M = D⊡κ (bending moment), Q^\\alpha = κ_s G t A^{\\alpha\\beta} γ_\\beta.
 
 Rotation DOFs: `r_{I,k}^φ = F_I · (∂d_I/∂φ_k) dΩ`
-where `F_I = ∂₁N_I S¹ + ∂₂N_I S² + N_I (Q₁ a₁ + Q₂ a₂)`, S^α = M^{αβ} a_β.
+where `F_I = ∂₁N_I S¹ + ∂₂N_I S² + N_I (Q₁ a₁ + Q₂ a₂)`, S^\\alpha = M^{\\alpha\\beta} a_\\beta.
 """
 function bending_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -372,8 +372,8 @@ end
 
 RM bending + transverse shear tangent, explicit index-notation form. Four blocks per (I,J) pair:
 
-- **uu** (3×3): `∂_αN_I ∂_γN_J (D^{αβγδ} d_{,β}⊗d_{,δ}) + q_{IJ}(d⊗d)` — frame_stiffness with d₁,d₂.
-- **uφ** (3×2): `∂_αN_I[δM^{αβ}d_{,β} + δQ^α N_J d] + (g_{IJ}+q_I N_J)dd_{Jl}`.
+- **uu** (3×3): `∂_\\alphaN_I ∂_γN_J (D^{\\alpha\\betaγδ} d_{,\\beta}⊗d_{,δ}) + q_{IJ}(d⊗d)` — frame_stiffness with d₁,d₂.
+- **uφ** (3×2): `∂_\\alphaN_I[δM^{\\alpha\\beta}d_{,\\beta} + δQ^\\alpha N_J d] + (g_{IJ}+q_I N_J)dd_{Jl}`.
 - **φu** (2×3): filled by transposing the uφ block for (I,J) into the (J,I) position.
 - **φφ** (2×2): material part `∂F_I/∂φ_{lJ}·dd_{Ik}` + geometric part `F_I·∂²d_I/∂φ_k∂φ_l` (J=I only).
 """
@@ -536,21 +536,42 @@ function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p)
         end
     end
 end
-# @inline get_displacements(u_e, I, ::Val{5}) = Vec{3}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-# @inline get_displacements(u_e, I, ::Val{3}) = Vec{3}((u_e[3I-2], u_e[3I-1], u_e[3I]))
+# skew-symmetric spin tensor: spin(v)·u = v × u.
+# Stored column-major in Tensors.jl: col_k = (0, v₃, -v₂), (-v₃, 0, v₁), (v₂, -v₁, 0).
+@inline spin(v::Vec{3,T}) where T = Tensor{2,3,T}((zero(T), v[3], -v[2], -v[3], zero(T), v[1], v[2], -v[1], zero(T)))
 
 """
-# Load-stiffness K_pres = ∂F_p/∂u via ForwardDiff (for unit pressure p=1).
-# `K_IJ^p = p * ∂(a₁ × a₂)/∂u_J * N_I`
+Load-stiffness K_pres = ∂F_p/∂u. Follower pressure n = a₁×a₂ depends on u through a₁,a₂.
+∂n/∂u_J = ∂₁N_J (eₗ×a₂) + ∂₂N_J (a₁×eₗ) = ∂₁N_J (-spin(a₂)) + ∂₂N_J spin(a₁).
+K_IJ = p N_I w [∂₁N_J (-spin(a₂)) + ∂₂N_J spin(a₁)]  (displacement-displacement block only).
 """
-function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e, p)
-    pressure_residual(u) = (re = zeros(eltype(u), length(u)); assemble_pressure!(re, scv, u, p); re)
-    ke .+= ForwardDiff.jacobian(pressure_residual, u_e)
+function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        w = scv.qr.weights[qp]
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for I in 1:n_nodes
+            dN  = scv.dNdξ[I, qp]
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
+        neg_sp_a₂ = -spin(a₂)   # columns: eₗ × a₂
+        sp_a₁     =  spin(a₁)   # columns: a₁ × eₗ
+        pw = p * w
+        for I in 1:n_nodes
+            NI = scv.N[I, qp]
+            for J in 1:n_nodes
+                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
+                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (pw * NI) * (∂NJ1 * neg_sp_a₂ + ∂NJ2 * sp_a₁)
+            end
+        end
+    end
 end
 
 
-# Precompute per-QP "frame stiffness" tensors M_{αδ} = C^{αβγδ} a_β⊗a_γ.
-# The material tangent is then K^mat_IJ = ∂N_I^α ∂N_J^δ M_{αδ} (summed over α,δ ∈ {1,2}).
+# Precompute per-QP "frame stiffness" tensors M_{\\alphaδ} = C^{\\alpha\\betaγδ} a_\\beta⊗a_γ.
+# The material tangent is then K^mat_IJ = ∂N_I^\\alpha ∂N_J^δ M_{\\alphaδ} (summed over \\alpha,δ ∈ {1,2}).
 # Uses C's full symmetry to reduce to 3 unique tensors (M₂₁ = transpose(M₁₂)).
 @inline function frame_stiffness(C::SymmetricTensor{4,2,T}, a₁::Vec{3,T}, a₂::Vec{3,T}) where T
     M₁₁ = C[1,1,1,1]*(a₁⊗a₁) + C[1,1,1,2]*(a₁⊗a₂ + a₂⊗a₁) + C[1,2,1,2]*(a₂⊗a₂)
@@ -562,8 +583,8 @@ end
 """
     membrane_residuals_RM_explicit!(re, scv, u_e, mat)
 
-RM membrane residual: `r_I = ∫ N^{αβ} ∂N_I^α a_β dΩ`.
-Stress resultant rows P_α = N^{αβ} a_β are precomputed once per QP.
+RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta dΩ``.
+Stress resultant rows ``P_\\alpha = N^{\\alpha\\beta} a_\\beta`` are precomputed once per QP.
 """
 function membrane_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -592,9 +613,10 @@ end
     membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
 
 RM membrane tangent.
-Material part: `K^mat_IJ = ∂N_I^α ∂N_J^δ M_{αδ}` where `M_{αδ} = C^{αβγδ} a_β⊗a_γ`.
-Geometric part: `K^geo_IJ = (∂N_I^α N^{αβ} ∂N_J^β) I₃`.
-Both M_{αδ} and N are precomputed once per QP outside the node loops.
+Material part: ``K^\\text{mat}_{IJ} = \\partial N_I^\\alpha \\partial N_J^\\delta M_{\\alpha\\delta}`` where
+``M_{\\alpha\\delta} = C^{\\alpha\\beta\\gamma\\delta} a_\\beta\\otimes a_\\gamma``.
+Geometric part: ``K^\\text{geo}_{IJ} = (\\partial N_I^\\alpha N^{\\alpha\\beta} \\partial N_J^\\beta) \\mathbb{h}_3``.
+Both M_{\\alphaδ} and N are precomputed once per QP outside the node loops.
 """
 function membrane_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -628,8 +650,8 @@ end
     apply_pointload!(f, dh, nodeset_name, load)
 
 Add a concentrated force `load::Vec{3}` to the displacement DOFs of all nodes in `nodeset_name`.
-Works for both single-field (:u only) and two-field (:u, :θ) DofHandlers; in both cases the
-:u DOFs for node I in a cell occupy local positions 3I-2:3I.
+Works for both single-field (`:u` only) and two-field (`:u`, `:θ`) DofHandlers; in both cases the
+`:u` DOFs for node I in a cell occupy local positions `3I-2:3I`.
 """
 function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
     node_set  = getnodeset(dh.grid, nodeset_name)

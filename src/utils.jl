@@ -165,3 +165,21 @@ function compute_volume(dh, scv, u::AbstractVector{T}) where T
     end
     return volume
 end
+
+function volume_residual!(scv, coords, uₑ)
+    h::Vec{3, T} = Vec((0.0, 0.0, 1.0))
+    b::Vec{3, T} = Vec((0.0, 0.0, -0.1))
+    for qp in 1:getnquadpoints(scv)
+        d = function_value(scv, qp, uₑ)
+        n = getnormal(scv, qp)
+        x = spatial_coordinate(scv, qp, coords)
+        ∇u = function_gradient(scv, qp, uₑ)
+        F = one(∇u) + ∇u
+        volume -=  det(F) * ((h ⊗ h) ⋅ (x + d - b)) ⋅ (transpose(inv(F)) ⋅ n) * getdetJdV(scv, qp)
+    end
+end
+
+function volume_tangent!(ke, scv::ShellCellValues, u_e)
+    volume(u) = (re = zeros(eltype(u), length(u)); volume_residual!(re, scv, u); re)
+    ke .+= ForwardDiff.jacobian(volume, u_e)
+end
