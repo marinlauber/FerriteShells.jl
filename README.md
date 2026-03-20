@@ -7,7 +7,7 @@
 ---
 
 This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff–Love linear, C⁰ Koiter (non-linear Kirchhoff–Love), Reissner–Mindlin, and Naghi (non-linear Reissner–Mindlin) shells.
-Specifically, this package provides a helper function to assemble the classical membrane, bending, and shear contributions to the residuals and the consistent tangent stiffness matrix.
+Specifically, this package provides functions to assemble the classical membrane, bending, and shear contributions to the residuals and the consistent tangent stiffness matrix.
 Proper assembly of these different terms leads to the different formulation mentioned above.
 
 We refer the reader to the specific weak form for each of these shells and their numerical implementation limitations.
@@ -50,22 +50,31 @@ for qp in 1:getnquadpoints(scv)
 end
 ```
 
-> [!WARNING]
-> For now, the residual and consistent tangent construction use `ForwardDiff.gradient` and `ForwardDiff.hessian`, so simplify implementation. This will be slow on large meshes (>1000 elements), in the future, explicit expressions should replace those. Medium term, we can start with the membrane term only for the Reissner-Mindlin shell.
-
 ### Shell obstacle course
 
 #### Cook's membrane
 
+![Cook's membrane](/docs/src/images/cooks_membrane.png)
+
 #### Scordelis-Lo roof
+
+![Scordelis-Lo roof](/docs/src/images/scoreldis_lo_roof.png)
 
 #### Pinched cylinder
 
+![Pinched cylinder](/docs/src/images/pinched_cylinder.png)
+
 #### Cantilever roll-up
+
+![Cantilever roll-up](/docs/src/images/cantilever_rollup.png)
 
 #### Hyperbolic paraboloid
 
+![Hyperbolic paraboloid](/docs/src/images/hyperbolic_paraboloid.png)
+
 #### Square airbag
+
+![Square airbag](/docs/src/images/airbag.png)
 
 ### Authors
 
