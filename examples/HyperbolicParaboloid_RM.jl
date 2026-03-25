@@ -9,10 +9,10 @@ function assemble_global_shell!(K, g, u, dh, scv, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         u_e = u[shelldofs(cell)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
-        bending_tangent_RM!(ke, scv, u_e, mat)
-        membrane_residuals_RM!(re, scv, u_e, mat)
-        bending_residuals_RM!(re, scv, u_e, mat)
+        FerriteShells.membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
+        FerriteShells.bending_tangent_RM_explicit!(ke, scv, u_e, mat)
+        FerriteShells.membrane_residuals_RM_explicit!(re, scv, u_e, mat)
+        FerriteShells.bending_residuals_RM_explicit!(re, scv, u_e, mat)
         assemble!(asm, shelldofs(cell), ke, re)
     end
 end
@@ -73,54 +73,56 @@ f_ext = zeros(ndofs(dh))
 assemble_traction!(f_ext, dh, getfacetset(grid, "traction"), ip, fqr, traction)
 
 # solve with Newton-Raphson
-let newton_itr = 0; @time while true
-    newton_itr += 1
-    # Construct the current guess
-    u .= un .+ Δu
-    # Compute residual and tangent for current guess
-    assemble_global_shell!(K, g, u, dh, scv, mat)
-    g .-= f_ext # apply external force
-    # Apply boundary conditions
-    apply_zero!(K, g, dbc)
-    # Compute the residual norm and compare with tolerance
-    norm(g[dbc.free_dofs]) < 1e-6 && break
-    newton_itr > 30 && break
-    # Compute increment
-    Δu .-= K \ g
-    # make sure BC are zero
-    apply_zero!(Δu, dbc)
-    # save
-    VTKGridFile("hyperbolic_paraboloid-$newton_itr", dh) do vtk
-        write_solution(vtk, dh, u); pvd[newton_itr] = vtk
-    end
-end; println("Converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
-end
-close(pvd);
-
-# load controlled Newton-Raphson
-# let λᵢ=0; @time for λ in 0.2:0.2:1.0
-#     # Newton solve for current load step
-#     λᵢ += 1; for newton_itr in 1:30
-#         # Construct the current guess
-#         u .= un .+ Δu
-#         # Compute residual and tangent for current guess
-#         assemble_global_shell!(K, g, u, dh, scv, mat)
-#         g .-= λ .* f_ext # apply external force
-#         # Apply boundary conditions
-#         apply_zero!(K, g, dbc)
-#         # Compute the residual norm and compare with tolerance
-#         norm(g[dbc.free_dofs]) < 1e-6 && break
-#         newton_itr > 30 && break
-#         # Compute increment
-#         Δu .-= K \ g
-#         # make sure BC are zero
-#         apply_zero!(Δu, dbc)
-#     end
-#     println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
+# let newton_itr = 0; @time while true
+#     newton_itr += 1
+#     # Construct the current guess
+#     u .= un .+ Δu
+#     # Compute residual and tangent for current guess
+#     assemble_global_shell!(K, g, u, dh, scv, mat)
+#     g .-= f_ext # apply external force
+#     # Apply boundary conditions
+#     apply_zero!(K, g, dbc)
+#     # Compute the residual norm and compare with tolerance
+#     norm(g[dbc.free_dofs]) < 1e-6 && break
+#     newton_itr > 30 && break
+#     # Compute increment
+#     Δu .-= K \ g
+#     # make sure BC are zero
+#     apply_zero!(Δu, dbc)
 #     # save
 #     VTKGridFile("hyperbolic_paraboloid-$newton_itr", dh) do vtk
 #         write_solution(vtk, dh, u); pvd[newton_itr] = vtk
 #     end
-# end
+# end; println("Converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
 # end
 # close(pvd);
+
+# load controlled Newton-Raphson
+let λᵢ=0; @time for λ in 0.2:0.2:1.0
+    # Newton solve for current load step
+    λᵢ += 1; newton_itr = 0
+    while true
+        newton_itr += 1
+        # Construct the current guess
+        u .= un .+ Δu
+        # Compute residual and tangent for current guess
+        assemble_global_shell!(K, g, u, dh, scv, mat)
+        g .-= λ .* f_ext # apply external force
+        # Apply boundary conditions
+        apply_zero!(K, g, dbc)
+        # Compute the residual norm and compare with tolerance
+        norm(g[dbc.free_dofs]) < 1e-6 && break
+        newton_itr > 30 && break
+        # Compute increment
+        Δu .-= K \ g
+        # make sure BC are zero
+        apply_zero!(Δu, dbc)
+    end
+    println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
+    # save
+    VTKGridFile("hyperbolic_paraboloid-$newton_itr", dh) do vtk
+        write_solution(vtk, dh, u); pvd[newton_itr] = vtk
+    end
+end
+end
+close(pvd);

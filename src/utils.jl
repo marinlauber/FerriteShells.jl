@@ -150,7 +150,7 @@ end
     compute_volume()
 
 Computes the volume of a shell in the configuration `u`.
-The vectors ``h`` and ``b`` define the reference and base positions, respectively. These can be used for open shells to remove 
+The vectors ``h`` and ``b`` define the reference and base positions, respectively. These can be used for open shells to remove
 contribution to the volume. For example, an inflated membrane on the x-y plane with +z deformation would be measured as
 ```Julia
 vol = compute_volume(dh, scv, u; h=Vec((0.0,0.0,1.0)), b=Vec((0.0,0.0,0.0)))
@@ -177,11 +177,33 @@ function volume_residual(scv, coords, uₑ::AbstractVector{T}, h, b) where T
         F = one(∇u) + ∇u
         val +=  det(F) * ((h ⊗ h) ⋅ (x + d - b)) ⋅ (transpose(inv(F)) ⋅ n) * getdetJdV(scv, qp)
     end
-    return val
+    return -val
 end
 
-function volume_tangent!(ke, scv::ShellCellValues, u_e::AbstractVector{T}) where T
-    # volume(u) = (re = zeros(eltype(u), length(u)); volume_residual!(re, scv, u); re)
-    # ke .+= ForwardDiff.jacobian(volume, u_e)
-    nothing
+function volume_residuals!(re, dh, scv::ShellCellValues, u::AbstractVector{T}, V⁰ᴰ; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
+    for cell in CellIterator(dh)
+        reinit!(scv, cell)
+        coords = getcoordinates(cell)
+        uₑ = u[shelldofs(cell)]
+        re[1] += volume_residual(scv, coords, uₑ, h, b)
+    end
+    re[1] += V⁰ᴰ
+end
+
+"""
+    volume_gradient!(dVdu, dh, scv, u; h, b)
+
+Compute the volume gradient ∂V₃D/∂u into `dVdu` via ForwardDiff.
+Each element contribution is `ForwardDiff.gradient(uₑ -> volume_residual(..., uₑ, h, b), uₑ)`
+assembled into the global DOF vector using the shell DOF permutation.
+"""
+function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
+    fill!(dVdu, zero(T))
+    for cell in CellIterator(dh)
+        reinit!(scv, cell)
+        coords = getcoordinates(cell)
+        sd  = shelldofs(cell)
+        uₑ  = u[sd]
+        dVdu[sd] .+= ForwardDiff.gradient(v -> volume_residual(scv, coords, v, h, b), uₑ)
+    end
 end

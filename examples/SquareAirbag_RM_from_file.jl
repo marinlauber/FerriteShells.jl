@@ -84,7 +84,7 @@ function make_quarter_pillow_grid(n; L=1.0)
     addfacetset!(grid, "sym_x", x -> isapprox(x[1], 0.0, atol=1e-10))
     addfacetset!(grid, "sym_y", x -> isapprox(x[2], 0.0, atol=1e-10))
     addnodeset!(grid, "center", x -> norm(x) < 1e-10)
-    addnodeset!(grid, "target", x -> isapprox(x[1], 0.25, atol=1e-6) && isapprox(x[2], 0.25, atol=1e-6))
+    addnodeset!(grid, "target", x -> isapprox(x[1], L/4, atol=1e-6) && isapprox(x[2], L/4, atol=1e-6))
     addcellset!(grid, "all", x -> true)
     return grid
 end
@@ -139,8 +139,8 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
     end
 end
 
-mat = LinearElastic(1.0e5, 0.3, 1e-2)
-grid = make_quarter_pillow_grid(16; L=1.0)
+mat = LinearElastic(1.0e5, 0.3, 2e-3)
+grid = make_quarter_pillow_grid(16; L=0.2)
 # grid = get_pillow_grid()
 
 addcustomnodeset!(grid, getcells(grid, "all"), "edge_top", x -> x[1] ≈ 0)
@@ -168,16 +168,9 @@ function generate_boundary_function(grid, nodeset)
     end
 end
 
-prescribed_u_top = generate_boundary_function(grid, "edge_top")
+# prescribed_u_top = generate_boundary_function(grid, "edge_top")
 
 ch = ConstraintHandler(dh)
-# add!(ch, Dirichlet(:u, getfacetset(grid, "edge"),  x -> 0.0, [3]))          # u_z=0 at boundary
-# add!(ch, Dirichlet(:θ, getfacetset(grid, "edge"),  x -> zeros(2), [1,2]))   # φ=0 at boundary
-# add!(ch, Dirichlet(:u, getfacetset(grid, "sym_x"), x -> 0.0, [1]))          # u_x=0 at x=0
-# add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_x"), x -> 0.0, [1]))          # φ₁=0 at x=0 (∂w/∂x=0)
-# add!(ch, Dirichlet(:u, getfacetset(grid, "sym_y"), x -> 0.0, [2]))          # u_y=0 at y=0
-# add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_y"), x -> 0.0, [2]))          # φ₂=0 at y=0 (∂w/∂y=0)
-
 # all edges fixed
 add!(ch, Dirichlet(:u, getfacetset(grid, "edge"),  x -> 0.0, [3]))          # u_z=0 at boundary
 add!(ch, Dirichlet(:u, getfacetset(grid, "sym_x"), x -> 0.0, [3]))          # u_z=0 at boundary
@@ -207,8 +200,8 @@ end
 # Displacement steps: trace p vs w_center from w=0 up to p=p_max.
 # Membrane theory: w ~ (p·L⁴/(E·t))^(1/3) → at p=500: w ≈ 0.63 m.
 p_max   = 500.0
-w_max   = 0.5         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
-n_steps = 160
+w_max   = 0.03         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
+n_steps = 100
 Δw      = w_max / n_steps   # = 0.005 m = 5·t per step
 tol     = 1e-6
 max_iter = 20
@@ -288,5 +281,6 @@ let u = zeros(N), p = 0.0
 end
 vtk_save(pvd);
 print_timer(title = "Analysis with $(getncells(grid)) elements", linechars = :ascii)
-# volume of 1/2 the pillow
-vol = compute_volume(dh, scv, u_final)
+# volume of 1/2 the pillow, in milliliters
+vol = 2compute_volume(dh, scv, u_final) * 1e6
+println("Pillow volume: $(round(vol, digits=3)) mL")

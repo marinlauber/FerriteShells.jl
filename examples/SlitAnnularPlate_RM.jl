@@ -90,8 +90,8 @@ function strain_energy(dh, scv, u, mat)
     for cell in CellIterator(dh)
         reinit!(scv, cell)
         u_e = u[shelldofs(cell)]
-        E += FerriteShells.rm_membrane_energy(u_e, scv, mat)
-        E += FerriteShells.rm_bending_shear_energy(u_e, scv, mat)
+        E += FerriteShells.membrane_energy_RM(u_e, scv, mat)
+        E += FerriteShells.bending_shear_energy_RM(u_e, scv, mat)
     end
     return E
 end

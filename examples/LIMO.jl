@@ -88,15 +88,11 @@ end
 
 
 # Assemble K_int, R_int, K_pres and F_p (all for unit pressure p=1) in one cell loop.
-function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
+function assemble_all!(K_int, r_int, dh, scv, u, mat)
     n_e = ndofs_per_cell(dh)
     ke_i = zeros(n_e, n_e)
     re_i = zeros(n_e)
-    ke_p = zeros(n_e, n_e)
-    re_p = zeros(n_e)
     asm_i = start_assemble(K_int, r_int)
-    asm_p = start_assemble(K_pres)
-    fill!(F_p, 0.0)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0)
         fill!(re_i, 0.0)
@@ -104,17 +100,24 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
         reinit!(scv, cell)
         sd = shelldofs(cell)
         u_e = u[sd]
-        FerriteShells.membrane_tangent_RM_impl!(ke_i, scv, u_e, mat)
-        FerriteShells.membrane_residuals_RM_impl!(re_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
+        FerriteShells.membrane_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+        FerriteShells.membrane_residuals_RM_explicit!(re_i, scv, u_e, mat)
+        FerriteShells.bending_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+        FerriteShells.bending_residuals_RM_explicit!(re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
+end
+
+function assemble_pressure!(K_pres, F_p, scv, u_e)
+    n_e = ndofs_per_cell(dh)
+    ke_p = zeros(n_e, n_e)
+    re_p = zeros(n_e)
+    asm_p = start_assemble(K_pres)
+    fill!(F_p, 0.0)
     # assemble the pressure for each cell set
     for cellset in keys(Ferrite.getcellsets(grid))
         for cell in CellIterator(dh, Ferrite.getcellset(grid, cellset))
-            fill!(ke_p, 0.0)
-            fill!(re_p, 0.0)
+            fill!(ke_p, 0.0); fill!(re_p, 0.0)
             reinit!(scv, cell)
             sd = shelldofs(cell)
             u_e = u[sd]
@@ -136,19 +139,11 @@ addfacetset!(grid, "edge", x -> x[2] ≈ 0.0)
 # addcustomfacetset!(grid, getcells(grid, "SRF_1"), "edge_top", x -> x[2] ≈ 0.0)
 # addcustomfacetset!(grid, getcells(grid, "SRF_8"), "edge_bottom", x -> x[2] ≈ 0.0)
 
-# Use custom NodeSet to slect prescribed Dirichlet nodes
+# Use custom NodeSet to select prescribed Dirichlet nodes
 addcustomnodeset!(grid, getcells(grid, "SRF_1"), "edge_top", x -> x[2] ≈ 0.0)
 addcustomnodeset!(grid, getcells(grid, "SRF_8"), "edge_bottom", x -> x[2] ≈ 0.0)
 
-
-function prescribed_u(x, t)
-    return [0., 0.]
-end
-function prescribed_θ(x, t)
-    return [0., 0.]
-end
-
-using Plots
+# using Plots
 # top_nodes = get_node_coordinate.(getnodes(grid, "edge_top"))
 # idx = sortperm(top_nodes)
 # L = maximum(first(maximum(top_nodes, dims=1) - minimum(top_nodes, dims=1)))
@@ -193,12 +188,12 @@ close!(dh)
 
 # make a dict of pressure and cellset
 pressures = Dict("SRF_1" => 1.104, "SRF_2" => 1.104,
-    "SRF_3" => 1.104, "SRF_4" => 1.104,
-    "SRF_5" => -1.104, "SRF_6" => -1.104,
-    "SRF_7" => -1.104, "SRF_8" => -1.104,
-    "SRF_9" => -1.104, "SRF_10" => -1.104,
-    "SRF_11" => -1.104, "SRF_12" => 1.104,
-    "SRF_13" => 1.104, "SRF_14" => 1.104)
+                 "SRF_3" => 1.104, "SRF_4" => 1.104,
+                 "SRF_5" => -1.104, "SRF_6" => -1.104,
+                 "SRF_7" => -1.104, "SRF_8" => -1.104,
+                 "SRF_9" => -1.104, "SRF_10" => -1.104,
+                 "SRF_11" => -1.104, "SRF_12" => 1.104,
+                 "SRF_13" => 1.104, "SRF_14" => 1.104)
 
 # add boundary conditions
 ch = ConstraintHandler(dh)
@@ -207,7 +202,7 @@ add!(ch, Dirichlet(:u, getnodeset(grid, "edge_top"), (x, t) -> prescribed_u_top(
 # add!(ch, Dirichlet(:θ, getnodeset(grid, "edge_top"), (x, t) -> prescribed_θ(x, t), [1, 2]))
 add!(ch, Dirichlet(:u, getnodeset(grid, "edge_bottom"), (x, t) -> [1,-1].*prescribed_u_bottom(x, t), [1, 3]))
 # add!(ch, Dirichlet(:θ, getnodeset(grid, "edge_bottom"), (x, t) -> prescribed_θ(x, t), [1, 2]))
-close!(ch); update!(ch, 1.0)
+close!(ch); update!(ch, 0.0)
 
 # allocate matrix and vectors
 N = ndofs(dh)
@@ -216,22 +211,84 @@ K_pres = allocate_matrix(dh)
 r_int = zeros(N)
 f_p = zeros(N)
 u = zeros(N)
+Δu = zeros(N)
+ΔΔu = zeros(N)
+un = zeros(N)
 
 # assemble
-p = 1.0
-@time assemble_all!(K_int, r_int, K_pres, f_p, dh, scv, u, mat)
-K_eff = K_int - p .* K_pres
-rhs1 = p .* f_p .- r_int
-apply_zero!(K_eff, rhs1, ch) # this does nothing
-apply!(K_eff, rhs1, ch)
+# p = 1.0
+# @time assemble_all!(K_int, r_int, K_pres, f_p, dh, scv, u, mat)
+# K_eff = K_int - p .* K_pres
+# rhs1 = p .* f_p .- r_int
+# apply_zero!(K_eff, rhs1, ch) # this does nothing
+# apply!(K_eff, rhs1, ch)
 # solve
-@time u = K_eff \ rhs1
-v2 = K_eff \ f_p
+# @time u = K_eff \ rhs1
+# v2 = K_eff \ f_p
 
 # save results
-VTKGridFile("LIMO", dh) do vtk
-    write_solution(vtk, dh, u)
-    # Ferrite.write_node_data(vtk, v2, "load dir")
-    Ferrite.write_constraints(vtk, ch)
-    color(vtk, grid)
+# VTKGridFile("LIMO", dh) do vtk
+#     write_solution(vtk, dh, u)
+#     # Ferrite.write_node_data(vtk, v2, "load dir")
+#     Ferrite.write_constraints(vtk, ch)
+#     color(vtk, grid)
+# end
+
+using WriteVTK
+pvd = paraview_collection("limo")
+# load controlled Newton-Raphson
+let λᵢ=0; @time for λ in 0.0:0.001:1.0
+    VTKGridFile("limo-0", dh) do vtk
+        write_solution(vtk, dh, u); pvd[0.0] = vtk
+    end
+     # Newton solve for current displacement step
+    λᵢ += 1; newton_itr = -1
+    # update the boundary conditions for the current load step
+    Ferrite.update!(ch, λ)
+    while true
+        newton_itr += 1
+        # Construct the current guess and enforce BCs at current λ
+        u .= un .+ Δu
+        apply!(u, ch)
+        # Compute residual and tangent for current guess
+        assemble_all!(K_int, r_int, dh, scv, u, mat)
+        # Apply boundary conditions
+        apply_zero!(K_int, r_int, ch)
+        # Compute the residual norm and compare with tolerance
+        normg = norm(r_int)
+        println("residual norm= ",normg)
+        if normg < 1e-6
+            break
+        elseif newton_itr > 10
+            error("Reached maximum Newton iterations, aborting at $(norm(r_int[ch.free_dofs]))")
+        end
+        # Compute Newton increment via direct solve
+        K_free = Matrix(K_int)[ch.free_dofs, ch.free_dofs]
+        d = diag(K_free)
+        @show minimum(d), maximum(d), maximum(d)/minimum(d)
+        ΔΔu .= K_int \ r_int
+        apply_zero!(ΔΔu, ch)
+        # backtracking if residual increase at some point
+        α = 1.0
+        normg0 = normg
+        for _ in 1:10
+            Δu_trial = Δu .- α .* ΔΔu
+            u_trial = un .+ Δu_trial; apply!(u_trial, ch)
+            assemble_all!(K_int, r_int, dh, scv, u_trial, mat)
+            apply_zero!(K_int, r_int, ch)
+            norm(r_int) < normg0 && break
+            α *= 0.5
+        end
+        Δu .-= α .* ΔΔu
+    end
+    println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(r_int[ch.free_dofs]))")
+    # Commit converged solution and reset increment for next load step
+    un .= u
+    fill!(Δu, 0.0)
+    # save
+    VTKGridFile("limo-$λᵢ", dh) do vtk
+        write_solution(vtk, dh, u); pvd[λᵢ] = vtk
+    end
+end;
 end
+close(pvd);

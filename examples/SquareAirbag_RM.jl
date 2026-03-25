@@ -64,7 +64,7 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
     end
 end
 
-n   = 16
+n   = 32
 L   = 1.0
 mat = LinearElastic(1.0e6, 0.3, 1e-2)
 

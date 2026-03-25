@@ -69,10 +69,10 @@ function assemble_global!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         u_e = u[shelldofs(cell)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
-        membrane_residuals_RM!(re, scv, u_e, mat)
-        bending_tangent_RM!(ke, scv, u_e, mat)
-        bending_residuals_RM!(re, scv, u_e, mat)
+        FerriteShells.membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
+        FerriteShells.membrane_residuals_RM_explicit!(re, scv, u_e, mat)
+        FerriteShells.bending_tangent_RM_explicit!(ke, scv, u_e, mat)
+        FerriteShells.bending_residuals_RM_explicit!(re, scv, u_e, mat)
         assemble!(asm, shelldofs(cell), ke, re)
     end
 end
@@ -83,8 +83,8 @@ function strain_energy(dh, scv, u, mat)
     for cell in CellIterator(dh)
         reinit!(scv, cell)
         u_e = u[shelldofs(cell)]
-        E += FerriteShells.rm_membrane_energy(u_e, scv, mat)
-        E += FerriteShells.rm_bending_shear_energy(u_e, scv, mat)
+        E += FerriteShells.membrane_energy_RM(u_e, scv, mat)
+        E += FerriteShells.bending_shear_energy_RM(u_e, scv, mat)
     end
     return E
 end
@@ -102,8 +102,8 @@ end
 
 mat   = LinearElastic(1.2e6, 0.0, t)
 EI    = mat.E * W * t^3 / 12
-M_ref = 2π * EI / L
-m_ref = M_ref / W
+M_ref = 3*2π * EI / L
+m_ref = 3*M_ref / W
 
 grid  = make_rollup_grid()
 ip    = Lagrange{RefQuadrilateral, 2}()
@@ -188,4 +188,9 @@ for step in 1:n_steps
     α_deg = λ * 360
     @printf("  %4d | %.4f | %5.1f | %9.4f | %9.4f | %7.4f | %7.4f | %d\n",
             step, λ, α_deg, tip_ux, tip_uz, ux_an, uz_an, n_iter)
+
+            # write to vtk
+    VTKGridFile("cantilever_rollup", dh) do vtk
+        write_solution(vtk, dh, u)
+    end
 end
