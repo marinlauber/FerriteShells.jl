@@ -129,21 +129,21 @@ params = (Ra,Ca,Rv,Cv,Rp,Pv)
 prob = ODE.ODEProblem(Windkessel!, u₀, tspan, params)
 
 # full control over iterations
-integrator = ODE.init(prob, ODE.Tsit5(), dtmax=0.001, reltol=1e-6,
+integrator = ODE.init(prob, ODE.Tsit5(), reltol=1e-6,
                       abstol=1e-9, save_everystep=false)
 
 # solve the ODE oroblem to get the reference solution for the uncoupled 0D model
-sol = ODE.solve(ODE.ODEProblem(Windkessel_init!, [100, 80, 60], tspan, params),
-                ODE.Tsit5(), dtmax=0.001)
-V0 = 20; Emin = 0.05; Emax = 2.0
-PLV = @. (Emin+(Emax-Emin)*ϕᵢ(sol.t;tC=0.0,tR=0.40,TC=0.40,TR=0.2))*(sol[1,:]-V0)
-p1 = plot(sol.t, PLV,label="P_\\ LV",lw=2)
-plot!(p1, sol, idxs=[1,2], linewidth=2, xaxis="Time (t/T)", yaxis="Pressure (mmHg)",
-      label=["V_\\ LV" "P_\\ AO"], ylims=(0,160))
-plot!(p1, sol.t, Pv.*ones(length(sol.t)), label="P_\\ Fill", lw=2)
-p2 = plot(getindex.(sol.u, 1), PLV, alpha=0.5,
-          label=:none, lw=2, xlims=(0,180), ylims=(0,100), xlabel="Volume")
-plot(p1,p2;layout=(1,2),size=(1200,400))
+# sol = ODE.solve(ODE.ODEProblem(Windkessel_init!, [100, 80, 60], tspan, params),
+#                 ODE.Tsit5(), dtmax=0.001)
+# V0 = 20; Emin = 0.05; Emax = 2.0
+# PLV = @. (Emin+(Emax-Emin)*ϕᵢ(sol.t;tC=0.0,tR=0.40,TC=0.40,TR=0.2))*(sol[1,:]-V0)
+# p1 = plot(sol.t, PLV,label="P_\\ LV",lw=2)
+# plot!(p1, sol, idxs=[1,2], linewidth=2, xaxis="Time (t/T)", yaxis="Pressure (mmHg)",
+#       label=["V_\\ LV" "P_\\ AO"], ylims=(0,160))
+# plot!(p1, sol.t, Pv.*ones(length(sol.t)), label="P_\\ Fill", lw=2)
+# p2 = plot(getindex.(sol.u, 1), PLV, alpha=0.5,
+#           label=:none, lw=2, xlims=(0,180), ylims=(0,100), xlabel="Volume")
+# plot(p1,p2;layout=(1,2),size=(1200,400))
 
 # Geometry scaled to match the Windkessel ODE units (mmHg, ml):
 #
@@ -154,8 +154,8 @@ plot(p1,p2;layout=(1,2),size=(1200,400))
 #   Calibrated from the SquareAirbag reference (C≈0.126, κ≈0.16).
 #   Solving for the target operating point with E=1 MPa gives L≈0.15 m, t≈8 mm.
 n   = 16
-L   = 0.15
-mat = LinearElastic(4.0e5, 0.3, 8e-3)
+L   = 0.1
+mat = LinearElastic(4.0e4, 0.3, 8e-3)
 
 grid = make_quarter_pillow_grid(n; L)
 ip   = Lagrange{RefQuadrilateral, 2}()
@@ -191,7 +191,7 @@ max_iter = 20
 dt_cpl   = 0.01   # coupling (macro) time step [s]; ODE may take smaller internal steps
 
 # Displacement steps: trace p vs w_center from w=0 up to p=p_max.
-V_target   = sol.u[end][1] / m3_to_ml / 4 # target is last solution
+# V_target   = sol.u[end][1] / m3_to_ml / 4 # target is last solution
 tol     = 1e-6
 max_iter = 20
 
