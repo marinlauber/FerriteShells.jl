@@ -157,3 +157,33 @@ In your RM explicit tangent (bending_tangent_RM_explicit!), the most likely sour
 ∂²d/∂φ∂φ term that's only assembled on diagonal J=I blocks. If that term is slightly off, you'd see 4–5 iterations instead of 3 on
 bending-dominated problems, but it wouldn't diverge. You can always verify by replacing the explicit tangent temporarily with a ForwardDiff 
 Jacobian of the residual and checking if the iteration count drops back to 3.
+
+# Two RHS per iteration: residual and reference load direction                                                                                                   
+  v1 = K_free \ (-r_free)          # standard Newton step                                                                                                          
+  v2 = K_free \ f_ref_free         # tangent to λ direction                                                                                                        
+                                                                                                                                                                   
+  # arc-length constraint gives δλ (cylindrical)                                                                                                                   
+  δλ = (-dot(Δu_free, v1)) / (dot(Δu_free, v2) + ψ² * Δλ)
+  δu = v1 + δλ * v2                                                                                                                                                
+                                                                                                                                                                   
+  Δu_free .+= δu; Δλ += δλ                                                                                                                                         
+                                                                                                                                                                   
+  The tricky part is computing f_ref_free. For your case (prescribed displacements scaling with λ), the cleanest approach is a finite difference:
+                                                                                                                                                                   
+  ε = 1e-6                                                  
+  update!(ch, λ + ε); u_pert = copy(u); apply!(u_pert, ch)                                                                                                         
+  assemble_all!(K_tmp, r_pert, dh, scv, u_pert, mat)        
+  apply_zero!(K_tmp, r_pert, ch)                                                                                                                                   
+  f_ref = (r_pert .- r_int) ./ ε   # only free DOFs matter  
+  update!(ch, λ)                    # restore                                                                                                                      
+                                                            
+  The predictor (first step from a converged point) is just the tangent direction normalized to Δs:                                                                
+                                                                                                                                                                   
+  v_pred = K_free \ f_ref_free                                                                                                                                     
+  Δλ_pred = Δs / sqrt(dot(v_pred, v_pred) + ψ²)                                                                                                                    
+  Δu_pred = Δλ_pred * v_pred                                
+                                                                                                                                                                   
+  The sign of Δλ_pred should follow the previous step to stay on the same branch.                                                                                  
+                                                                                                                                                                   
+  ψ scales the relative weight of λ vs displacement in the arc-length — ψ = 0 gives cylindrical (displacement only), ψ = 1 gives spherical. Start with ψ = 0 since 
+  λ and displacements have very different magnitudes here.    
