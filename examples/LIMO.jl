@@ -85,7 +85,16 @@ function map_initial(x, y, Ar)
     find_points(x, y, a, a / Ar, L)
 end
 
-
+function strain_energy(dh, scv, u, mat)
+      E = 0.0
+      for cell in CellIterator(dh)
+          reinit!(scv, cell)
+          u_e = @views u[shelldofs(cell)]
+          E += FerriteShells.membrane_energy_RM(u_e, scv, mat)
+          E += FerriteShells.bending_shear_energy_RM(u_e, scv, mat)
+      end
+      E
+  end
 
 # Assemble K_int, R_int, K_pres and F_p (all for unit pressure p=1) in one cell loop.
 function assemble_all!(K_int, r_int, dh, scv, u, mat)
@@ -178,7 +187,7 @@ qr = QuadratureRule{RefQuadrilateral}(3)
 scv = ShellCellValues(qr, ip, ip)
 
 # material model
-mat = LinearElastic(20000.0, 0.33, 0.0016)
+mat = LinearElastic(20000.0, 0.33, 0.016)
 
 # degrees of freedom of the problem
 dh = DofHandler(grid)
@@ -234,6 +243,10 @@ un = zeros(N)
 #     color(vtk, grid)
 # end
 
+# store the results of the newton step
+t_store = []
+u_store = copy(u)
+
 using WriteVTK
 pvd = paraview_collection("limo")
 # load controlled Newton-Raphson
@@ -258,6 +271,7 @@ let λᵢ=0; @time for λ in 0.0:0.001:1.0
         normg = norm(r_int)
         println("residual norm= ",normg)
         if normg < 1e-6
+            push!(t_store, λ)
             break
         elseif newton_itr > 10
             error("Reached maximum Newton iterations, aborting at $(norm(r_int[ch.free_dofs]))")
@@ -269,14 +283,22 @@ let λᵢ=0; @time for λ in 0.0:0.001:1.0
         ΔΔu .= K_int \ r_int
         apply_zero!(ΔΔu, ch)
         # backtracking if residual increase at some point
-        α = 1.0
-        normg0 = normg
-        for _ in 1:10
-            Δu_trial = Δu .- α .* ΔΔu
-            u_trial = un .+ Δu_trial; apply!(u_trial, ch)
-            assemble_all!(K_int, r_int, dh, scv, u_trial, mat)
-            apply_zero!(K_int, r_int, ch)
-            norm(r_int) < normg0 && break
+        # residual norm Armiijo is broken for shells
+        # α = 1.0; normg0 = normg
+        # for _ in 1:10
+        #     Δu_trial = Δu .- α .* ΔΔu
+        #     u_trial = un .+ Δu_trial; apply!(u_trial, ch)
+        #     assemble_all!(K_int, r_int, dh, scv, u_trial, mat)
+        #     apply_zero!(K_int, r_int, ch)
+        #     norm(r_int) < normg0 && break
+        #     α *= 0.5
+        # end
+        # energy Armijo
+        slope = dot(ΔΔu, r_int)      # = r_int' K⁻¹ r_int > 0
+        α = 1.0; E0 = strain_energy(dh, scv, u, mat) #- dot(f_p, u)
+        for _ in 1:30
+            u_trial = un .+ (Δu .- α .* ΔΔu); apply!(u_trial, ch)
+            strain_energy(dh, scv, u_trial, mat) #=- dot(f_p, u)=# ≤ E0 - 1e-4 * α * slope && break
             α *= 0.5
         end
         Δu .-= α .* ΔΔu
@@ -292,3 +314,44 @@ let λᵢ=0; @time for λ in 0.0:0.001:1.0
 end;
 end
 close(pvd);
+
+using JLD2
+# jldsave("limo_results.jld2", t_store=t_store, un=un)
+# jld = jldopen("limo_results.jld2", "r")
+# t_store = jld["t_store"]
+# un = jld["un"]
+
+
+# Condition number / stiffness quality
+K_free = Matrix(K_int[ch.free_dofs, ch.free_dofs])
+# @show cond(Matrix(K_free))
+# d = diag(K_free)
+# @show extrema(d), maximum(d)/minimum(d)
+# λ_min = minimum(eigvals(K_free))
+
+# Which DOF components are driving the residual overshoot
+assemble_all!(K_int, r_int, dh, scv, un, mat)
+apply_zero!(K_int, r_int, ch)
+# split by field
+n_u = length(ch.free_dofs)  # rough split
+@show norm(r_int[1:3:end])  # u₁ components
+@show norm(r_int[2:3:end])  # u₂
+@show norm(r_int[3:3:end])  # u₃
+@show norm(r_int[n_u:2:end])  # φ₁
+@show norm(r_int[n_u+1:2:end])  # φ₂
+
+r_u_node = zeros(3, getnnodes(dh.grid))
+r_θ_node = zeros(2, getnnodes(dh.grid))
+for cell in CellIterator(dh)
+    sd = shelldofs(cell)
+    for (I, nid) in enumerate(cell.nodes)
+        r_u_node[:, nid] .= r_int[sd[5I-4:5I-2]]
+        r_θ_node[:, nid] .= r_int[sd[5I-1:5I  ]]
+    end
+end
+
+VTKGridFile("limo_last_converged", dh) do vtk
+    write_solution(vtk, dh, un)
+    write_node_data(vtk, r_u_node, "residual_u")
+    write_node_data(vtk, r_θ_node, "residual_theta")
+end
