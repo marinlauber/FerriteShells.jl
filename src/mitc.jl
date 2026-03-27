@@ -20,6 +20,7 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     G₃_tie_1 :: Vector{Vec{3,T}}; T₁_tie_1 :: Vector{Vec{3,T}}; T₂_tie_1 :: Vector{Vec{3,T}}
     A₁_tie_2 :: Vector{Vec{3,T}}; A₂_tie_2 :: Vector{Vec{3,T}}  # ref geometry at γ₂ tying pts
     G₃_tie_2 :: Vector{Vec{3,T}}; T₁_tie_2 :: Vector{Vec{3,T}}; T₂_tie_2 :: Vector{Vec{3,T}}
+    ξ_tie_1::Vector{Vec{2,T}};  ξ_tie_2::Vector{Vec{2,T}} # local coorindates of the tying points
 end
 
 # empty MITC is standard
@@ -27,6 +28,32 @@ struct NoMITC <: AbstractMITC end
 
 import Ferrite: reinit!
 reinit!(::NoMITC, args...) = nothing
+function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}}) where {N,M,T}
+    n_geo = getnbasefunctions(ip_geo)
+    for (k, ξ_k) in enumerate(mitc.ξ_tie_1)
+        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
+        for i in 1:n_geo
+            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
+            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
+        end
+        G₃ = (A₁ × A₂) / norm(A₁ × A₂)
+        T₁ = A₁ / norm(A₁); T₂ = (G₃ × T₁) / norm(G₃ × T₁)
+        mitc.A₁_tie_1[k] = A₁; mitc.A₂_tie_1[k] = A₂
+        mitc.G₃_tie_1[k] = G₃; mitc.T₁_tie_1[k] = T₁; mitc.T₂_tie_1[k] = T₂
+    end
+    for (k, ξ_k) in enumerate(mitc.ξ_tie_2)
+        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
+        for i in 1:n_geo
+            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
+            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
+        end
+        G₃ = (A₁ × A₂) / norm(A₁ × A₂)
+        T₁ = A₁ / norm(A₁); T₂ = (G₃ × T₁) / norm(G₃ × T₁)
+        mitc.A₁_tie_2[k] = A₁; mitc.A₂_tie_2[k] = A₂
+        mitc.G₃_tie_2[k] = G₃; mitc.T₁_tie_2[k] = T₁; mitc.T₂_tie_2[k] = T₂
+    end
+end
+
 
 # default is no tying shear strain
 @inline tying_shear_strains(::NoMITC, u_e) = nothing, nothing

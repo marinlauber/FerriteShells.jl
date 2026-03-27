@@ -1,12 +1,3 @@
-
-# Tying points
-const MITC9_ξ_tie_1 = let s = 1/sqrt(3)
-    (Vec{2}((-s,-1.)), Vec{2}((s,-1.)), Vec{2}((-s,0.)), Vec{2}((s,0.)), Vec{2}((-s,1.)), Vec{2}((s,1.)))
-end
-const MITC9_ξ_tie_2 = let s = 1/sqrt(3)
-    (Vec{2}((-1.,-s)), Vec{2}((0.,-s)), Vec{2}((1.,-s)), Vec{2}((-1.,s)), Vec{2}((0.,s)), Vec{2}((1.,s)))
-end
-
 """
     MITC{9,T}
 
@@ -21,16 +12,20 @@ function MITC9(ip_shape::Interpolation, qr::QuadratureRule)
     T       = Float64
     n_shape = getnbasefunctions(ip_shape)
     n_qp    = length(qr.weights)
-
+    # tying point for Q9
+    s = 1/sqrt(3)
+    ξ_tie_1 = [Vec{2}((-s,-1.)), Vec{2}((s,-1.)), Vec{2}((-s,0.)), Vec{2}((s,0.)), Vec{2}((-s,1.)), Vec{2}((s,1.))]
+    ξ_tie_2 = [Vec{2}((-1.,-s)), Vec{2}((0.,-s)), Vec{2}((1.,-s)), Vec{2}((-1.,s)), Vec{2}((0.,s)), Vec{2}((1.,s))]
+    # shape values there
     N_tie_1 = zeros(T, n_shape, 6);  dNdξ_tie_1 = Matrix{Vec{2,T}}(undef, n_shape, 6)
     N_tie_2 = zeros(T, n_shape, 6);  dNdξ_tie_2 = Matrix{Vec{2,T}}(undef, n_shape, 6)
-    for (k, ξ_k) in enumerate(MITC9_ξ_tie_1)
+    for (k, ξ_k) in enumerate(ξ_tie_1)
         for I in 1:n_shape
             dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
             N_tie_1[I, k] = Nval;  dNdξ_tie_1[I, k] = dN
         end
     end
-    for (k, ξ_k) in enumerate(MITC9_ξ_tie_2)
+    for (k, ξ_k) in enumerate(ξ_tie_2)
         for I in 1:n_shape
             dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
             N_tie_2[I, k] = Nval;  dNdξ_tie_2[I, k] = dN
@@ -57,31 +52,6 @@ function MITC9(ip_shape::Interpolation, qr::QuadratureRule)
         fill(zero(Vec{3,T}), 6), fill(zero(Vec{3,T}), 6), fill(zero(Vec{3,T}), 6),
         fill(zero(Vec{3,T}), 6), fill(zero(Vec{3,T}), 6),
         fill(zero(Vec{3,T}), 6), fill(zero(Vec{3,T}), 6), fill(zero(Vec{3,T}), 6),
+        ξ_tie_1, ξ_tie_2,
     )
-end
-
-function reinit!(mitc::MITC{9}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}})
-    n_geo = getnbasefunctions(ip_geo)
-    for (k, ξ_k) in enumerate(MITC9_ξ_tie_1)
-        A₁ = zero(Vec{3,Float64}); A₂ = zero(Vec{3,Float64})
-        for i in 1:n_geo
-            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
-            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-        end
-        G₃ = (A₁ × A₂) / norm(A₁ × A₂)
-        T₁ = A₁ / norm(A₁); T₂ = (G₃ × T₁) / norm(G₃ × T₁)
-        mitc.A₁_tie_1[k] = A₁; mitc.A₂_tie_1[k] = A₂
-        mitc.G₃_tie_1[k] = G₃; mitc.T₁_tie_1[k] = T₁; mitc.T₂_tie_1[k] = T₂
-    end
-    for (k, ξ_k) in enumerate(MITC9_ξ_tie_2)
-        A₁ = zero(Vec{3,Float64}); A₂ = zero(Vec{3,Float64})
-        for i in 1:n_geo
-            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
-            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-        end
-        G₃ = (A₁ × A₂) / norm(A₁ × A₂)
-        T₁ = A₁ / norm(A₁); T₂ = (G₃ × T₁) / norm(G₃ × T₁)
-        mitc.A₁_tie_2[k] = A₁; mitc.A₂_tie_2[k] = A₂
-        mitc.G₃_tie_2[k] = G₃; mitc.T₁_tie_2[k] = T₁; mitc.T₂_tie_2[k] = T₂
-    end
 end
