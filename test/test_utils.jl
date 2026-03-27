@@ -124,25 +124,26 @@ end
         end
     end
 
-    # Zero displacement, explicit b_z=-0.1: enclosed height = 0.1 over unit area → volume = 0.1.
-    @test compute_volume(dh, scv, zeros(ndofs(dh)); b=Vec((0.0,0.0,-0.1))) ≈ 0.1 atol=1e-10
+    # compute_volume returns −V_physical (volume_residual sign convention: return -val).
+    # Physical enclosed volume = −compute_volume.
 
-    # Default b=(0,0,0): zero displacement at z=0 → enclosed height = 0 → volume = 0.
+    # Zero displacement, explicit b_z=-0.1: enclosed height = 0.1 over unit area → physical = 0.1.
+    @test compute_volume(dh, scv, zeros(ndofs(dh)); b=Vec((0.0,0.0,-0.1))) ≈ -0.1 atol=1e-10
+
+    # Default b=(0,0,0): zero displacement at z=0 → zero volume.
     @test compute_volume(dh, scv, zeros(ndofs(dh))) ≈ 0.0 atol=1e-10
 
-    # Uniform z-translation by Δz with default b=(0,0,0): F=I (constant u → ∇u=0), volume = Δz.
+    # Uniform z-translation by Δz: F=I, physical volume = Δz → compute_volume = -Δz.
     Δz = 0.3
     u_inf = zeros(ndofs(dh))
     set_uz!(u_inf, dh, _ -> Δz)
-    @test compute_volume(dh, scv, u_inf) ≈ Δz atol=1e-10
+    @test compute_volume(dh, scv, u_inf) ≈ -Δz atol=1e-10
 
-    # Linearly varying u_z = α*x with default b=(0,0,0): F has a non-trivial deformation gradient.
-    # Via the divergence theorem: ∫₀¹∫₀¹ α*x dx dy = α/2.
-    # det(F) * F⁻ᵀ*ê_z correctly reduces to (α*x) * ê_z via the Nanson identity.
+    # Linearly varying u_z = α*x: ∫₀¹∫₀¹ α*x dx dy = α/2 → compute_volume = -α/2.
     α = 0.2
     u_shear = zeros(ndofs(dh))
     set_uz!(u_shear, dh, x -> α * x[1])
-    @test compute_volume(dh, scv, u_shear) ≈ α/2 atol=1e-8
+    @test compute_volume(dh, scv, u_shear) ≈ -α/2 atol=1e-8
 end
 
 @testset "compute_volume: closed surface (divergence theorem)" begin
@@ -178,7 +179,7 @@ end
     for (L, W, H) in ((1.0, 1.0, 1.0), (2.0, 3.0, 4.0))
         grid = make_cube_grid(L, W, H)
         dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
-        @test compute_volume(dh, scv, zeros(ndofs(dh))) ≈ L * W * H atol=1e-10
+        @test compute_volume(dh, scv, zeros(ndofs(dh))) ≈ -L * W * H atol=1e-10
     end
 end
 
@@ -286,8 +287,8 @@ end
         fill!(ke3, 0.0); fill!(re3, 0.0)
         reinit!(scv3, cell)
         x = getcoordinates(cell); u_e = zeros(n_el)
-        membrane_tangent_RM!(ke3, scv3, u_e, mat3)
-        bending_tangent_RM!(ke3, scv3, u_e, mat3)
+        membrane_tangent_RM_FD!(ke3, scv3, u_e, mat3)
+        bending_tangent_RM_FD!(ke3, scv3, u_e, mat3)
         assemble!(asmb3, shelldofs(cell), ke3, re3)
     end
     dbc3 = ConstraintHandler(dh3)

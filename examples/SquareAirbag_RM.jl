@@ -47,13 +47,13 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
             u_e = u[sd]
         end
         @timeit "residuals" begin
-            @timeit "membrane residual" FerriteShells.membrane_residuals_RM_explicit!(re_i, scv, u_e, mat)
-            @timeit "bending residual"  FerriteShells.bending_residuals_RM_explicit!(re_i, scv, u_e, mat)
+            @timeit "membrane residual" membrane_residuals_RM!(re_i, scv, u_e, mat)
+            @timeit "bending residual"  bending_residuals_RM!(re_i, scv, u_e, mat)
             @timeit "pressure residual" assemble_pressure!(re_p, scv, u_e, 1.0)
         end
         @timeit "tangent" begin
-            @timeit "membrane tangent" FerriteShells.membrane_tangent_RM_explicit!(ke_i, scv, u_e, mat)
-            @timeit "bending tangent"  FerriteShells.bending_tangent_RM_explicit!(ke_i, scv, u_e, mat)
+            @timeit "membrane tangent" membrane_tangent_RM!(ke_i, scv, u_e, mat)
+            @timeit "bending tangent"  bending_tangent_RM!(ke_i, scv, u_e, mat)
             @timeit "pressure tangent" assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
         end
         @timeit "global assembly" begin

@@ -151,21 +151,21 @@ function membrane_energy_RM(u_flat, scv::ShellCellValues, mat)
 end
 
 """
-    membrane_residuals_RM!(re, scv, u_e, mat)
+    membrane_residuals_RM_FD!(re, scv, u_e, mat)
 
 Reissner–Mindlin membrane residual. `u_e` is a flat vector of length 5·n_nodes.
 """
-function membrane_residuals_RM!(re, scv, u_e, mat)
+function membrane_residuals_RM_FD!(re, scv, u_e, mat)
     re .+= ForwardDiff.gradient(u -> membrane_energy_RM(u, scv, mat), u_e)
 end
 
 """
-    membrane_residuals_RM_explicit!(re, scv, u_e, mat)
+    membrane_residuals_RM!(re, scv, u_e, mat)
 
 RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta dΩ``.
 Stress resultant rows ``P_\\alpha = N^{\\alpha\\beta} a_\\beta`` are precomputed once per QP.
 """
-function membrane_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
+function membrane_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
@@ -190,11 +190,11 @@ end
 
 
 """
-    membrane_tangent_RM!(ke, scv, u_e, mat)
+    membrane_tangent_RM_FD!(ke, scv, u_e, mat)
 
 Reissner–Mindlin membrane tangent. `u_e` is a flat vector of length 5·n_nodes.
 """
-function membrane_tangent_RM!(ke, scv, u_e, mat)
+function membrane_tangent_RM_FD!(ke, scv, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> membrane_energy_RM(u, scv, mat), u_e)
 end # 1050 μs (26 allocations: 115.21 KiB) on a 45x45 matrix
 
@@ -209,7 +209,7 @@ end # 1050 μs (26 allocations: 115.21 KiB) on a 45x45 matrix
 end
 
 """
-    membrane_tangent_RM_explicit!(ke, scv, u_e, mat)
+    membrane_tangent_RM!(ke, scv, u_e, mat)
 
 RM membrane tangent.
 Material part: ``K^\\text{mat}_{IJ} = \\partial N_I^\\alpha \\partial N_J^\\delta M_{\\alpha\\delta}`` where
@@ -217,7 +217,7 @@ Material part: ``K^\\text{mat}_{IJ} = \\partial N_I^\\alpha \\partial N_J^\\delt
 Geometric part: ``K^\\text{geo}_{IJ} = (\\partial N_I^\\alpha N^{\\alpha\\beta} \\partial N_J^\\beta) \\mathbb{h}_3``.
 Both M_{\\alphaδ} and N are precomputed once per QP outside the node loops.
 """
-function membrane_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
+function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
@@ -261,6 +261,7 @@ function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
@@ -288,8 +289,7 @@ function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
         κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
         κ₂₂ = dot(a₂, d₂) - B[2,2]
         κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
-        γ₁  = dot(a₁, d)
-        γ₂  = dot(a₂, d)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         Aup  = inv(scv.A_metric[qp])
         G_sh = mat.E / (2*(1 + mat.ν))
@@ -303,15 +303,15 @@ function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
 end
 
 """
-    bending_residuals_RM!(re, scv, u_e, mat)
+    bending_residuals_RM_FD!(re, scv, u_e, mat)
 
 Reissner–Mindlin bending + transverse shear residual. `u_e` is a flat vector of length 5·n_nodes.
 """
-function bending_residuals_RM!(re, scv, u_e, mat)
+function bending_residuals_RM_FD!(re, scv, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_shear_energy_RM(u, scv, mat), u_e)
 end
 """
-    bending_residuals_RM_explicit!(re, scv, u_e, mat)
+    bending_residuals_RM!(re, scv, u_e, mat)
 
 RM bending + transverse shear residual, explicit index-notation form.
 
@@ -321,9 +321,10 @@ where `P^\\alpha = M^{\\alpha\\beta} d_{,\\beta} + Q^\\alpha d`, M = D⊡κ (ben
 Rotation DOFs: `r_{I,k}^φ = F_I · (∂d_I/∂φ_k) dΩ`
 where `F_I = ∂₁N_I S¹ + ∂₂N_I S² + N_I (Q₁ a₁ + Q₂ a₂)`, S^\\alpha = M^{\\alpha\\beta} a_\\beta.
 """
-function bending_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
+function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     G_sh = mat.E / (2*(1 + mat.ν))
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
@@ -339,7 +340,7 @@ function bending_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractV
             θ²  = φ₁*φ₁ + φ₂*φ₂
             cosθ, sincθ = _cos_sinc_sq(θ²)
             d_I = cosθ*G₃ + sincθ*(φ₁*T₁ + φ₂*T₂)
-            d  += scv.N[I, qp]         * d_I
+            d  += scv.N[I, qp]        * d_I
             d₁ += scv.dNdξ[I, qp][1]  * d_I
             d₂ += scv.dNdξ[I, qp][2]  * d_I
         end
@@ -348,7 +349,7 @@ function bending_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractV
         κ₁₂ = 0.5 * (dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
         κ₂₂ = dot(a₂, d₂) - B[2,2]
         κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
-        γ₁  = dot(a₁, d); γ₂ = dot(a₂, d)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         M   = D ⊡ κ
         Aup = inv(scv.A_metric[qp])
@@ -377,16 +378,16 @@ function bending_residuals_RM_explicit!(re, scv::ShellCellValues, u_e::AbstractV
 end
 
 """
-    bending_tangent_RM!(ke, scv, u_e, mat)
+    bending_tangent_RM_FD!(ke, scv, u_e, mat)
 
 Reissner–Mindlin bending + transverse shear tangent. `u_e` is a flat vector of length 5·n_nodes.
 """
-function bending_tangent_RM!(ke, scv, u, mat)
+function bending_tangent_RM_FD!(ke, scv, u, mat)
     ke .+= ForwardDiff.hessian(u -> bending_shear_energy_RM(u, scv, mat), u)
 end
 
 """
-    bending_tangent_RM_explicit!(ke, scv, u_e, mat)
+    bending_tangent_RM!(ke, scv, u_e, mat)
 
 RM bending + transverse shear tangent, explicit index-notation form. Four blocks per (I,J) pair:
 
@@ -395,9 +396,10 @@ RM bending + transverse shear tangent, explicit index-notation form. Four blocks
 - **φu** (2×3): filled by transposing the uφ block for (I,J) into the (J,I) position.
 - **φφ** (2×2): material part `∂F_I/∂φ_{lJ}·dd_{Ik}` + geometric part `F_I·∂²d_I/∂φ_k∂φ_l` (J=I only).
 """
-function bending_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
+function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     G_sh = mat.E / (2*(1 + mat.ν))
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for I in 1:n_nodes
@@ -422,7 +424,7 @@ function bending_tangent_RM_explicit!(ke, scv::ShellCellValues, u_e::AbstractVec
         κ₁₂ = 0.5*(dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
         κ₂₂ = dot(a₂, d₂) - B[2,2]
         κ   = SymmetricTensor{2,2,T}((κ₁₁, κ₁₂, κ₂₂))
-        γ₁  = dot(a₁, d); γ₂ = dot(a₂, d)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         M   = D ⊡ κ
         Aup = inv(scv.A_metric[qp])

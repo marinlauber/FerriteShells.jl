@@ -625,8 +625,8 @@ end
         fill!(ke_rm, 0.0); fill!(re_rm, 0.0)
         reinit!(scv_rm, cell)
         x = getcoordinates(cell); u_e = zeros(n_el_rm)
-        membrane_tangent_RM!(ke_rm, scv_rm, u_e, mat_rm)
-        bending_tangent_RM!(ke_rm, scv_rm, u_e, mat_rm)
+        membrane_tangent_RM_FD!(ke_rm, scv_rm, u_e, mat_rm)
+        bending_tangent_RM_FD!(ke_rm, scv_rm, u_e, mat_rm)
         assemble!(asmb_rm, shelldofs(cell), ke_rm, re_rm)
     end
 
@@ -652,3 +652,4 @@ include("test_rm.jl")
 include("test_utils.jl")
 include("test_plate.jl")
 include("test_benchmarks.jl")
+include("test_mitc.jl")

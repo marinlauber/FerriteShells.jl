@@ -28,6 +28,7 @@ export LinearElastic, contravariant_elasticity
 include("assembly.jl")
 export membrane_residuals_KL!, membrane_tangent_KL!, bending_residuals_KL!, bending_tangent_KL!
 export membrane_residuals_RM!, membrane_tangent_RM!, bending_residuals_RM!, bending_tangent_RM!
+export membrane_residuals_RM_FD!, membrane_tangent_RM_FD!, bending_residuals_RM_FD!, bending_tangent_RM_FD!
 export assemble_pressure!, assemble_pressure_tangent!, assemble_traction!, apply_pointload!
 
 include("utils.jl")

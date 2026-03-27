@@ -1,4 +1,4 @@
-using FerriteShells
+using FerriteShells, LinearAlgebra
 
 # colors the surface in the mesh by their ID from the *.inp file
 function color(vtk, grid)
@@ -100,10 +100,10 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
         reinit!(scv, cell)
         sd = shelldofs(cell)
         u_e = u[sd]
-        FerriteShells.membrane_tangent_RM_explicit!(ke_i, scv, u_e, mat)
-        FerriteShells.membrane_residuals_RM_explicit!(re_i, scv, u_e, mat)
-        FerriteShells.bending_tangent_RM_explicit!(ke_i, scv, u_e, mat)
-        FerriteShells.bending_residuals_RM_explicit!(re_i, scv, u_e, mat)
+        membrane_tangent_RM!(ke_i, scv, u_e, mat)
+        membrane_residuals_RM!(re_i, scv, u_e, mat)
+        bending_tangent_RM!(ke_i, scv, u_e, mat)
+        bending_residuals_RM!(re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
 end
@@ -264,7 +264,7 @@ let λᵢ=0; @time for λ in 0.0:0.001:1.0
         end
         # Compute Newton increment via direct solve
         K_free = Matrix(K_int)[ch.free_dofs, ch.free_dofs]
-        d = diag(K_free)
+        d = LinearAlgebra.diag(K_free)
         @show minimum(d), maximum(d), maximum(d)/minimum(d)
         ΔΔu .= K_int \ r_int
         apply_zero!(ΔΔu, ch)

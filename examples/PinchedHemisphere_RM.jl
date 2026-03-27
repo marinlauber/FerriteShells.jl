@@ -61,8 +61,8 @@ for n in [2, 4, 8, 16, 32]
         fill!(ke, 0.0)
         reinit!(scv, cell)
         u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, u0, mat)
-        bending_tangent_RM!(ke, scv, u0, mat)
+        membrane_tangent_RM_FD!(ke, scv, u0, mat)
+        bending_tangent_RM_FD!(ke, scv, u0, mat)
         assemble!(asm, shelldofs(cell), ke, re)
     end
 
@@ -108,8 +108,8 @@ let n = 8
         fill!(ke, 0.0)
         reinit!(scv, cell)
         u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, u0, mat)
-        bending_tangent_RM!(ke, scv, u0, mat)
+        membrane_tangent_RM_FD!(ke, scv, u0, mat)
+        bending_tangent_RM_FD!(ke, scv, u0, mat)
         assemble!(asm, shelldofs(cell), ke, re)
     end
 
