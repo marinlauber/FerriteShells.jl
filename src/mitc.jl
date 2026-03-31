@@ -22,6 +22,33 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     G₃_tie_2 :: Vector{Vec{3,T}}; T₁_tie_2 :: Vector{Vec{3,T}}; T₂_tie_2 :: Vector{Vec{3,T}}
     ξ_tie_1::Vector{Vec{2,T}};  ξ_tie_2::Vector{Vec{2,T}} # local coorindates of the tying points
 end
+function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) where N
+    n_shape = getnbasefunctions(ip_shape)
+    Nt = length(ξ_tie_1); T = eltype(ξ_tie_1[1])
+    # shape values there
+    N_tie_1 = zeros(T, n_shape, Nt);  dNdξ_tie_1 = Matrix{Vec{2,T}}(undef, n_shape, Nt)
+    N_tie_2 = zeros(T, n_shape, Nt);  dNdξ_tie_2 = Matrix{Vec{2,T}}(undef, n_shape, Nt)
+    for (k, ξ_k) in enumerate(ξ_tie_1)
+        for I in 1:n_shape
+            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
+            N_tie_1[I, k] = Nval;  dNdξ_tie_1[I, k] = dN
+        end
+    end
+    for (k, ξ_k) in enumerate(ξ_tie_2)
+        for I in 1:n_shape
+            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
+            N_tie_2[I, k] = Nval;  dNdξ_tie_2[I, k] = dN
+        end
+    end
+    MITC{N,Nt,T}(
+        N_tie_1, dNdξ_tie_1, N_tie_2, dNdξ_tie_2, h_tie_1, h_tie_2,
+        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
+        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
+        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
+        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
+        ξ_tie_1, ξ_tie_2,
+    )
+end
 
 # empty MITC is standard
 struct NoMITC <: AbstractMITC end
@@ -58,9 +85,6 @@ end
 # default is no tying shear strain
 @inline tying_shear_strains(::NoMITC, u_e) = nothing, nothing
 
-# default shear strains
-@inline shear_strains(a₁, a₂, d, ::Int, ::Nothing, ::Nothing, ::NoMITC) = dot(a₁, d), dot(a₂, d)
-
 """
     tying_shear_strains(mitc::MITC{N,M,T}, u_e)
 
@@ -69,7 +93,7 @@ from the current DOF vector `u_e` (5 DOFs/node: [u₁,u₂,u₃,φ₁,φ₂,…]
 Returns `(γ₁_k, γ₂_k)` as two NTuples of length `M`, ForwardDiff-safe.
 Call once before the quadrature-point loop and pass to `shear_strains`.
 """
-function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T}
+function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
     γ₁_k = ntuple(Val(M)) do k
         G₃_k = mitc.G₃_tie_1[k]; T₁_k = mitc.T₁_tie_1[k]; T₂_k = mitc.T₂_tie_1[k]
         Δa₁ = zero(Vec{3,T}); d_k = zero(Vec{3,T})
@@ -96,6 +120,9 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
     end
     γ₁_k, γ₂_k
 end
+
+# default shear strains
+@inline shear_strains(a₁, a₂, d, ::Int, ::Nothing, ::Nothing, ::NoMITC) = dot(a₁, d), dot(a₂, d)
 
 """
     shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)

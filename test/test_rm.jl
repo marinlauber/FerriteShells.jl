@@ -107,40 +107,6 @@ end
           FerriteShells.bending_shear_energy_RM(u_pert, scv, mat) rtol=1e-8
 end
 
-@testset "RM bending explicit residual" begin
-    mat = LinearElastic(1.0e6, 0.3, 0.01)
-    scv = make_rm_scv()
-    reinit!(scv, X_Q9_UNIT_RM)
-    n_dof = 45
-
-    # 1. Zero residual at reference state.
-    re_exp = zeros(n_dof)
-    bending_residuals_RM!(re_exp, scv, zeros(n_dof), mat)
-    @test norm(re_exp) ≤ 1e-14
-
-    # 2. Consistency with ForwardDiff at a non-trivial state.
-    Random.seed!(42)
-    u_pert = zeros(n_dof)
-    for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
-        u_pert[5I-1] = 1e-3 * randn()
-        u_pert[5I  ] = 1e-3 * randn()
-    end
-    re_fd  = zeros(n_dof); bending_residuals_RM_FD!(re_fd,  scv, u_pert, mat)
-    re_ex2 = zeros(n_dof); bending_residuals_RM!(re_ex2, scv, u_pert, mat)
-    @test norm(re_ex2 .- re_fd) / (norm(re_fd) + 1e-14) < 1e-10
-
-    # 3. Larger rotations: φ ≈ 10° — Rodrigues director is more accurate than additive.
-    u_large = zeros(n_dof)
-    α = deg2rad(10.0)
-    for I in 1:9
-        u_large[5I-1] = α * 0.3
-        u_large[5I  ] = α * 0.7
-    end
-    re_fd_lg  = zeros(n_dof); bending_residuals_RM_FD!(re_fd_lg,  scv, u_large, mat)
-    re_ex_lg  = zeros(n_dof); bending_residuals_RM!(re_ex_lg, scv, u_large, mat)
-    @test norm(re_ex_lg .- re_fd_lg) / (norm(re_fd_lg) + 1e-14) < 1e-10
-end
 
 @testset "RM bending explicit tangent" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)

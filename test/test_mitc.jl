@@ -152,3 +152,123 @@ end
     w_nomitc_2 = ss_plate_center(2; use_mitc=false)
     @test abs(ws_mitc[2] / w_nav - 1) < abs(w_nomitc_2 / w_nav - 1)
 end
+
+# Q4 unit square [0,1]² in XY plane, 5 DOFs/node → 20 DOFs per element.
+const X_Q4_UNIT_RM = [
+    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)),
+    Vec{3}((1.0, 1.0, 0.0)), Vec{3}((0.0, 1.0, 0.0)),
+]
+
+@testset "MITC4 unit element" begin
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ip  = Lagrange{RefQuadrilateral, 1}()
+    qr  = QuadratureRule{RefQuadrilateral}(2)
+    scv_mitc   = ShellCellValues(qr, ip, ip; mitc=MITC4)
+    scv_nomitc = ShellCellValues(qr, ip, ip)
+    reinit!(scv_mitc,   X_Q4_UNIT_RM)
+    reinit!(scv_nomitc, X_Q4_UNIT_RM)
+    n_dof = 20
+
+    # 1. All tying-point shear strains are zero at the reference state.
+    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
+    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+
+    # 2. No-MITC explicit residual matches ForwardDiff gradient exactly.
+    #    MITC4 explicit residual agrees to within the MITC-δγ approximation (~1%).
+    Random.seed!(42)
+    u_pert = zeros(n_dof)
+    for I in 1:4
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q4_UNIT_RM[I][1]) * sin(π * X_Q4_UNIT_RM[I][2])
+        u_pert[5I-1] = 1e-3 * randn()
+        u_pert[5I  ] = 1e-3 * randn()
+    end
+    re_ex_nm = zeros(n_dof); bending_residuals_RM!(re_ex_nm, scv_nomitc, u_pert, mat)
+    re_fd_nm = zeros(n_dof); bending_residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
+    @test norm(re_ex_nm .- re_fd_nm) / norm(re_fd_nm) < 1e-10
+
+    re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
+    re_fd = zeros(n_dof); bending_residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
+    @test norm(re_ex .- re_fd) / norm(re_fd) < 1e-2
+
+    # Zero state: residual is exactly zero.
+    re_ex0 = zeros(n_dof); bending_residuals_RM!(re_ex0, scv_mitc, zeros(n_dof), mat)
+    @test norm(re_ex0) ≤ 1e-14
+
+    # 3. Kirchhoff mode: u₃ = α·x·y, φ₁ = −α·y, φ₂ = −α·x (zero transverse shear).
+    #    MITC4 and NoMITC must produce identical bending energy.
+    α_kl = 1e-4
+    u_kl = zeros(n_dof)
+    for I in 1:4
+        xI, yI = X_Q4_UNIT_RM[I][1], X_Q4_UNIT_RM[I][2]
+        u_kl[5I-2] = α_kl * xI * yI
+        u_kl[5I-1] = -α_kl * yI
+        u_kl[5I  ] = -α_kl * xI
+    end
+    W_mitc   = FerriteShells.bending_shear_energy_RM(u_kl, scv_mitc,   mat)
+    W_nomitc = FerriteShells.bending_shear_energy_RM(u_kl, scv_nomitc, mat)
+    @test W_mitc ≈ W_nomitc rtol=1e-6
+end
+
+@testset "MITC4 anti-locking: thin SS plate h-convergence" begin
+    E, ν, t = 1e4, 0.3, 0.01
+    D     = E * t^3 / (12 * (1 - ν^2))
+    κ_s   = 5/6
+    G_sh  = E / (2 * (1 + ν))
+    q0    = 1.0
+    w_nav = q0 / (4 * π^4 * D) + q0 / (2 * κ_s * G_sh * t * π^2)
+
+    function ss_plate_center_q4(n; use_mitc=false)
+        ip  = Lagrange{RefQuadrilateral, 1}()
+        qr  = QuadratureRule{RefQuadrilateral}(2)
+        scv = ShellCellValues(qr, ip, ip; mitc = use_mitc ? MITC4 : nothing)
+        mat_h = LinearElastic(E, ν, t)
+        grid2d = generate_grid(Quadrilateral, (n, n),
+                               Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0)))
+        grid = shell_grid(grid2d)
+        addnodeset!(grid, "boundary",
+            x -> isapprox(x[1],0.0,atol=1e-10) || isapprox(x[1],1.0,atol=1e-10) ||
+                 isapprox(x[2],0.0,atol=1e-10) || isapprox(x[2],1.0,atol=1e-10))
+        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+        n_el   = ndofs_per_cell(dh)
+        n_base = getnbasefunctions(ip)
+        K = allocate_matrix(dh); f = zeros(ndofs(dh))
+        asmb = start_assemble(K, zeros(ndofs(dh)))
+        ke = zeros(n_el, n_el); re = zeros(n_el); fe = zeros(n_el)
+        for cell in CellIterator(dh)
+            fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
+            reinit!(scv, cell)
+            x = getcoordinates(cell); u_e = zeros(n_el)
+            membrane_tangent_RM!(ke, scv, u_e, mat_h)
+            bending_tangent_RM_FD!(ke, scv, u_e, mat_h)
+            assemble!(asmb, shelldofs(cell), ke, re)
+            for qp in 1:getnquadpoints(scv)
+                ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
+                xp = sum(Ferrite.reference_shape_value(ip, ξ, I) * x[I] for I in 1:n_base)
+                q  = q0 * sin(π*xp[1]) * sin(π*xp[2])
+                for I in 1:n_base
+                    fe[5I-2] += Ferrite.reference_shape_value(ip, ξ, I) * q * dΩ
+                end
+            end
+            @views f[shelldofs(cell)] .+= fe
+        end
+        dbc = ConstraintHandler(dh)
+        add!(dbc, Dirichlet(:u, getnodeset(grid, "boundary"), x -> zeros(3), [1,2,3]))
+        close!(dbc); Ferrite.update!(dbc, 0.0)
+        apply!(K, f, dbc)
+        u_sol = K \ f
+        ph = PointEvalHandler(grid, [Vec{3}((0.5, 0.5, 0.0))])
+        return first(evaluate_at_points(ph, dh, u_sol, :u))[3]
+    end
+
+    # MITC4 convergence: n=2,4,8. Rates ≥ 1.5, error < 5% at n=8.
+    ws_mitc = [ss_plate_center_q4(n; use_mitc=true) for n in [2, 4, 8]]
+    errors_mitc = abs.(ws_mitc .- w_nav)
+    rates_mitc  = [log2(errors_mitc[i] / errors_mitc[i+1]) for i in 1:2]
+    @test all(r -> r >= 1.5, rates_mitc)
+    @test errors_mitc[end] / w_nav < 0.05
+
+    # Anti-locking: MITC4 at n=4 must be strictly closer to reference than no-MITC Q4.
+    w_nomitc_4 = ss_plate_center_q4(4; use_mitc=false)
+    @test abs(ws_mitc[2] / w_nav - 1) < abs(w_nomitc_4 / w_nav - 1)
+end
