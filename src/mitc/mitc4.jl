@@ -32,13 +32,17 @@ function MITC4(ip_shape::Interpolation, qr::QuadratureRule)
     end
 
     # Interpolation weights h_tie[qp, k] such that γ̃(ξ_qp) = Σ_k h_tie[qp,k] · γ(ξ_tie_k)
-    # γ₁: linear in ξ₁ (Lagrange over {-1,+1})
-    # γ₂: linear in ξ₂ (Lagrange over {-1,+1})
+    # γ₁: linear in ξ₁ between ±1 linear over ξ₂ {-1,1}
+    # γ₂: linear in ξ₂ between ±1 linear over ξ₁ {-1,1}
     h_tie_1 = zeros(T, n_qp, 2);  h_tie_2 = zeros(T, n_qp, 2)
     for q in 1:n_qp
         ξ, η = qr.points[q][1], qr.points[q][2]
-        h_tie_1[q, :] = [ , ]
-        h_tie_2[q, :] = [ , ]
+        h₁ = (1 - ξ)/2;  h₂ = (1 + ξ)/2
+        L₁ = (1 - η)/2;  L₂ = (1 + η)/2
+        h_tie_1[q, :] = [h₁*L₁, h₂*L₂]
+        l₁ = (1 - η)/2;  l₂ = (1 + η)/2
+        g₁ = (1 - η)/2;  g₂ = (1 + η)/2
+        h_tie_2[q, :] = [l₁*g₁, l₂*g₂]
     end
 
     MITC{4,2,T}(

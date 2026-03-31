@@ -48,12 +48,13 @@ end
 # Interpolated director d and covariant derivatives d₁ = d,₁, d₂ = d,₂ at qp.
 # Rodrigues: d_I = cos|φ|·G₃ + sinc|φ|·(φ₁T₁+φ₂T₂), |d_I| = 1.
 @inline function director_field(scv, qp, u_e::AbstractVector{T}, n_nodes, G₃, T₁, T₂) where T
+    # G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
     d = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
     for I in 1:n_nodes
         φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
         cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
         d_I = cosθ*G₃ + sincθ*(φ₁*T₁ + φ₂*T₂)
-        d  += scv.N[I, qp]        * d_I
+        d  += scv.N[I, qp]       * d_I
         d₁ += scv.dNdξ[I, qp][1] * d_I
         d₂ += scv.dNdξ[I, qp][2] * d_I
     end

@@ -118,8 +118,8 @@ end
 # export MITC3
 
 # MITC4
-# include("mitc/mitc4.jl")
-# export MITC4
+include("mitc/mitc4.jl")
+export MITC4
 
 # MITC6
 # include("mitc/mitc6.jl")
