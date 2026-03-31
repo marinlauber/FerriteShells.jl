@@ -18,14 +18,14 @@ bending_energy_KL
 ```@docs
 membrane_residuals_RM!
 bending_residuals_RM!
-membrane_residuals_RM_explicit!
-bending_residuals_RM_explicit!
-bending_shear_energy_rm
-membrane_energy_rm
+membrane_residuals_RM_FD!
+bending_residuals_RM_FD!
+bending_shear_energy_RM
+membrane_energy_RM
 membrane_tangent_RM!
 bending_tangent_RM!
-membrane_tangent_RM_explicit!
-bending_tangent_RM_explicit!
+membrane_tangent_RM_FD!
+bending_tangent_RM_FD!
 ```
 
 ## External loading functions

@@ -7,4 +7,6 @@ Utility function
 
 ```@docs
 shelldofs
+compute_volume
+volume_gradient!
 ```

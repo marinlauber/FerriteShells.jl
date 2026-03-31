@@ -57,10 +57,36 @@ The Green-Lagrange strain tensor is given by half the increment in the metric te
 ```math
 e_{ij} = \frac{1}{2}\left(g_{ij} - G_{ji}\right).
 ```
-Subsituting the definition of ``g_{ij}``, we get
+where ``g_{i,j}`` and ``G_{ij}`` are the metric tensor in the current and in the reference configuration, respectively.
+Another form can be obtained by subsituting the definition of ``g_{ij}`` and ``G_{i,j}`` to get
 ```math
-e_{ij} = \frac{1}{2}\left(\mathbf{g}_i\cdot\mathbf{g}_j - \mathbf{G}_j\cdot\mathbf{G}_i\right)
+e_{ij} = \frac{1}{2}\left(\mathbf{g}_i\cdot\mathbf{g}_j - \mathbf{G}_j\cdot\mathbf{G}_i\right).
 ```
+For linear analysis, it is common to expand the second expression with the definition of the covariant basis
+```math
+g_{ij} = \frac{\partial\Phi(\xi^1,\xi^2,\xi^3)}{\partial\xi^i}\cdot\frac{\partial\Phi(\xi^1,\xi^2,\xi^3)}{\partial\xi^j} \quad G_{ij} = \frac{\partial\Phi^0(\xi^1,\xi^2,\xi^3)}{\partial\xi^i}\cdot\frac{\partial\Phi^0(\xi^1,\xi^2,\xi^3)}{\partial\xi^j}
+```
+where the mapping in the current configuration can be through the displacement field 
+```math
+\mathbf{u}(\xi^1,\xi^2,\xi^3) = \Phi(\xi^1,\xi^2,\xi^3) - \Phi^0(\xi^1,\xi^2,\xi^3)
+```
+dropping the ``(\xi^1,\xi^2,\xi^3)`` terms for brevity, we get
+```math
+e_{ij} = \frac{1}{2}\left(\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right)\cdot\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right) - \frac{\partial\Phi^0}{\partial\xi^i}\cdot\frac{\partial\Phi^0}{\partial\xi^j}\right)
+```
+expanding the first term and cancelling the last contribution with the first expansion, we get
+```math
+e_{ij} = \frac{1}{2}\left(\frac{\partial\Phi^0}{\partial\xi^i}\cdot\frac{\partial\mathbf{u}}{\partial\xi^j} + \frac{\partial\mathbf{u}}{\partial\xi^i}\cdot\frac{\partial\Phi^0}{\partial\xi^j} - \frac{\partial\mathbf{u}}{\partial\xi^i}\cdot\frac{\partial\mathbf{u}}{\partial\xi^j}\right)
+```
+or simply
+```math
+e_{ij} = \frac{1}{2}\left(\mathbf{G}_i\cdot\frac{\partial\mathbf{u}}{\partial\xi^j} + \frac{\partial\mathbf{u}}{\partial\xi^i}\cdot\mathbf{G}_j + \frac{\partial\mathbf{u}}{\partial\xi^i}\cdot\frac{\partial\mathbf{u}}{\partial\xi^j}\right).
+```
+In linear shell analysis the last term is usually dropped since it is quadratic in the displacement field and we arrive to the **linear** covariant shell strains
+```math
+e_{ij} = \frac{1}{2}\left(\mathbf{G}_i\cdot\mathbf{u}_{,j} + \mathbf{u}_{,i}\cdot\mathbf{G}_j\right).
+```
+In the following, we will use the full nonlinear covariant strain tensor.
 
 ## 2.2 Kirchhoff-Love / Koiter shell
 
@@ -127,7 +153,7 @@ To obtain the residual equation, we apply the principal of stationnary action in
 ```
 
 !!! info
-    Why only the second term varies?
+    $\mathcal{W}(\gamma+\epsilon\delta\gamma) = \int_\omega\lim_{\epsilon\to0}\frac{d}{d\epsilon}\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\gamma_{\gamma\delta}+\epsilon\delta\gamma_{\gamma\delta})\gamma_{\alpha\beta}\right)\sqrt{a}\text{ d}y$
 
 The variation of the membrane term is given by
 ```math
@@ -186,6 +212,70 @@ Subtituting these two final terms back into the second variation, we get
 ```math
 \delta\delta\mathcal{W}_\text{int} = \int_\omega \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\delta\mathbf{a}_\gamma\cdot\mathbf{a}_\delta)\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right) + \delta\left[...\right] \sqrt{a}\,\mathrm{d}y
 ```
+
+## 2.3 Reissner-Mindlin / Naghdi shell
+
+The Reissner-Mindlin kinematic relaxes the kirchhoff-Love zero shear strain assumption through orthogonality of material lines. The shear strain measures the rotation of these material lines around the normal vector of the shell's midsurface ``\hat{\mathbf{a}}_3``
+```math
+\Phi(\xi^1,\xi^2,\xi^3) = \phi(\xi^1,\xi^2) + \xi^3\theta^\lambda(\xi^1,\xi^2) \mathbf{a}_\lambda(\xi^1,\xi^2) = \phi(\xi^1,\xi^2) + \xi^3\mathbf{d}(\xi^1,\xi^2)
+```
+where $\mathbf{d}(\xi^1,\xi^2)$ is the director at a point $(\xi^1,\xi^2)$ on the midsurface and $\gamma_\alpha=\mathbf{d}⋅ \mathbf{a}_\alpha$.
+
+The surface basis vector are given by
+```math
+\begin{split}
+\mathbf{g}_\alpha &= \frac{\partial \Phi(\xi^1,\xi^2)}{\partial \xi^\alpha} = \frac{\partial}{\partial\xi^\alpha}\left[\phi(\xi^1,\xi^2) + \xi^3\mathbf{d}_3(\xi^1,\xi^2)\right]\\
+&= \mathbf{a}_\alpha + \xi^3 \mathbf{d}_{,\alpha} \\
+\mathbf{g}_3 &= \frac{\partial}{\partial\xi^3}\left[\phi(\xi^1,\xi^2) + \xi^3\mathbf{d}(\xi^1,\xi^2)\right] = \mathbf{d}
+\end{split}
+```
+using the definition of ``\mathbf{a}_\alpha``. From this, we can get the components of the metric tensor
+```math
+\begin{split}
+g_{\alpha\beta} &= \mathbf{g}_\alpha \cdot \mathbf{g}_\beta = (\mathbf{a}_\alpha+\xi^3\mathbf{d}_{,\alpha})\cdot(\mathbf{a}_\beta+\xi^3\mathbf{d}_{,\beta})\\
+ &= a_{\alpha\beta} + \xi^3(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) + (\xi^3)^2\mathbf{d}_{,\alpha}\cdot\mathbf{d}_{,\beta}\\
+ &= a_{\alpha\beta} + \xi^3(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) + O(t^2) \\
+g_{\alpha 3} &= g_{3\alpha} = (\mathbf{a}_\alpha+\xi^3\mathbf{d}_{,\alpha})\cdot\mathbf{d} = \mathbf{a}_\alpha\cdot\mathbf{d} + \xi^3\mathbf{d}_{,\alpha}\cdot\mathbf{d}\\
+g_{33} &= 1.
+\end{split}
+```
+where the plane stress assumption results in $g_{33}=1$ and the shear contributions are non-zero $g_{3\alpha}\neq0$. As a result, the strain tensor is now
+```math
+\begin{split}
+e_{\alpha\beta} &= \frac{1}{2}(g_{\alpha\beta} - G_{\alpha\beta})\\
+e_{\alpha3} &= \\
+e_{33} &= 0.
+\end{split}
+```
+
+!!! Note
+    Interestingly, the plane stress assumption now results in non-zero transverse strains $e_{3\alpha}\neq0$. This is expected since shear also results in ... This component scales with the thickness squared and is usually very small. We can recover it as a post-processing step from the in-plane strain via
+    ```math
+    e_{3\alpha} = ...
+    ```
+
+### 2.3.1 Director parametrization
+
+There are a few ways to parametrize the the director vector, and the different choice lead to different discertization. One way is to discretize each of its components, leading to an additional 3 degrees of freedom per node. This is the simplest way, but requires enforcing $\Vert\mathbf{d}\Vert=1$ through a Lagrange multiplier approach and static condensation, which results in an overall complex implementation.
+
+Another way is to use additive vector rotations starting from the midsurface normal
+```math
+\mathbf{d} = \hat{\mathbf{a}}_3 + \theta_1\mathbf{T}_1 + \theta_2\mathbf{T}_2
+```
+which removes one unknown since we only require $\theta_1,\theta_2$ to fully describe $\mathbf{d}$. One issue with this formulation is that the unitarity of the director is not enforced $\Vert\mathbf{d}\Vert\neq1$. This limits the formulation to small rotations $\Vert\mathbf{\theta}\Vert\ll1$ as large $\Vert\mathcal{d}\Vert$ would lead to large shear strains ($\gamma_\alpha=\mathbf{a}_\alpha\cdot\mathbf{d}$) resulting in shear locking as all the internal energy is taken by shear.
+
+For finite rotation nonlinear shell, we would like to parametrize $\mathbf{d}$ in a way that naturally enforces the $\Vert\mathbf{d}\Vert=1$ constraint. One way to do this is through Rodrigue's parametrization
+```math
+\mathbf{d} = \cos{\Vert\mathbf{\theta}\Vert}\cdot\hat{\mathbf{a}}_3 + \text{sinc}{\Vert\theta\Vert}\cdot(\theta_1\cdot\mathbf{T}_1 + \theta_2\cdot\mathbf{T}_2)
+```
+which guarantees $\Vert\mathcal{d}\Vert=1$ for rotations that satisfy $\mathbf{\theta}^2 = \theta_1^2 + \theta_2^2$ . This formulation is also limited by a singularity in the Rodrigue parametrization for $\theta=\pi$ rotations. This could be solved with quarterion parametrization, but in practice, an updated Lagrange formation can be used to enforce $\theta<\phi$.
+
+In the following, we will keep the director variation terms general since explicit variation of the director is messy, especially here since we use a Rodrigue's parametrization.
+
+!!! info
+    In practice, we use $\theta^2$ in the trigonometric functions to enforce directly the constraint on the rotations, but this means that for small rotations, we could take the square-root of a very small number, which could lead to overflow. To avoid this, we use a Taylor-series expansion to evaluate the trigonometric functions for $\mathbf{\theta}^2<10^{-6}$, and the normal expression otherwise.
+
+### 2.3.2 
 
 # References
 
