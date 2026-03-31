@@ -38,9 +38,9 @@ using Plots
 # This recovers the pure displacement-controlled limit: S = −(∂V/∂u) · v₂.
 # Setting C₀D > 0 enables genuine 3D-0D compliance coupling.
 
-function make_quarter_pillow_grid(n; L=1.0)
+function make_quarter_pillow_grid(n; L=1.0, Primitive=QuadraticQuadrilateral)
     corners = [Vec{2}((0.0, 0.0)), Vec{2}((L/2, 0.0)), Vec{2}((L/2, L/2)), Vec{2}((0.0, L/2))]
-    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (n, n), corners))
+    grid = shell_grid(generate_grid(Primitive, (n, n), corners))
     addfacetset!(grid, "edge",  x -> isapprox(x[1], L/2, atol=1e-10) || isapprox(x[2], L/2, atol=1e-10))
     addfacetset!(grid, "sym_x", x -> isapprox(x[1], 0.0, atol=1e-10))
     addfacetset!(grid, "sym_y", x -> isapprox(x[2], 0.0, atol=1e-10))

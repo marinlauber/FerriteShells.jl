@@ -110,18 +110,16 @@ What each piece does:
 │ Tsit5() │ Advances the 0D circuit ODE │
 └─────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-So SchurComplementLinearSolver is not coupling the 3D and 0D models — it's the bordered linear solver within the 3D solid Newton step for
-the (u, p) pair given a fixed V_target from the circuit. That's exactly S = -dot(dVdu, v2), δp = (...)/ S in our code.
+So SchurComplementLinearSolver is not coupling the 3D and 0D models — it's the bordered linear solver within the 3D solid Newton step for the (u, p) pair given a fixed V_target from the circuit. That's exactly S = -dot(dVdu, v2), δp = (...)/ S in our code.
 
 Our 3D0D.jl is doing the same thing, just with:
 - Manual lu!/ldiv! instead of SchurComplementLinearSolver
 - Simple Lie-Trotter (1st order) instead of the symmetric Godunov variant (2nd order)
 - No HomotopyPathSolver (we rely on small enough dt_cpl so Newton doesn't need sub-stepping)
 
-To upgrade to the Godunov symmetric split you'd just run the Newton solve at the start and end of each step at half-dt, which doubles the
-solid cost but eliminates the O(dt) coupling lag.
+To upgrade to the Godunov symmetric split you'd just run the Newton solve at the start and end of each step at half-dt, which doubles the solid cost but eliminates the O(dt) coupling lag.
 
-## Newton converegnce
+## Newton convergence
 
 With a good initial guess (previous step's solution as warm start), the initial residual after applying the new BCs is O(Δλ). Each Newton
 iteration squares the error:
@@ -136,54 +134,45 @@ With tol = 1e-6 and a step size that gives ‖R₀‖ ~ 1e-2:
 
 That's 2 solves + 1 final check = 3 assembly evaluations, which is what newton_itr counts.
 
-You see this across the RM examples (RollupCantilever, SquareAirbag, now LIMO) because they all sit in the same regime: step size small
-enough that ‖R₀‖ is moderate (~1e-2 to 1e-3), tolerance at 1e-6, quadratic convergence → always lands in 2–3 iterations. If you halve the
-step size, ‖R₀‖ halves, and you'd still get 3 iterations (just the final residual is much smaller after iter 2). You'd only drop to 2
-iterations if ‖R₀‖ were already near √tol ~ 1e-3.
+You see this across the RM examples (RollupCantilever, SquareAirbag, now LIMO) because they all sit in the same regime: step size small enough that ‖R₀‖ is moderate (~1e-2 to 1e-3), tolerance at 1e-6, quadratic convergence → always lands in 2–3 iterations. If you halve the step size, ‖R₀‖ halves, and you'd still get 3 iterations (just the final residual is much smaller after iter 2). You'd only drop to 2 iterations if ‖R₀‖ were already near √tol ~ 1e-3.
 
-Quadratic convergence is a property of the exact Newton method — if the tangent K is the true derivative of the residual, you get  
-quadratic convergence. Any deviation means the tangent is approximate:
+Quadratic convergence is a property of the exact Newton method — if the tangent K is the true derivative of the residual, you get quadratic convergence. Any deviation means the tangent is approximate:
 
-- More iterations (4–6), residual decreasing but slowly: tangent is slightly wrong — common causes are ForwardDiff truncation, missing  
-geometric stiffness terms, or symmetry approximations (K_IJ ≠ K_JI filled incorrectly). 
+- More iterations (4–6), residual decreasing but slowly: tangent is slightly wrong — common causes are ForwardDiff truncation, missing geometric stiffness terms, or symmetry approximations (K_IJ ≠ K_JI filled incorrectly).
 - Stagnation at some residual floor: tangent is consistent but there's a term missing entirely (e.g. missing follower-pressure stiffness
-K_pres in a pressure-loaded problem). The solution drifts to a slightly wrong equilibrium.  
-- Linear convergence (residual halves each step): the "tangent" is actually a fixed matrix reused across iterations (e.g. initial stiffness
-method), not updated each step. 
-- Divergence: tangent has wrong sign somewhere, or a term dominates with the wrong sign (like the unit-inconsistent Pact from earlier —
-K_eff = K_int - (p - Pact_in_mmHg)*K_pres made K_eff indefinite).   
+K_pres in a pressure-loaded problem). The solution drifts to a slightly wrong equilibrium.
+- Linear convergence (residual halves each step): the "tangent" is actually a fixed matrix reused across iterations (e.g. initial stiffness method), not updated each step.
+- Divergence: tangent has wrong sign somewhere, or a term dominates with the wrong sign (like the unit-inconsistent Pact from earlier — K_eff = K_int - (p - Pact_in_mmHg)*K_pres made K_eff indefinite).
 
-In your RM explicit tangent (bending_tangent_RM_explicit!), the most likely source of imperfection is the φφ geometric block — it has a 
-∂²d/∂φ∂φ term that's only assembled on diagonal J=I blocks. If that term is slightly off, you'd see 4–5 iterations instead of 3 on
-bending-dominated problems, but it wouldn't diverge. You can always verify by replacing the explicit tangent temporarily with a ForwardDiff 
-Jacobian of the residual and checking if the iteration count drops back to 3.
+In your RM explicit tangent (bending_tangent_RM_explicit!), the most likely source of imperfection is the φφ geometric block — it has a ∂²d/∂φ∂φ term that's only assembled on diagonal J=I blocks. If that term is slightly off, you'd see 4–5 iterations instead of 3 on bending-dominated problems, but it wouldn't diverge. You can always verify by replacing the explicit tangent temporarily with a ForwardDiff Jacobian of the residual and checking if the iteration count drops back to 3.
 
-# Two RHS per iteration: residual and reference load direction                                                                                                   
-  v1 = K_free \ (-r_free)          # standard Newton step                                                                                                          
-  v2 = K_free \ f_ref_free         # tangent to λ direction                                                                                                        
-                                                                                                                                                                   
-  # arc-length constraint gives δλ (cylindrical)                                                                                                                   
-  δλ = (-dot(Δu_free, v1)) / (dot(Δu_free, v2) + ψ² * Δλ)
-  δu = v1 + δλ * v2                                                                                                                                                
-                                                                                                                                                                   
-  Δu_free .+= δu; Δλ += δλ                                                                                                                                         
-                                                                                                                                                                   
-  The tricky part is computing f_ref_free. For your case (prescribed displacements scaling with λ), the cleanest approach is a finite difference:
-                                                                                                                                                                   
-  ε = 1e-6                                                  
-  update!(ch, λ + ε); u_pert = copy(u); apply!(u_pert, ch)                                                                                                         
-  assemble_all!(K_tmp, r_pert, dh, scv, u_pert, mat)        
-  apply_zero!(K_tmp, r_pert, ch)                                                                                                                                   
-  f_ref = (r_pert .- r_int) ./ ε   # only free DOFs matter  
-  update!(ch, λ)                    # restore                                                                                                                      
-                                                            
-  The predictor (first step from a converged point) is just the tangent direction normalized to Δs:                                                                
-                                                                                                                                                                   
-  v_pred = K_free \ f_ref_free                                                                                                                                     
-  Δλ_pred = Δs / sqrt(dot(v_pred, v_pred) + ψ²)                                                                                                                    
-  Δu_pred = Δλ_pred * v_pred                                
-                                                                                                                                                                   
-  The sign of Δλ_pred should follow the previous step to stay on the same branch.                                                                                  
-                                                                                                                                                                   
-  ψ scales the relative weight of λ vs displacement in the arc-length — ψ = 0 gives cylindrical (displacement only), ψ = 1 gives spherical. Start with ψ = 0 since 
-  λ and displacements have very different magnitudes here.    
+# Two RHS per iteration: residual and reference load direction
+v1 = K_free \ (-r_free)          # standard Newton step
+v2 = K_free \ f_ref_free         # tangent to λ direction
+
+# arc-length constraint gives δλ (cylindrical)
+δλ = (-dot(Δu_free, v1)) / (dot(Δu_free, v2) + ψ² * Δλ)
+δu = v1 + δλ * v2
+
+Δu_free .+= δu; Δλ += δλ
+
+The tricky part is computing f_ref_free. For your case (prescribed displacements scaling with λ), the cleanest approach is a finite difference:
+
+ε = 1e-6
+update!(ch, λ + ε); u_pert = copy(u); apply!(u_pert, ch)
+assemble_all!(K_tmp, r_pert, dh, scv, u_pert, mat)
+apply_zero!(K_tmp, r_pert, ch)
+f_ref = (r_pert .- r_int) ./ ε   # only free DOFs matter
+update!(ch, λ)                    # restore
+
+
+The predictor (first step from a converged point) is just the tangent direction normalized to Δs:
+
+v_pred = K_free \ f_ref_free
+Δλ_pred = Δs / sqrt(dot(v_pred, v_pred) + ψ²)
+Δu_pred = Δλ_pred * v_pred
+
+The sign of Δλ_pred should follow the previous step to stay on the same branch.
+
+ψ scales the relative weight of λ vs displacement in the arc-length — ψ = 0 gives cylindrical (displacement only), ψ = 1 gives spherical. Start with ψ = 0 since
+λ and displacements have very different magnitudes here.

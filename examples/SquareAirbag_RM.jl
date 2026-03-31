@@ -140,7 +140,7 @@ let u = zeros(N), p = 0.0
     # the numeric phase, which is the dominant cost for Newton on a fixed mesh.
     @timeit "assembly" assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
     K_eff.nzval .= K_int.nzval
-    let rhs_dummy = zeros(N); apply_zero!(K_eff, rhs_dummy, ch); end
+    apply_zero!(K_eff, r_int, ch)
     F_lu = lu(K_eff)
 
     for step in 1:n_steps
