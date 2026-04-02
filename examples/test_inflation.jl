@@ -101,9 +101,10 @@ function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
     end
 end
 
+# device dimensions
+L   = 0.1 # Length in meters
 n   = 32
-L   = 1.0
-mat = LinearElastic(20000.0, 0.3,  0.016)
+mat = LinearElastic(0.35e6, 0.3,  0.002)
 
 grid = make_quarter_pillow_grid(n; L)
 ip   = Lagrange{RefQuadrilateral, 1}()
@@ -161,17 +162,17 @@ w_center_dof = let
 end
 @assert w_center_dof > 0 "center u_z DOF not found"
 
-# Displacement steps: trace p vs w_center from w=0 up to p=p_max.
-# Membrane theory: w ~ (p·L⁴/(E·t))^(1/3) → at p=500: w ≈ 0.63 m.
-p_max   = 1.0
-w_max   = 0.65         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
-n_steps = 160
-Δw      = w_max / n_steps   # = 0.005 m = 5·t per step
+# Displacement steps
+Pa2mmHg = 0.00750062 # Pa/mmHg
+m3_to_ml = 1.0e6          # m³ to ml
+p_max   = 6.0 / Pa2mmHg  # Pfill = 6 mmHg
+w_max   = 0.02         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
+n_steps = 50
+Δw      = 2w_max / n_steps   # = 0.005 m = 5·t per step
 tol     = 1e-6
 max_iter = 20
 
 N = ndofs(dh)
-
 K_int  = allocate_matrix(dh)
 K_pres = allocate_matrix(dh)
 K_eff  = allocate_matrix(dh)   # preallocated; values updated in-place each Newton step
@@ -181,64 +182,266 @@ v1     = zeros(N)
 v2     = zeros(N)
 u_final= zeros(N)
 
-println("Square airbag RM (Q9, n=$n, p_max=$p_max, Δw=$(round(Δw;digits=4)) m)")
-println("  step |    p    | w_center   | iters")
+pvd = paraview_collection("minilimo")
+vtk_step = Ref(0)
+p_final  = Ref(0.0)
 
-pvd = paraview_collection("square_airbag")
+# Initialise symbolic LU factorisation from the linearised system at u=0, p=0
+assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u_final, mat)
+K_eff.nzval .= K_int.nzval
+apply_zero!(K_eff, r_int, ch)
+F_lu = lu(K_eff)
 
-# first step, go into initial configuration by applying BC on valve support and P_fill in ventricle with
-# load displacement-controlled Newton-Raphson.
-let u = zeros(N), p = 0.0
-    VTKGridFile("square_airbag-0", dh) do vtk
-        write_solution(vtk, dh, u); pvd[0.0] = vtk
-    end
+# TODO the one I am using
+# println("miniLIMO RM (Q4, n=$n)")
+# println("  step |    λ    | iters")
+# let u = zeros(N), p = 0.0
+#     VTKGridFile("minilimo-0", dh) do vtk
+#         vtk_step[] += 1
+#         write_solution(vtk, dh, u)
+#         pvd[0.0] = vtk
+#     end
+#     δp = p_max / n_steps
+#     for step in 1:n_steps
+#         λ = step/n_steps
+#         Ferrite.update!(ch, λ)
+#         converged = false; n_iter = 0
+#         for iter in 1:max_iter
+#             assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
+#             # Update K_eff values in-place (same sparsity pattern as K_int and K_pres).
+#             K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval
+#             rhs1 = p .* F_p .- r_int           # −R(u,p): negative equilibrium residual
+#             apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
+#             if norm(rhs1) < tol
+#                 converged = true; n_iter = iter - 1; break
+#             end
+#             n_iter = iter
+#             lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
+#             ldiv!(v1, F_lu, rhs1)   # equilibrium correction
+#             u .+= v1
+#             apply!(u, ch)          # reset BC DOFs to zero
+#         end
+#         p  += δp # increment pressure loading
 
-    # Initialise symbolic LU factorisation from the linearised system at u=0, p=0
-    assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
-    K_eff.nzval .= K_int.nzval
-    apply_zero!(K_eff, r_int, ch)
-    F_lu = lu(K_eff)
+#         if !converged
+#             @warn "step $step did not converge after $max_iter iters (p=$p)"
+#             break
+#         end
 
-    for step in 1:n_steps
-        w_target = step * Δw
-        Ferrite.update!(ch, step/20) # zero to one ramp quicker than the pressure, maxes at t=1 in function
-        converged = false; n_iter = 0
+#         VTKGridFile("minilimo-$(vtk_step[])", dh) do vtk
+#             vtk_step[] += 1
+#             write_solution(vtk, dh, u)
+#             Ferrite.write_constraints(vtk, ch)
+#             color(vtk, grid, "actuation")
+#             pvd[float(step)] = vtk
+#         end
+#         p_final[] = p
+#         @printf("  %4d |   %.3f | %d\n", step, λ, n_iter)
+#     end
+#     u_final .= u
+# end
+
+# # first step, go into initial configuration by applying BC on valve support and P_fill in ventricle with
+# # load displacement-controlled Newton-Raphson.
+# let u = zeros(N), p = 0.0
+#     VTKGridFile("minilimo-0", dh) do vtk
+#         vtk_step[] += 1
+#         write_solution(vtk, dh, u); pvd[0.0] = vtk
+#     end
+
+#     for step in 1:n_steps
+#         w_target = step * Δw
+#         Ferrite.update!(ch, step/20) # zero to one ramp quicker than the pressure, maxes at t=1 in function
+#         converged = false; n_iter = 0
+#         for iter in 1:max_iter
+#             assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
+#             # Update K_eff values in-place (same sparsity pattern as K_int and K_pres).
+#             K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval
+#             rhs1 = p .* F_p .- r_int           # −R(u,p): negative equilibrium residual
+#             apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
+#             if norm(rhs1) < tol && abs(u[w_center_dof] - w_target) < tol
+#                 converged = true; n_iter = iter - 1; break
+#             end
+#             n_iter = iter
+#             lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
+#             ldiv!(v1, F_lu, rhs1)   # equilibrium correction
+#             ldiv!(v2, F_lu, F_p)    # load-direction vector
+#             δp = (w_target - u[w_center_dof] - v1[w_center_dof]) / v2[w_center_dof]
+#             u .+= v1 .+ δp .* v2
+#             p  += δp
+#             apply!(u, ch)                       # reset BC DOFs to zero
+#         end
+
+#         if !converged
+#             @warn "step $step (w_target=$w_target) did not converge after $max_iter iters (p=$p)"
+#             break
+#         end
+
+#         VTKGridFile("minilimo-$(vtk_step[])", dh) do vtk
+#             vtk_step[] += 1
+#             write_solution(vtk, dh, u)
+#             Ferrite.write_constraints(vtk, ch)
+#             color(vtk, grid, "actuation")
+#             pvd[float(step)] = vtk
+#         end
+#         p_final[] = p
+#         @printf("  %4d | %4f | %8.4e | %d\n", step, p, u[w_center_dof], n_iter)
+#         p ≥ p_max && (@printf("  Reached p_max = %.4f at step %d (w = %.4f m).\n", p_max, step, u[w_center_dof]); break)
+#     end
+#     u_final .= u
+# end
+
+using JLD2
+# jldsave("inflation.jld2"; u_final, p_final)
+data = jldopen("inflation.jld2", "r")
+u_final = data["u_final"]
+p_final = data["p_final"]
+
+Ferrite.update!(ch, 1.0)
+assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u_final, mat)
+K_eff.nzval .= K_int.nzval .- p_final[] .* K_pres.nzval
+rhs1 = p_final[] .* F_p .- r_int
+apply_zero!(K_eff, rhs1, ch)
+norm(rhs1)
+
+# what's the volume in this configuration
+vol = -2compute_volume(dh, scv, u_final) * m3_to_ml
+
+import OrdinaryDiffEq as ODE
+using Plots
+
+# open-loop windkessel
+function Windkessel!(du,u,p,t)
+    # unpack
+    (Vlv,Pa,Plv) = u
+    (Ra,Ca,Rv,Cv,Rp,Pv)  = p
+
+    # flow at the two vales
+    Qmv = Pv ≥ Plv ? (Pv - Plv)/Rv : (Plv - Pv)/1e10
+    Qao = Plv ≥ Pa ? (Plv - Pa)/Ra : (Pa - Plv)/1e10
+
+    # rates
+    du[1] = Qmv - Qao             # dVlv/dt=Qmv-Qao
+    du[2] = Qao/Ca - Pa/(Rp*Ca)   # dPa/dt=Qao/C-Pao/RC
+    du[3] = 0.0                   # un-used u[3] hold the ventricular pressure
+end
+
+# actuation waveform (normalized to [0,1])
+ϕᵢ(t;tC=0.10,tR=0.25,TC=0.15,TR=0.45) = 0.0<=(t-tC)%1<=TC ? 0.5*(1-cos(π*((t-tC)%1)/TC)) : (0.0<=(t-tR)%1<=TR ? 0.5*(1+cos(π*((t-tR)%1)/TR)) : 0)
+
+# Kasra's parameters
+Ra = 8.0e6*Pa2mmHg/m3_to_ml     # Pa.s/m³ -> mmHg.s/ml
+Rp = 1.0e8*Pa2mmHg/m3_to_ml     # Pa.s/m³
+Rv = 5.0e5*Pa2mmHg/m3_to_ml     # Pa.s/m³
+Ca = 8.0e-9*m3_to_ml/Pa2mmHg    # m³/Pa
+Cv = 5.0e-8*m3_to_ml/Pa2mmHg    # m³/Pa not used in openloop
+Pv = p_final[] * Pa2mmHg
+
+# setup
+u₀ = [vol, 60, Pv]              # initial conditions
+tspan = (0.0, 10.0)
+params = (Ra,Ca,Rv,Cv,Rp,Pv)
+
+# generate a problem to solve
+prob = ODE.ODEProblem(Windkessel!, u₀, tspan, params)
+
+# full control over iterations
+integrator = ODE.init(prob, ODE.Tsit5(), reltol=1e-6,
+                      abstol=1e-9, save_everystep=false)
+
+# Reset ODE.
+ODE.reinit!(integrator, [vol, 60, Pv])
+
+# coupling tolerances
+tol      = 1e-6
+max_iter = 20
+dt_cpl   = 0.01
+
+# storages
+vols = Float64[]
+pres = Float64[]
+pact = Float64[]
+vtarget = []
+
+# new FE arrays
+dVdu = zeros(N)
+
+# start with the initial condition from the morphing step
+let u = copy(u_final), p = p_final[], k₀ = length(pvd.timeSteps)
+    println("3D-0D Lie–Trotter coupling (RM Q9, n=$n, dt_cpl=$(dt_cpl) s)")
+    println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
+
+    step = 0
+    while integrator.t < tspan[2] - dt_cpl / 2
+        step += 1
+
+        # advance Windkessel by dt_cpl; Plv = integrator.u[3] is held fixed.
+        ODE.step!(integrator, dt_cpl, true)
+
+        # full-LV volume (ml)
+        V_target = 0.5 * integrator.u[1] / m3_to_ml # in m³
+        push!(vtarget, V_target)
+
+        # pressure at this step, meaning at t [mmHg], converted to Pa for 3D model
+        Pact_mmHg = 80 * ϕᵢ(integrator.t;tC=0.1,tR=0.4,TC=0.3,TR=0.3) # in mmHg
+        Pact = Pact_mmHg / Pa2mmHg # Pa
+        @show V_target, p, Pact_mmHg
+
+        # Schur Complement Newton-Raphson solve for the volume
+        converged = false; n_iter = 0; V₃D = 0.0
         for iter in 1:max_iter
             assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
-            # Update K_eff values in-place (same sparsity pattern as K_int and K_pres).
-            K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval
-            rhs1 = p .* F_p .- r_int           # −R(u,p): negative equilibrium residual
-            apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
-            if norm(rhs1) < tol && abs(u[w_center_dof] - w_target) < tol
+
+            # volume_residual returns −val → compute_volume < 0 for outward (+z) inflation.
+            V₃D = -compute_volume(dh, scv, u) # in m³
+            volume_gradient!(dVdu, dh, scv, u)
+            dVdu[ch.prescribed_dofs] .= 0.0   # zero BC DOFs in gradient
+            @show norm(dVdu)
+
+            r_V  = V₃D - V_target
+            K_eff.nzval .= K_int.nzval .- (p-Pact) .* K_pres.nzval
+            rhs1 = (p-Pact) .* F_p .- r_int
+            apply_zero!(K_eff, rhs1, ch)
+            @show V₃D, p
+            if norm(rhs1) < tol && abs(r_V) < tol * max(1.0, abs(V_target))
                 converged = true; n_iter = iter - 1; break
             end
             n_iter = iter
-            lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
+
+            lu!(F_lu, K_eff)        # factorize
             ldiv!(v1, F_lu, rhs1)   # equilibrium correction
             ldiv!(v2, F_lu, F_p)    # load-direction vector
-            δp = (w_target - u[w_center_dof] - v1[w_center_dof]) / v2[w_center_dof]
+
+            # Schur complement (dVdu = ∂(compute_volume)/∂u = −∂V₃D/∂u):
+            S  = -dot(dVdu, v2)                       # > 0: dVdu[u_z]<0, v2[u_z]>0
+            δp = (-r_V + dot(dVdu, v1)) / S
             u .+= v1 .+ δp .* v2
             p  += δp
-            apply!(u, ch)                       # reset BC DOFs to zero
+            apply!(u, ch)
         end
 
-        if !converged
-            @warn "step $step (w_target=$w_target) did not converge after $max_iter iters (p=$p)"
-            break
-        end
+        !converged && (@warn "step $step (t=$(integrator.t)) did not converge"; break)
 
-        VTKGridFile("square_airbag-$step", dh) do vtk
-            write_solution(vtk, dh, u)
-            Ferrite.write_constraints(vtk, ch)
-            color(vtk, grid, "actuation")
-            pvd[float(step)] = vtk
+        # feed new LV pressure back into ODE state.
+        integrator.u[3] = p * Pa2mmHg # back in mmHg for the ODE
+        ODE.u_modified!(integrator, true)
+
+        push!(vols, 2V₃D * m3_to_ml)   # full volume [ml]
+        push!(pres, p * Pa2mmHg)            # pressure [mmHg]
+        push!(pact, Pact_mmHg)
+
+        if mod(step, 10) == 0
+            VTKGridFile("minilimo-$(vtk_step[])", dh) do vtk
+                vtk_step[] += 1
+                write_solution(vtk, dh, u)
+                pvd[k₀+integrator.t] = vtk
+            end
+            @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n",
+                    integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter)
         end
-        @printf("  %4d | %7.2f | %8.4e | %d\n", step, p, u[w_center_dof], n_iter)
-        p ≥ p_max && (@printf("  Reached p_max = %.1f at step %d (w = %.4f m).\n", p_max, step, u[w_center_dof]); break)
     end
-    u_final .= u
 end
 vtk_save(pvd);
 
-# what's the volume of this
-compute_volume(dh, scv, u_final; h=Vec((0.0,0.0,1.0)), b=Vec((0.0,0.0,0.0)))
+# # plot([vols, pres, pact, vtarget* 4 * m3_to_ml], xlabel="Volume [ml]", ylabel="Pressure [mmHg]",
+#     #  label=["Vlv" "Plv" "Pact" "Vtarget"])

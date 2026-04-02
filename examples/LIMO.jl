@@ -86,15 +86,15 @@ function map_initial(x, y, Ar)
 end
 
 function strain_energy(dh, scv, u, mat)
-      E = 0.0
-      for cell in CellIterator(dh)
-          reinit!(scv, cell)
-          u_e = @views u[shelldofs(cell)]
-          E += FerriteShells.membrane_energy_RM(u_e, scv, mat)
-          E += FerriteShells.bending_shear_energy_RM(u_e, scv, mat)
-      end
-      E
-  end
+    E = 0.0
+    for cell in CellIterator(dh)
+        FerriteShells.reinit!(scv, cell)
+        u_e = @views u[shelldofs(cell)]
+        E += FerriteShells.membrane_energy_RM(u_e, scv, mat)
+        E += FerriteShells.bending_shear_energy_RM(u_e, scv, mat)
+    end
+    E
+end
 
 # Assemble K_int, R_int, K_pres and F_p (all for unit pressure p=1) in one cell loop.
 function assemble_all!(K_int, r_int, dh, scv, u, mat)
@@ -103,10 +103,8 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
     re_i = zeros(n_e)
     asm_i = start_assemble(K_int, r_int)
     for cell in CellIterator(dh)
-        fill!(ke_i, 0.0)
-        fill!(re_i, 0.0)
-        # fill!(ke_p, 0.0); fill!(re_p, 0.0)
-        reinit!(scv, cell)
+        fill!(ke_i, 0.0); fill!(re_i, 0.0)
+        FerriteShells.reinit!(scv, cell)
         sd = shelldofs(cell)
         u_e = u[sd]
         membrane_tangent_RM!(ke_i, scv, u_e, mat)
@@ -117,19 +115,18 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
     end
 end
 
-function assemble_pressure!(K_pres, F_p, scv, u_e)
+function assemble_pressure_all!(K_pres, F_p, scv, u_vec)
     n_e = ndofs_per_cell(dh)
     ke_p = zeros(n_e, n_e)
     re_p = zeros(n_e)
     asm_p = start_assemble(K_pres)
     fill!(F_p, 0.0)
-    # assemble the pressure for each cell set
     for cellset in keys(Ferrite.getcellsets(grid))
         for cell in CellIterator(dh, Ferrite.getcellset(grid, cellset))
             fill!(ke_p, 0.0); fill!(re_p, 0.0)
-            reinit!(scv, cell)
+            FerriteShells.reinit!(scv, cell)
             sd = shelldofs(cell)
-            u_e = u[sd]
+            u_e = u_vec[sd]
             assemble_pressure!(re_p, scv, u_e, pressures[cellset])
             assemble_pressure_tangent!(ke_p, scv, u_e, pressures[cellset])
             assemble!(asm_p, sd, ke_p)
@@ -145,6 +142,7 @@ grid = get_ferrite_grid(fname)
 
 # boundary definition
 addfacetset!(grid, "edge", x -> x[2] ≈ 0.0)
+addnodeset!(grid, "corner", x -> x[2] ≈ 0.0 && x[1] ≈ -0.46411)
 # addcustomfacetset!(grid, getcells(grid, "SRF_1"), "edge_top", x -> x[2] ≈ 0.0)
 # addcustomfacetset!(grid, getcells(grid, "SRF_8"), "edge_bottom", x -> x[2] ≈ 0.0)
 
@@ -162,7 +160,6 @@ addcustomnodeset!(grid, getcells(grid, "SRF_8"), "edge_bottom", x -> x[2] ≈ 0.
 # x_new, y_new = map_initial(x, y, Ar)
 # plot(x_new, y_new, aspect_ratio=:equal)
 # scatter!(x_new, y_new)
-
 
 function generate_boundary_function(grid, nodeset)
     top_nodes = get_node_coordinate.(getnodes(grid, nodeset))
@@ -196,20 +193,30 @@ add!(dh, :θ, ip^2)
 close!(dh)
 
 # make a dict of pressure and cellset
-pressures = Dict("SRF_1" => 1.104, "SRF_2" => 1.104,
-                 "SRF_3" => 1.104, "SRF_4" => 1.104,
-                 "SRF_5" => -1.104, "SRF_6" => -1.104,
-                 "SRF_7" => -1.104, "SRF_8" => -1.104,
-                 "SRF_9" => -1.104, "SRF_10" => -1.104,
-                 "SRF_11" => -1.104, "SRF_12" => 1.104,
-                 "SRF_13" => 1.104, "SRF_14" => 1.104)
+# pressures = Dict("SRF_1" => 1.104e2, "SRF_2" => 1.104e2,
+#                  "SRF_3" => 1.104e2, "SRF_4" => 1.104e2,
+#                  "SRF_5" => -1.104e2, "SRF_6" => -1.104e2,
+#                  "SRF_7" => -1.104e2, "SRF_8" => -1.104e2,
+#                  "SRF_9" => -1.104e2, "SRF_10" => -1.104e2,
+#                  "SRF_11" => -1.104e2, "SRF_12" => 1.104e2,
+#                  "SRF_13" => 1.104e2, "SRF_14" => 1.104e2)
+
+# make a dict of pressure and cellset
+pressures = Dict("SRF_1" => 5.e2, "SRF_2" => 5.e2,
+                 "SRF_3" => 5.e2, "SRF_4" => 5.e2,
+                 "SRF_5" => 5.e2, "SRF_6" => 5.e2,
+                 "SRF_7" => 5.e2, "SRF_8" => -5.e2,
+                 "SRF_9" => -5.e2, "SRF_10" => -5.e2,
+                 "SRF_11" => -5.e2, "SRF_12" => -5.e2,
+                 "SRF_13" => -5.e2, "SRF_14" => -5.e2)
 
 # add boundary conditions
 ch = ConstraintHandler(dh)
 add!(ch, Dirichlet(:u, getfacetset(grid, "edge"), x -> 0.0, [2]))
-add!(ch, Dirichlet(:u, getnodeset(grid, "edge_top"), (x, t) -> prescribed_u_top(x, t), [1, 3]))
+add!(ch, Dirichlet(:u, getnodeset(grid, "corner"), x -> zero(x), [1,2,3]))
+# add!(ch, Dirichlet(:u, getnodeset(grid, "edge_top"), (x, t) -> prescribed_u_top(x, t), [1, 3]))
 # add!(ch, Dirichlet(:θ, getnodeset(grid, "edge_top"), (x, t) -> prescribed_θ(x, t), [1, 2]))
-add!(ch, Dirichlet(:u, getnodeset(grid, "edge_bottom"), (x, t) -> [1,-1].*prescribed_u_bottom(x, t), [1, 3]))
+# add!(ch, Dirichlet(:u, getnodeset(grid, "edge_bottom"), (x, t) -> [1,-1].*prescribed_u_bottom(x, t), [1, 3]))
 # add!(ch, Dirichlet(:θ, getnodeset(grid, "edge_bottom"), (x, t) -> prescribed_θ(x, t), [1, 2]))
 close!(ch); update!(ch, 0.0)
 
@@ -243,115 +250,102 @@ un = zeros(N)
 #     color(vtk, grid)
 # end
 
-# store the results of the newton step
-t_store = []
-u_store = copy(u)
+t_store = Float64[]
 
 using WriteVTK
 pvd = paraview_collection("limo")
-# load controlled Newton-Raphson
-let λᵢ=0; @time for λ in 0.0:0.001:1.0
-    VTKGridFile("limo-0", dh) do vtk
-        write_solution(vtk, dh, u); pvd[0.0] = vtk
+vtk_step = Ref(0)
+
+function write_vtk_step!(pvd, dh, u, r_int, t)
+    vtk_step[] += 1
+    r_u_node = zeros(3, getnnodes(dh.grid))
+    r_θ_node = zeros(2, getnnodes(dh.grid))
+    for cell in CellIterator(dh)
+        sd = shelldofs(cell)
+        for (I, nid) in enumerate(cell.nodes)
+            r_u_node[:, nid] .= r_int[sd[5I-4:5I-2]]
+            r_θ_node[:, nid] .= r_int[sd[5I-1:5I  ]]
+        end
     end
-     # Newton solve for current displacement step
-    λᵢ += 1; newton_itr = -1
-    # update the boundary conditions for the current load step
-    Ferrite.update!(ch, λ)
-    while true
-        newton_itr += 1
-        # Construct the current guess and enforce BCs at current λ
-        u .= un .+ Δu
-        apply!(u, ch)
-        # Compute residual and tangent for current guess
-        assemble_all!(K_int, r_int, dh, scv, u, mat)
-        # Apply boundary conditions
+    VTKGridFile("limo-$(vtk_step[])", dh) do vtk
+        write_solution(vtk, dh, u)
+        write_node_data(vtk, r_u_node, "residual_u")
+        write_node_data(vtk, r_θ_node, "residual_theta")
+        pvd[t] = vtk
+    end
+end
+
+free   = ch.free_dofs
+tol_nl = 1e-6
+
+# Arc-length (Riks): BCs and pressure both ramp with λ.
+# f_ref = f_p (pressure) steers the arc-length direction; BCs tag along
+# in the corrector equilibrium without polluting the arc-length constraint.
+Δs_init = 5e-3
+ψ       = 0.0    # cylindrical constraint (displacement-only norm)
+max_arc = 400
+max_cor = 20
+
+f_ref        = zeros(N)
+Δu_free      = zeros(N)
+Δu_free_prev = zeros(N)
+
+let λ=0.0, Δs=Δs_init, Δλ_prev=Δs_init
+    for step in 1:max_arc
+        Ferrite.update!(ch, λ)
+
+        # residual and tangent at (un, λ)
+        assemble_all!(K_int, r_int, dh, scv, un, mat)
+        assemble_pressure_all!(K_pres, f_p, scv, un)
+        r_int .-= λ .* f_p; K_int.nzval .-= λ .* K_pres.nzval
         apply_zero!(K_int, r_int, ch)
-        # Compute the residual norm and compare with tolerance
-        normg = norm(r_int)
-        println("residual norm= ",normg)
-        if normg < 1e-6
-            push!(t_store, λ)
-            break
-        elseif newton_itr > 10
-            error("Reached maximum Newton iterations, aborting at $(norm(r_int[ch.free_dofs]))")
+
+        # f_ref = pressure load at un (drives arc-length; BCs are implicit)
+        f_ref .= f_p; apply_zero!(f_ref, ch)
+
+        # predictor: tangent direction K·v = f_ref, scaled to arc length Δs
+        v_pred = K_int \ f_ref; apply_zero!(v_pred, ch)
+        vn = sqrt(dot(v_pred[free], v_pred[free]) + ψ^2)
+        δλ_pred = Δs / max(vn, 1e-15)
+        dot(Δu_free_prev[free], v_pred[free]) + ψ^2 * Δλ_prev * δλ_pred < 0 && (δλ_pred = -δλ_pred)
+        Δu_free .= δλ_pred .* v_pred; Δλ = δλ_pred
+
+        # corrector: BCs and pressure both at λ+Δλ
+        converged = false; itr = 0
+        for cor in 1:max_cor
+            itr = cor
+            Ferrite.update!(ch, λ + Δλ)
+            u .= un; apply!(u, ch); u[free] .+= Δu_free[free]
+
+            assemble_all!(K_int, r_int, dh, scv, u, mat)
+            assemble_pressure_all!(K_pres, f_p, scv, u)
+            r_int .-= (λ + Δλ) .* f_p; K_int.nzval .-= (λ + Δλ) .* K_pres.nzval
+            apply_zero!(K_int, r_int, ch)
+
+            normg = norm(r_int[free])
+            normg < tol_nl && (converged = true; break)
+
+            v1 = K_int \ (-r_int); apply_zero!(v1, ch)
+            v2 = K_int \ f_ref;    apply_zero!(v2, ch)
+
+            denom = dot(Δu_free[free], v2[free]) + ψ^2 * Δλ
+            δλ = abs(denom) > 1e-15 ? (-dot(Δu_free[free], v1[free])) / denom : 0.0
+            Δu_free[free] .+= v1[free] .+ δλ .* v2[free]
+            Δλ += δλ
         end
-        # Compute Newton increment via direct solve
-        K_free = Matrix(K_int)[ch.free_dofs, ch.free_dofs]
-        d = LinearAlgebra.diag(K_free)
-        @show minimum(d), maximum(d), maximum(d)/minimum(d)
-        ΔΔu .= K_int \ r_int
-        apply_zero!(ΔΔu, ch)
-        # backtracking if residual increase at some point
-        # residual norm Armiijo is broken for shells
-        # α = 1.0; normg0 = normg
-        # for _ in 1:10
-        #     Δu_trial = Δu .- α .* ΔΔu
-        #     u_trial = un .+ Δu_trial; apply!(u_trial, ch)
-        #     assemble_all!(K_int, r_int, dh, scv, u_trial, mat)
-        #     apply_zero!(K_int, r_int, ch)
-        #     norm(r_int) < normg0 && break
-        #     α *= 0.5
-        # end
-        # energy Armijo
-        slope = dot(ΔΔu, r_int)      # = r_int' K⁻¹ r_int > 0
-        α = 1.0; E0 = strain_energy(dh, scv, u, mat) #- dot(f_p, u)
-        for _ in 1:30
-            u_trial = un .+ (Δu .- α .* ΔΔu); apply!(u_trial, ch)
-            strain_energy(dh, scv, u_trial, mat) #=- dot(f_p, u)=# ≤ E0 - 1e-4 * α * slope && break
-            α *= 0.5
+
+        if converged
+            push!(t_store, λ + Δλ)
+            Δu_free_prev .= Δu_free; Δλ_prev = Δλ
+            λ = min(λ + Δλ, 1.0); un .= u; Δs = min(Δs * 1.2, 0.1)
+            println("Step $step: λ=$(round(λ; digits=4)), converged in $itr iters, |r|=$(norm(r_int[free]))")
+            write_vtk_step!(pvd, dh, u, r_int, λ)
+            λ ≥ 1.0 - 1e-10 && break
+        else
+            Δs *= 0.5
+            println("Step $step: FAILED at λ=$(round(λ; digits=4)), Δs→$(round(Δs; digits=8))")
+            Δs < 1e-8 && error("Arc-length step too small")
         end
-        Δu .-= α .* ΔΔu
-    end
-    println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(r_int[ch.free_dofs]))")
-    # Commit converged solution and reset increment for next load step
-    un .= u
-    fill!(Δu, 0.0)
-    # save
-    VTKGridFile("limo-$λᵢ", dh) do vtk
-        write_solution(vtk, dh, u); pvd[λᵢ] = vtk
-    end
-end;
-end
-close(pvd);
-
-using JLD2
-# jldsave("limo_results.jld2", t_store=t_store, un=un)
-# jld = jldopen("limo_results.jld2", "r")
-# t_store = jld["t_store"]
-# un = jld["un"]
-
-
-# Condition number / stiffness quality
-K_free = Matrix(K_int[ch.free_dofs, ch.free_dofs])
-# @show cond(Matrix(K_free))
-# d = diag(K_free)
-# @show extrema(d), maximum(d)/minimum(d)
-# λ_min = minimum(eigvals(K_free))
-
-# Which DOF components are driving the residual overshoot
-assemble_all!(K_int, r_int, dh, scv, un, mat)
-apply_zero!(K_int, r_int, ch)
-# split by field
-n_u = length(ch.free_dofs)  # rough split
-@show norm(r_int[1:3:end])  # u₁ components
-@show norm(r_int[2:3:end])  # u₂
-@show norm(r_int[3:3:end])  # u₃
-@show norm(r_int[n_u:2:end])  # φ₁
-@show norm(r_int[n_u+1:2:end])  # φ₂
-
-r_u_node = zeros(3, getnnodes(dh.grid))
-r_θ_node = zeros(2, getnnodes(dh.grid))
-for cell in CellIterator(dh)
-    sd = shelldofs(cell)
-    for (I, nid) in enumerate(cell.nodes)
-        r_u_node[:, nid] .= r_int[sd[5I-4:5I-2]]
-        r_θ_node[:, nid] .= r_int[sd[5I-1:5I  ]]
     end
 end
-
-VTKGridFile("limo_last_converged", dh) do vtk
-    write_solution(vtk, dh, un)
-    write_node_data(vtk, r_u_node, "residual_u")
-    write_node_data(vtk, r_θ_node, "residual_theta")
-end
+close(pvd)
