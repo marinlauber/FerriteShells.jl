@@ -247,13 +247,6 @@ end
 # u_final = data["u_final"]
 # p_final = data["p_final"]
 
-# Ferrite.update!(ch, 1.0)
-# assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u_final, mat)
-# K_eff.nzval .= K_int.nzval .- p_final[] .* K_pres.nzval
-# rhs1 = p_final[] .* F_p .- r_int
-# apply_zero!(K_eff, rhs1, ch)
-# norm(rhs1)
-
 # what's the volume in this configuration
 vol = -2compute_volume(dh, scv, u_final) * m3_to_ml
 
@@ -390,9 +383,11 @@ dVdu = zeros(N)
 end
 vtk_save(pvd);
 
-# p1=plot(0:dt_cpl:integrator.t, [vols, pres, pact], xlabel="Time [s]",
-#         label=["Vlv" "Plv" "Pact"])
-# p2=plot(vols, pres, label=:none, xlim=(100,300),ylims=(0, 100),
-#     xlabel="Volume [ml]", ylabel="Pressure [mmHg]")
-# plot(p1, p2)
-# savefig("3D0D_ferriteshells.png")
+times = collect(0:dt_cpl:integrator.t)
+p1=plot(times, [vols, pres, pact], xlabel="Time [s]",
+        label=["Vlv" "Plv" "Pact"], lw=2)
+p2=plot(vols, pres, label=:none, xlim=(200,300),ylims=(0, 100),
+        xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2,
+        linez=times./maximum(times))
+plot(p1, p2)
+savefig("3D0D_ferriteshells.png")
