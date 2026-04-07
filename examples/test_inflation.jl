@@ -65,8 +65,8 @@ function make_quarter_pillow_grid(n; L=1.0)
 
     addnodeset!(grid, "x_low", x -> isapprox(x[1], -L/2, atol=1e-10))
 
-    addcellset!(grid, "actuation", x -> (abs(x[1]) < 0.4L && abs(x[2]) < 0.4L) )
-
+    addcellset!(grid, "Pact", x -> (abs(x[1]) < 0.4L && abs(x[2]) < 0.4L) )
+    addcellset!(grid, "Plv", x -> true ) # all the grid
     addfacetset!(grid, "x_high", x -> isapprox(x[1],  L/2, atol=1e-10))
     addfacetset!(grid, "y_low", x -> isapprox(x[2], -L/2, atol=1e-10))
     addfacetset!(grid, "y_high", x -> isapprox(x[2],  L/2, atol=1e-10))
@@ -75,27 +75,37 @@ function make_quarter_pillow_grid(n; L=1.0)
     return grid
 end
 
-# Assemble K_int, R_int, K_pres and F_p (all for unit pressure p=1) in one cell loop.
-function assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
+# Assemble K_int, R_int, K_plv and F_p (all for unit pressure p=1) in one cell loop.
+function assemble_all!(K_int, r_int, dh, scv, u, mat)
     n_e = ndofs_per_cell(dh)
     ke_i = zeros(n_e, n_e); re_i = zeros(n_e)
-    ke_p = zeros(n_e, n_e); re_p = zeros(n_e)
     asm_i = start_assemble(K_int, r_int)
-    asm_p = start_assemble(K_pres)
-    fill!(F_p, 0.0)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0); fill!(re_i, 0.0)
-        fill!(ke_p, 0.0); fill!(re_p, 0.0)
         reinit!(scv, cell)
         sd  = shelldofs(cell)
         u_e = u[sd]
         membrane_residuals_RM!(re_i, scv, u_e, mat)
         bending_residuals_RM!(re_i, scv, u_e, mat)
-        assemble_pressure!(re_p, scv, u_e, 1.0)
         membrane_tangent_RM!(ke_i, scv, u_e, mat)
         bending_tangent_RM!(ke_i, scv, u_e, mat)
-        assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
         assemble!(asm_i, sd, ke_i, re_i)
+    end
+end
+
+function assemble_pressure_region!(K_plv, F_p, scv, u_vec, dh, region_name)
+    n_e = ndofs_per_cell(dh)
+    ke_p = zeros(n_e, n_e)
+    re_p = zeros(n_e)
+    asm_p = start_assemble(K_plv)
+    fill!(F_p, 0.0)
+    for cell in CellIterator(dh, getcellset(grid, region_name))
+        fill!(ke_p, 0.0); fill!(re_p, 0.0)
+        reinit!(scv, cell)
+        sd = shelldofs(cell)
+        u_e = u_vec[sd]
+        assemble_pressure!(re_p, scv, u_e, 1.0) # unit pressure
+        assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
         assemble!(asm_p, sd, ke_p)
         F_p[sd] .+= re_p
     end
@@ -146,22 +156,6 @@ add!(ch, Dirichlet(:u, getfacetset(grid, "y_high"), x -> 0.0, [3]))
 add!(ch, Dirichlet(:θ, getfacetset(grid, "y_high"), x -> zeros(2), [1,2]))
 close!(ch); Ferrite.update!(ch, 0.0)
 
-# Global DOF index for u_z at the center node (free DOF — used as displacement control).
-center_node = only(getnodeset(grid, "center"))
-w_center_dof = let
-    dof = 0
-    for cell in CellIterator(dh)
-        for (I, gid) in enumerate(getnodes(cell))
-            if gid == center_node
-                dof = celldofs(cell)[3I]; break
-            end
-        end
-        dof > 0 && break
-    end
-    dof
-end
-@assert w_center_dof > 0 "center u_z DOF not found"
-
 # Displacement steps
 Pa2mmHg = 0.00750062 # Pa/mmHg
 m3_to_ml = 1.0e6          # m³ to ml
@@ -174,10 +168,12 @@ max_iter = 20
 
 N = ndofs(dh)
 K_int  = allocate_matrix(dh)
-K_pres = allocate_matrix(dh)
+K_plv  = allocate_matrix(dh)
+K_pact = allocate_matrix(dh)
 K_eff  = allocate_matrix(dh)   # preallocated; values updated in-place each Newton step
 r_int  = zeros(N)
-F_p    = zeros(N)
+F_plv  = zeros(N)
+F_pact = zeros(N)
 v1     = zeros(N)
 v2     = zeros(N)
 u_final= zeros(N)
@@ -187,7 +183,7 @@ vtk_step = Ref(0)
 p_final  = Ref(0.0)
 
 # Initialise symbolic LU factorisation from the linearised system at u=0, p=0
-assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u_final, mat)
+assemble_all!(K_int, r_int, dh, scv, u_final, mat)
 K_eff.nzval .= K_int.nzval
 apply_zero!(K_eff, r_int, ch)
 F_lu = lu(K_eff)
@@ -199,6 +195,9 @@ let u = zeros(N), p = 0.0
     VTKGridFile("minilimo-0", dh) do vtk
         vtk_step[] += 1
         write_solution(vtk, dh, u)
+        Ferrite.write_constraints(vtk, ch)
+        color(vtk, grid, "Pact")
+        color(vtk, grid, "Plv")
         pvd[0.0] = vtk
     end
     δp = p_max / n_steps
@@ -206,11 +205,14 @@ let u = zeros(N), p = 0.0
         λ = step/n_steps
         Ferrite.update!(ch, λ)
         converged = false; n_iter = 0
+        p  += δp # increment pressure loading
         for iter in 1:max_iter
-            assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
-            # Update K_eff values in-place (same sparsity pattern as K_int and K_pres).
-            K_eff.nzval .= K_int.nzval .- p .* K_pres.nzval
-            rhs1 = p .* F_p .- r_int           # −R(u,p): negative equilibrium residual
+            # assembly of the internal and external loading
+            assemble_all!(K_int, r_int, dh, scv, u, mat)
+            assemble_pressure_region!(K_plv, F_plv, scv, u, dh, "Plv")
+            # Update K_eff values in-place (same sparsity pattern as K_int and K_plv).
+            K_eff.nzval .= K_int.nzval .- p .* K_plv.nzval
+            rhs1 = p .* F_plv .- r_int           # −R(u,p): negative equilibrium residual
             apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
             if norm(rhs1) < tol
                 converged = true; n_iter = iter - 1; break
@@ -221,7 +223,6 @@ let u = zeros(N), p = 0.0
             u .+= v1
             apply!(u, ch)          # reset BC DOFs to zero
         end
-        p  += δp # increment pressure loading
 
         if !converged
             @warn "step $step did not converge after $max_iter iters (p=$p)"
@@ -232,7 +233,8 @@ let u = zeros(N), p = 0.0
             vtk_step[] += 1
             write_solution(vtk, dh, u)
             Ferrite.write_constraints(vtk, ch)
-            color(vtk, grid, "actuation")
+            color(vtk, grid, "Pact")
+            color(vtk, grid, "Plv")
             pvd[float(step)] = vtk
         end
         p_final[] = p
@@ -311,7 +313,7 @@ dVdu = zeros(N)
 
 # start with the initial condition from the morphing step
 @time let u = copy(u_final), p = p_final[], k₀ = length(pvd.timeSteps)
-    println("3D-0D Lie–Trotter coupling (RM Q9, n=$n, dt_cpl=$(dt_cpl) s)")
+    println("3D-0D Lie–Trotter coupling (RM Q4, n=$n, dt_cpl=$(dt_cpl) s)")
     println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
 
     step = 0
@@ -332,32 +334,33 @@ dVdu = zeros(N)
         # Schur Complement Newton-Raphson solve for the volume
         converged = false; n_iter = 0; V₃D = 0.0
         for iter in 1:max_iter
-            assemble_all!(K_int, r_int, K_pres, F_p, dh, scv, u, mat)
-
+            # assembly
+            assemble_all!(K_int, r_int, dh, scv, u, mat)
+            assemble_pressure_region!(K_plv, F_plv, scv, u, dh, "Plv")
+            assemble_pressure_region!(K_pact, F_pact, scv, u, dh, "Pact")
             # volume_residual returns −val → compute_volume < 0 for outward (+z) inflation.
             V₃D = -compute_volume(dh, scv, u) # in m³
             volume_gradient!(dVdu, dh, scv, u)
             dVdu[ch.prescribed_dofs] .= 0.0   # zero BC DOFs in gradient
-
+            # Lagrange term of the coupled problem
             r_V  = V₃D - V_target
-            K_eff.nzval .= K_int.nzval .- (p-Pact) .* K_pres.nzval
-            rhs1 = (p-Pact) .* F_p .- r_int
+            K_eff.nzval .= K_int.nzval .- p .* K_plv.nzval .+ Pact .* K_pact.nzval
+            rhs1 = p .* F_plv .- Pact .* F_pact .- r_int
             apply_zero!(K_eff, rhs1, ch)
             if norm(rhs1) < tol && abs(r_V) < tol * max(1.0, abs(V_target))
                 converged = true; n_iter = iter - 1; break
             end
             n_iter = iter
-
+            # linear solve
             lu!(F_lu, K_eff)        # factorize
             ldiv!(v1, F_lu, rhs1)   # equilibrium correction
-            ldiv!(v2, F_lu, F_p)    # load-direction vector
-
+            ldiv!(v2, F_lu, F_plv)    # load-direction vector
             # Schur complement (dVdu = ∂(compute_volume)/∂u = −∂V₃D/∂u):
             S  = -dot(dVdu, v2)                       # > 0: dVdu[u_z]<0, v2[u_z]>0
             δp = (-r_V + dot(dVdu, v1)) / S
             u .+= v1 .+ δp .* v2
             p  += δp
-            apply!(u, ch)
+            apply!(u, ch) # make sure BCs are correctly imposed
         end
 
         !converged && (@warn "step $step (t=$(integrator.t)) did not converge"; break)
@@ -370,10 +373,13 @@ dVdu = zeros(N)
         push!(pres, p * Pa2mmHg)            # pressure [mmHg]
         push!(pact, Pact_mmHg)
 
-        if mod(step, 10) == 0
+        if mod(step, 5) == 0
             VTKGridFile("minilimo-$(vtk_step[])", dh) do vtk
                 vtk_step[] += 1
                 write_solution(vtk, dh, u)
+                Ferrite.write_constraints(vtk, ch)
+                color(vtk, grid, "Pact")
+                color(vtk, grid, "Plv")
                 pvd[k₀+integrator.t] = vtk
             end
             @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n",
