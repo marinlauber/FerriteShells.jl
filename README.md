@@ -86,7 +86,7 @@ end
 where `shelldofs` is a helper function (similar to `celldofs`) to get the degrees of freedom of the shell element, which are ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
 
 > [!WARNING]
-> `shelldofs is only usefull for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements, and the rotations are obtained from the displacements. In this case, `celldofs` can be used instead of `shelldofs`.
+> `shelldofs` is only usefull for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements, and the rotations are obtained from the displacements. In this case, `celldofs` can be used instead of `shelldofs`.
 
 ### External loadings
 
