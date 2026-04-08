@@ -2,8 +2,19 @@ import Ferrite: Grid,Triangle,Quadrilateral,Nodes
 using LinearAlgebra: cross
 using ForwardDiff
 
-# maps the 2D nodes of a mesh onto the 3D coordinates
-# by applying the `map` function to the nodes (default: flat z=0 plane)
+"""
+    shell_grid(grid::Grid{2,P,T}; map::Function) where {P<:Union{Triangle,Quadrilateral,QuadraticTriangle,QuadraticQuadrilateral},T}
+
+
+Embed the 2D `grid` into 3D space by applying the mapping `map` to the nodes (default: flat `z=0`` plane).
+
+For example, the hyperbolic paraboloid shell can be generated in two lines
+```julia
+# domain ω ∈ ]-1/2; 1/2[ and 3D grid
+grid2D = generate_grid(Quadrilateral, (20, 20), Vec(-0.5, -0.5), Vec(0.5, 0.5))
+grid3D = shell_grid(grid2D; map=(n)->(n.x[1], n.x[2], n.x[1]^2 - n.x[2]^2))
+```
+"""
 function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(T))) where {P<:Union{Triangle,Quadrilateral,
                                                                                                      QuadraticTriangle,QuadraticQuadrilateral},T}
     return Grid(grid.cells, [Node(Tensors.Vec{3}(map(n))) for n in grid.nodes])
@@ -15,7 +26,6 @@ function compute_membrane_strains(Es, scv, u_e)
         Es[qp] = 0.5 * (a_metric - A_metric)
     end
 end
-
 
 # K.J - Bath https://doi.org/10.1016/S0045-7949(03)00010-5
 function s_norm(u, uₕ)

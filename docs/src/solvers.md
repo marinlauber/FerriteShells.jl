@@ -77,6 +77,18 @@ The Schur complement reduction costs exactly two triangular solves against the s
 
 ### Arc-length method
 
+[arc-length pdf](https://img1.wsimg.com/blobby/go/e35e0087-c3c0-4b15-a0c5-d8b4ee6b719d/downloads/ArcLength.pdf?ver=1748029264278#page=13.64)
+
+## Time-varying analysis
+
+### HHT-α method
+
+Adding inertia M·ü regularizes the problem — the structure accelerates dynamically through the unstable branch rather than Newton stalling at the limit point. The tangent matrix becomes K_eff + (4/Δt²)·M (Newmark), which is better conditioned near the snap-through because the   mass term prevents the stiffness singularity from being reached.
+
+!!! Warning
+  the elastic wave speed c ∝ √(E/ρ)/t is very high for thin shells. For explicit time integration (central differences), the
+   CFL condition gives a critical time step Δt_crit ~ h·t/L·(1/c) that is extremely small — potentially microseconds for a 2 mm thick shell. You'd need implicit time integration (Newmark/HHT-α) to use physiologically relevant time steps (~1 ms).
+
 ### Tip for solving non-convergence issues
 
 The key diagnostic is whether the residual is:

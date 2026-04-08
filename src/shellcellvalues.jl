@@ -138,7 +138,7 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         A₁₁ = zero(Vec{3,Float64}); A₁₂ = zero(Vec{3,Float64}); A₂₂ = zero(Vec{3,Float64})
         for i in 1:n_geo
             d2N, dN, _ = Ferrite.reference_shape_hessian_gradient_and_value(scv.ip_geo, ξ, i)
-            A₁  += x[i] * dN[1];     A₂  += x[i] * dN[2]
+            A₁  += x[i] * dN[1];    A₂  += x[i] * dN[2]
             A₁₁ += x[i] * d2N[1,1]; A₁₂ += x[i] * d2N[1,2]; A₂₂ += x[i] * d2N[2,2]
         end
         n_vec = A₁ × A₂
@@ -150,9 +150,9 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.detJdV[q]   = area * scv.qr.weights[q]
         scv.A₁[q]       = A₁;  scv.A₂[q]  = A₂
         scv.A₁₁[q]      = A₁₁; scv.A₁₂[q] = A₁₂; scv.A₂₂[q] = A₂₂
-        scv.A_metric[q]  = SymmetricTensor{2,2,Float64}((dot(A₁,A₁), dot(A₁,A₂), dot(A₂,A₂)))
-        scv.G₃[q]        = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
-        scv.B[q]         = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
+        scv.A_metric[q] = SymmetricTensor{2,2,Float64}((dot(A₁,A₁), dot(A₁,A₂), dot(A₂,A₂)))
+        scv.G₃[q]       = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
+        scv.B[q]        = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
     reinit!(scv.mitc, scv.ip_geo, x)
 end

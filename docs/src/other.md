@@ -115,16 +115,13 @@ h_I^{22} = \partial^2_{22} N_I - \Gamma^1_{22} \partial_1 N_I - \Gamma^2_{22} \p
 
 with Christoffel symbols $\Gamma^\gamma_{\alpha\beta} = a^{\gamma\mu}(a_{\alpha\beta} \cdot a_\mu)$ (all quantities from the current configuration).
 ---
-### Simplification: flat reference, small rotations 
+### Simplification: flat reference, small rotations
+
 For a flat reference ($B_{\alpha\beta}=0$, orthonormal $\xi$-parametrisation) and moderate deformations, $a_{\alpha\beta} = \Sigma_I \partial^2_{\alpha\beta} N_I , u_I$ is first-order in $u$, so $\Gamma^\gamma_{\alpha\beta} \sim O(u)$ and the term $\Gamma^\gamma_{\alpha\beta} \partial_\gamma N_I \sim O(u)$. Dropping this gives the linearised approximation $h_I^{\alpha\beta} \approx \partial^2_{\alpha\beta} N_I$, which is what you'd use for a linear plate. For a geometrically nonlinear flat shell the Christoffel terms must be retained.
 
 ---
 This is what the ForwardDiff.gradient on bending_energy_KL computes exactly. The explicit residual adds the Christoffel
 correction that isn't visible in the energy-based form but is essential for large-rotation accuracy.
-
-
-
-
 
 
 ---

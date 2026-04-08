@@ -451,6 +451,24 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
 end
 
 """
+    mass_matrix!(me, scv::ShellCellValues, ρ::T, mat)
+
+Mass matrix for embedded shell elements (2D mesh in 3D). Only translational DOFs contribute to kinetic energy.
+"""
+function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    for qp in 1:getnquadpoints(scv)
+        ρt = ρ * mat.thickness
+        dΩ = scv.detJdV[qp]
+        for I in 1:n_nodes, J in 1:n_nodes
+            NI = scv.N[I, qp]
+            NJ = scv.N[J, qp]
+            me[5I-4:5I-2, 5J-4:5J-2] .+= (NI * NJ * ρt) * one(SymmetricTensor{2,3}) * dΩ
+        end
+    end
+end
+
+"""
 
 Assemble external traction into force vector f for embedded shell elements (2D mesh in 3D).
 `traction` is either a Vec{3} (uniform) or a callable x::Vec{3} -> Vec{3}.
