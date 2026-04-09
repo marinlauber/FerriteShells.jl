@@ -19,9 +19,9 @@ Function | Membrane | Kirchhoff–Love | Reissner–Mindlin
 :------------ | :-------------| :-------------| :-------------
 linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
-`Lagrange{RefTriangle, 1}` (Q3) | :white_check_mark: |  :x: | :white_check_mark:
+`Lagrange{RefTriangle, 1}` (T3) | :white_check_mark: |  :x: | :white_check_mark:
 `Lagrange{RefQuadrilateral, 1}` (Q4) | :white_check_mark: |  :x: | :white_check_mark:
-`Lagrange{RefTriangle, 2}` (Q6) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
+`Lagrange{RefTriangle, 2}` (T6) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 `Serendipity{RefQuadrilateral, 2}` (Q8) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 `Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 MITC |  |   | :construction_worker:
@@ -101,13 +101,11 @@ volume coupling | `volume_residuals!` | `volume_gradient!`
 
 ### Shell obstacle course
 
-Some classical shell benchmarks are available in the `examples/` directory, which can be used to test the different formulations and implementations. These include:
+Some classical shell benchmarks are available in the `examples/` directory, which can be used to test the different formulations and implementations. These include linear static, non-linear static and dynamic cases.
 
 #### Cook's membrane
 
-Displacement | Convergence
-:------------ | :-------------
-![Cook's membrane](/docs/src/images/cooks_membrane.png) | ![Cook's membrane convergence](/docs/src/images/cooks_membrane_convergence.png)
+![Cook's membrane](/docs/src/images/cooks_membrane_convergence.png)
 
 #### Scordelis-Lo roof
 

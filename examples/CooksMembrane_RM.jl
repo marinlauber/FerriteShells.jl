@@ -68,7 +68,7 @@ apply!(Ke, f, dbc)
 @time ue = Ke \ f
 
 # extract solution at point
-ph     = PointEvalHandler(grid, [Vec{3}((48.0, 60.0, 0.0))])
+ph     = PointEvalHandler(grid, [Vec{3}((48.0, 52.0, 0.0))])
 u_eval = first(evaluate_at_points(ph, dh, ue, :u))
 @show u_eval
 

@@ -61,10 +61,10 @@ assemble_traction!(f, dh, getfacetset(grid, "traction"), ip, fqr, (0.0, 1.0/16, 
 
 # apply BCs and solve (\) figures out the best linear solver to use
 apply!(Ke, f, dbc)
-@time ue = Ke\f
+@time ue = Ke \ f
 
 # extract solution at point
-ph     = PointEvalHandler(grid, [Vec{3}((48.0, 60.0, 0.0))])
+ph     = PointEvalHandler(grid, [Vec{3}((48.0, 52.0, 0.0))])
 u_eval = first(evaluate_at_points(ph, dh, ue, :u))
 @show u_eval
 

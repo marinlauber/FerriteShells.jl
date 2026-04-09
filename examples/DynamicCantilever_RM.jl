@@ -37,13 +37,13 @@ const ω₁    = 3.516 / Lx^2 * sqrt(EI_b / ρA_b)   # fundamental frequency [ra
 const T₁    = 2π / ω₁                    # period [s]
 
 # ── Mesh ─────────────────────────────────────────────────────────────────────
-grid2D = generate_grid(QuadraticQuadrilateral, (8, 1),
+grid2D = generate_grid(QuadraticQuadrilateral, (16, 2),
                         Vec{2}((0.0, 0.0)), Vec{2}((Lx, Ly)))
 grid = shell_grid(grid2D)
 addfacetset!(grid, "clamped", x -> isapprox(x[1], 0.0, atol=1e-10))
 addfacetset!(grid, "tip",     x -> isapprox(x[1], Lx,  atol=1e-10))
 addnodeset!(grid,  "tip_mid", x -> isapprox(x[1], Lx,  atol=1e-10) &&
-                                    isapprox(x[2], Ly/2, atol=1e-10))
+                                   isapprox(x[2], Ly/2, atol=1e-10))
 
 # ── FE objects ────────────────────────────────────────────────────────────────
 ip  = Lagrange{RefQuadrilateral, 2}()
@@ -140,6 +140,14 @@ println("Fundamental period:     T₁  = $(round(T₁,  digits=3)) s")
 println("Time step:              Δt  = $(round(Δt,  digits=4)) s  (T₁/50)\n")
 @printf("%-8s  %-12s  %-12s  %-6s\n", "t [s]", "u_z [m]", "u_anal [m]", "iters")
 
+using WriteVTK
+pvd = paraview_collection("cantilever")
+vtk_step = Ref(0)
+# save to the pvd
+VTKGridFile("cantilever-$(vtk_step[])", dh) do vtk
+    write_solution(vtk, dh, u); pvd[0.0] = vtk
+end
+
 # ── Time integration ──────────────────────────────────────────────────────────
 for step in 1:n_steps
     t_now = step * Δt
@@ -150,7 +158,7 @@ for step in 1:n_steps
 
     u_new = copy(ũ)
     apply!(u_new, ch)
-    converged = false; iters = 0
+    converged = false; iters = 0; vtk_step[] += 1
 
     for iter in 1:max_iter
         iters = iter
@@ -185,8 +193,13 @@ for step in 1:n_steps
     r_old .= r_int
     u    .= u_new
 
+    # save to the pvd
+    VTKGridFile("cantilever-$(vtk_step[])", dh) do vtk
+        write_solution(vtk, dh, u); pvd[t_now] = vtk
+    end
+
     # Compare with analytical first-mode response under step load
     u_anal = u_s * (1 - cos(ω₁ * t_now))
-    step % 5 == 0 &&
-        @printf("%-8.3f  %-12.6f  %-12.6f  %-6d\n", t_now, u[w_tip], u_anal, iters)
+    step % 5 == 0 && @printf("%-8.3f  %-12.6f  %-12.6f  %-6d\n", t_now, u[w_tip], u_anal, iters)
 end
+close(pvd);
