@@ -457,24 +457,34 @@ Mass matrix for embedded shell elements (2D mesh in 3D). Only translational DOFs
 """
 function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ρt = ρ * mat.thickness
     for qp in 1:getnquadpoints(scv)
-        ρt = ρ * mat.thickness
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes, J in 1:n_nodes
-            NI = scv.N[I, qp]
-            NJ = scv.N[J, qp]
-            me[5I-4:5I-2, 5J-4:5J-2] .+= (NI * NJ * ρt) * one(SymmetricTensor{2,3}) * dΩ
+            m = scv.N[I, qp] * scv.N[J, qp] * ρt * dΩ
+            me[5I-4, 5J-4] += m
+            me[5I-3, 5J-3] += m
+            me[5I-2, 5J-2] += m
         end
     end
 end
 
-"""
+# ∂ξ/∂t for the mapping t ∈ [-1,1] → 2D cell reference coord along each facet.
+# Derived from ξ(t) = 0.5*(1-t)*A + 0.5*(1+t)*B (vertices A, B of facet in ref space).
+# RefQuadrilateral vertices: (-1,-1),(1,-1),(1,1),(-1,1); all facets are axis-aligned.
+# RefTriangle vertices: (0,0),(1,0),(0,1); facet 2 (hypotenuse) has mixed direction.
+@inline _facet_dxi(::Lagrange{RefQuadrilateral}, f::Int) = f ∈ (1,3) ? Vec{2}((1.0, 0.0)) : Vec{2}((0.0, 1.0))
+@inline _facet_dxi(::Lagrange{RefTriangle},      f::Int) =
+    f == 1 ? Vec{2}(( 0.5,  0.0)) :
+    f == 2 ? Vec{2}((-0.5,  0.5)) :
+             Vec{2}(( 0.0, -0.5))
 
+"""
 Assemble external traction into force vector f for embedded shell elements (2D mesh in 3D).
 `traction` is either a Vec{3} (uniform) or a callable x::Vec{3} -> Vec{3}.
 Uses a `FacetQuadratureRule` and computes the edge length element directly from 3D node positions,
 bypassing the sdim mismatch that prevents standard `FacetValues` from working on embedded meshes.
-For RefQuadrilateral: facets 1,3 (bottom/top) vary in ξ₁; facets 2,4 (right/left) vary in ξ₂.
+Works for RefQuadrilateral and RefTriangle of any interpolation order.
 """
 function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
@@ -488,14 +498,14 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
         x        = getcoordinates(fc)
         facet_nr = fc.current_facet_id
         qr_f     = fqr.facet_rules[facet_nr]
-        tdir     = facet_nr ∈ (1, 3) ? 1 : 2  # parametric direction along edge
+        dxi      = _facet_dxi(ip, facet_nr)   # ∂ξ/∂t in reference coords
         for (ξ, w) in zip(qr_f.points, qr_f.weights)
             xp = zero(Vec{3,Float64})
-            Jt = zero(Vec{3,Float64})  # physical tangent along edge
+            Jt = zero(Vec{3,Float64})  # physical tangent: J * dxi
             for I in 1:n_base
                 dN, N = Ferrite.reference_shape_gradient_and_value(ip, ξ, I)
                 xp += N * x[I]
-                Jt += dN[tdir] * x[I]
+                Jt += dot(dN, dxi) * x[I]
             end
             dΓ = norm(Jt) * w
             t  = t_func(xp)
