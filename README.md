@@ -109,9 +109,9 @@ Some classical shell benchmarks are available in the `examples/` directory, whic
 
 #### Scordelis-Lo roof
 
-![Scordelis-Lo roof](/docs/src/images/scoreldis_lo_roof.png)
+![Scordelis-Lo roof](/docs/src/images/scordelis_lo_roof_convergence.png)
 
-#### Pinched cylinder
+<!-- #### Pinched cylinder
 
 ![Pinched cylinder](/docs/src/images/pinched_cylinder.png)
 
@@ -125,7 +125,7 @@ Some classical shell benchmarks are available in the `examples/` directory, whic
 
 #### Square airbag
 
-![Square airbag](/docs/src/images/airbag.png)
+![Square airbag](/docs/src/images/airbag.png) -->
 
 ### Authors
 
