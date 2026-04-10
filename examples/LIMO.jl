@@ -138,6 +138,14 @@ end
 # load the deformed geometry
 # fname = "/home/marin/Workspace/WaterLilyPreCICE/examples/0D-CalculiX/miniLIMO-0D/CalculiX/geom_deformed.inp"
 fname = "/home/marin/Workspace/WaterLilyPreCICE/examples/0D-CalculiX/miniLIMO-0D/CalculiX/geom.inp"
+# Mesh structure (geom.inp): 4231 nodes, 4392 Q4 elements, 14 SRF cellsets.
+# Two-surface pillow: SRF_1–7 = top surface (outward normal +z, p = +500 Pa),
+#                     SRF_8–14 = bottom surface (outward normal +z, p = −500 Pa).
+# 101 shared "weld" nodes at the y=0 boundary connect the two surfaces.
+# 2063 coincident-but-separate node pairs exist in the interior (not shared).
+# WARNING: nodes 4, 7, 11, 18 appear in *NODE but are not referenced by any element
+# → zero rows in K → singular stiffness matrix. Fix: pin all DOFs at those nodes,
+# e.g. addnodeset!(grid, "isolated", Set([4,7,11,18])) + Dirichlet zero BCs.
 grid = get_ferrite_grid(fname)
 
 # boundary definition

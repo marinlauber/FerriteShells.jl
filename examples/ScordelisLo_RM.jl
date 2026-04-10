@@ -4,11 +4,8 @@ using FerriteShells
 # Same geometry and loading as ScordelisLo.jl; see that file for full description.
 # Two-field DofHandler (:u ip^3, :θ ip^2).  DOF reordering via shelldofs().
 
-const R_sl, L_sl, Φ_sl = 25.0, 50.0, 40π/180
-const E_sl, ν_sl, t_sl = 4.32e8, 0.0, 0.25
-const q_sl = Vec{3}((0.0, -90.0, 0.0))
-
 function scordelis_lo_rm_grid(ns, nt)
+    R_sl, L_sl, Φ_sl = 25.0, 50.0, 40π/180
     g = shell_grid(
         generate_grid(QuadraticQuadrilateral, (ns, nt),
                       Vec{2}((-Φ_sl, 0.0)), Vec{2}((Φ_sl, L_sl)));
@@ -22,12 +19,13 @@ end
 
 function scordelis_lo_rm_solve(ns, nt)
     ip  = Lagrange{RefQuadrilateral, 2}()
-    qr  = QuadratureRule{RefQuadrilateral}(4)
+    qr  = QuadratureRule{RefQuadrilateral}(3)
     scv = ShellCellValues(qr, ip, ip)
-    mat = LinearElastic(E_sl, ν_sl, t_sl)
+    mat = LinearElastic(4.32e8, 0.0, 0.25)
 
     grid = scordelis_lo_rm_grid(ns, nt)
-    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    dh   = DofHandler(grid)
+    add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
     n_el   = ndofs_per_cell(dh)   # 5·n_base (interleaved after shelldofs)
     n_base = getnbasefunctions(ip)
 
@@ -35,7 +33,7 @@ function scordelis_lo_rm_solve(ns, nt)
     f  = zeros(ndofs(dh))
     asmb = start_assemble(K, zeros(ndofs(dh)))
     ke = zeros(5n_base, 5n_base); re = zeros(5n_base); fe = zeros(5n_base)
-
+    q_sl = Vec{3}((0.0, -90.0, 0.0))
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
         reinit!(scv, cell)
@@ -79,4 +77,4 @@ function scordelis_lo_rm_solve(ns, nt)
 end
 
 w = scordelis_lo_rm_solve(16, 16)
-println("Scordelis-Lo (RM, 16×16): u_y at free-edge midpoint = $(round(w; digits=5)) (reference: -0.3024)")
+println("Scordelis-Lo: u_y at free-edge midpoint = $(round(w; digits=5)) (reference: -0.3024)")

@@ -59,23 +59,14 @@ function map_initial(x, y, Ar)
     find_points(x, y, a, a / Ar, L)
 end
 
-function make_quarter_pillow_grid(n; L=1.0)
-    corners = [Vec{2}((-L/2, -L/2)), Vec{2}((L/2, -L/2)), Vec{2}((L/2, L/2)), Vec{2}((-L/2, L/2))]
-    grid = shell_grid(generate_grid(Quadrilateral, (n, n), corners))
-
-    addnodeset!(grid, "x_low", x -> isapprox(x[1], -L/2, atol=1e-10))
-
-    addcellset!(grid, "Pact", x -> (abs(x[1]) < 0.4L && abs(x[2]) < 0.4L) )
-    addcellset!(grid, "Plv", x -> true ) # all the grid
-    addfacetset!(grid, "x_high", x -> isapprox(x[1],  L/2, atol=1e-10))
-    addfacetset!(grid, "y_low", x -> isapprox(x[2], -L/2, atol=1e-10))
-    addfacetset!(grid, "y_high", x -> isapprox(x[2],  L/2, atol=1e-10))
-    addnodeset!(grid, "center", x -> norm(x) < 1e-10)
-    addnodeset!(grid, "origin", x -> isapprox(x[1], -L/2, atol=1e-10) && isapprox(x[2], L/2, atol=1e-10))
+function make_quarter_pillow_grid(n; primitive=Quadrilateral)
+    corners = [Vec{2}((-0.05058799, 0.000)), Vec{2}(( 0.05058799, 0.000)),
+               Vec{2}(( 0.05058799, 0.109)), Vec{2}((-0.05058799, 0.109))]
+    grid = shell_grid(generate_grid(primitive, (n, n), corners))
     return grid
 end
 
-# Assemble K_int, R_int, K_plv and F_p (all for unit pressure p=1) in one cell loop.
+# Assemble K_int, R_int, K_plv and F_plv (all for unit pressure p=1) in one cell loop.
 function assemble_all!(K_int, r_int, dh, scv, u, mat)
     n_e = ndofs_per_cell(dh)
     ke_i = zeros(n_e, n_e); re_i = zeros(n_e)
@@ -93,12 +84,12 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
     end
 end
 
-function assemble_pressure_region!(K_plv, F_p, scv, u_vec, dh, region_name)
+function assemble_pressure_region!(K_plv, F_plv, scv, u_vec, dh, region_name)
     n_e = ndofs_per_cell(dh)
     ke_p = zeros(n_e, n_e)
     re_p = zeros(n_e)
     asm_p = start_assemble(K_plv)
-    fill!(F_p, 0.0)
+    fill!(F_plv, 0.0)
     for cell in CellIterator(dh, getcellset(grid, region_name))
         fill!(ke_p, 0.0); fill!(re_p, 0.0)
         reinit!(scv, cell)
@@ -107,16 +98,24 @@ function assemble_pressure_region!(K_plv, F_p, scv, u_vec, dh, region_name)
         assemble_pressure!(re_p, scv, u_e, 1.0) # unit pressure
         assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)
         assemble!(asm_p, sd, ke_p)
-        F_p[sd] .+= re_p
+        F_plv[sd] .+= re_p
     end
 end
 
-# device dimensions
-L   = 0.1 # Length in meters
-n   = 32
+# material model
 mat = LinearElastic(0.35e6, 0.3,  0.002)
 
-grid = make_quarter_pillow_grid(n; L)
+grid = make_quarter_pillow_grid(32; primitive=Quadrilateral)
+
+# fname = "/home/marin/Workspace/HHH/code/miniLIMO/p6/geom_julia.inp"
+# grid = get_ferrite_grid(fname)
+
+addnodeset!(grid, "edge", x -> x[2] ≈ 0)
+addfacetset!(grid, "sym", x -> ((x[2] ≈ 0.109) || (abs(x[1]) ≈ 0.05058799)))
+addcellset!(grid, "Plv", x -> true) # all the grid
+addcellset!(grid, "Pact", x -> (abs(x[1]) < 0.020235196 && abs(x[2]) < 0.020235196) )
+
+# interpolation scape
 ip   = Lagrange{RefQuadrilateral, 1}()
 qr   = QuadratureRule{RefQuadrilateral}(3)
 scv  = ShellCellValues(qr, ip, ip)
@@ -131,38 +130,42 @@ function generate_boundary_function(grid, nodeset)
     idx = sortperm(top_nodes)
     node_sorted = top_nodes[idx]
     Ar = 80.2 / 55.2 # from Nienke
-    x, y = getindex.(node_sorted, 2), getindex.(node_sorted, 1)
+    x, y = getindex.(node_sorted, 1), getindex.(node_sorted, 2)
     x_new, y_new = map_initial(x, y, Ar)
     Xs = vcat(x', y'); dXs = vcat(x_new' .- x', y_new') # we map to z-displacements which are zero
     return function prescribed_u(x, t)
-        # carefull with the Xs, these are (y,x) points that map to (y,z) displacements
-        idx = findmin(dropdims(sum(abs2, Xs .- [x[2], x[1]], dims=1), dims=1))[2]
+        idx = findmin(dropdims(sum(abs2, Xs .- [x[1], x[2]], dims=1), dims=1))[2]
         return min(t,1).*dXs[:, idx] # linear ramp
     end
 end
 
+# using Plots
+# nodeset = "edge"
+# top_nodes = get_node_coordinate.(getnodes(grid, nodeset))
+# idx = sortperm(top_nodes)
+# node_sorted = top_nodes[idx]
+# Ar = 80.2 / 55.2 # from Nienke
+# x, y = getindex.(node_sorted, 1), getindex.(node_sorted, 2)
+# x_new, y_new = map_initial(x, y, Ar)
+# Xs = vcat(x', y'); dXs = vcat(x_new' .- x', y_new')
+# scatter(x, y); scatter!(x_new, y_new, aspect_ratio=:equal)
+
 # generate the function for the boundary conditions
-prescribed_u = generate_boundary_function(grid, "x_low")
+prescribed_u = generate_boundary_function(grid, "edge")
 
 ch = ConstraintHandler(dh)
-add!(ch, Dirichlet(:u, getnodeset(grid, "x_low"), (x,t) -> prescribed_u(x, t), [2,3]))
-add!(ch, Dirichlet(:u, getnodeset(grid, "x_low"), x -> 0.0, [1]))
-add!(ch, Dirichlet(:θ, getnodeset(grid, "x_low"), x -> zeros(2), [1,2])) # what happens when we rotate
-add!(ch, Dirichlet(:u, getfacetset(grid, "y_low"), x -> 0.0, [3]))
-add!(ch, Dirichlet(:θ, getfacetset(grid, "y_low"), x -> zeros(2), [1,2]))
-add!(ch, Dirichlet(:u, getfacetset(grid, "x_high"), x -> 0.0, [3]))
-add!(ch, Dirichlet(:θ, getfacetset(grid, "x_high"), x -> zeros(2), [1,2]))
-add!(ch, Dirichlet(:u, getfacetset(grid, "y_high"), x -> 0.0, [3]))
-add!(ch, Dirichlet(:θ, getfacetset(grid, "y_high"), x -> zeros(2), [1,2]))
+add!(ch, Dirichlet(:u, getnodeset(grid, "edge"), (x,t) -> prescribed_u(x, t), [1,3]))
+add!(ch, Dirichlet(:u, getnodeset(grid, "edge"), x -> 0.0, [2]))
+add!(ch, Dirichlet(:θ, getnodeset(grid, "edge"), x -> zeros(2), [1,2])) # what happens when we rotate
+add!(ch, Dirichlet(:u, getfacetset(grid, "sym"), x -> 0.0, [3]))
+add!(ch, Dirichlet(:θ, getfacetset(grid, "sym"), x -> zeros(2), [1,2]))
 close!(ch); Ferrite.update!(ch, 0.0)
 
 # Displacement steps
 Pa2mmHg = 0.00750062 # Pa/mmHg
 m3_to_ml = 1.0e6          # m³ to ml
 p_max   = 6.0 / Pa2mmHg  # Pfill = 6 mmHg
-w_max   = 0.02         # upper bound for w_center (membrane theory at p_max ≈ 0.63 m)
 n_steps = 50
-Δw      = 2w_max / n_steps   # = 0.005 m = 5·t per step
 tol     = 1e-6
 max_iter = 20
 
@@ -174,80 +177,53 @@ K_eff  = allocate_matrix(dh)   # preallocated; values updated in-place each Newt
 r_int  = zeros(N)
 F_plv  = zeros(N)
 F_pact = zeros(N)
+v      = zeros(N)
 v1     = zeros(N)
 v2     = zeros(N)
-u_final= zeros(N)
+u      = zeros(N)
+Δu     = zeros(N)
+un     = zeros(N)
 
 pvd = paraview_collection("minilimo")
 vtk_step = Ref(0)
 p_final  = Ref(0.0)
 
-# Initialise symbolic LU factorisation from the linearised system at u=0, p=0
+# initialize the lu-decomposition
 assemble_all!(K_int, r_int, dh, scv, u_final, mat)
 K_eff.nzval .= K_int.nzval
 apply_zero!(K_eff, r_int, ch)
 F_lu = lu(K_eff)
+free   = ch.free_dofs
 
-# TODO the one I am using
-println("miniLIMO RM (Q4, n=$n)")
-println("  step |    λ    | iters")
-let u = zeros(N), p = 0.0
-    VTKGridFile("minilimo-0", dh) do vtk
-        vtk_step[] += 1
-        write_solution(vtk, dh, u)
-        Ferrite.write_constraints(vtk, ch)
-        color(vtk, grid, "Pact")
-        color(vtk, grid, "Plv")
-        pvd[0.0] = vtk
-    end
-    δp = p_max / n_steps
-    for step in 1:n_steps
-        λ = step/n_steps
-        Ferrite.update!(ch, λ)
-        converged = false; n_iter = 0
-        p  += δp # increment pressure loading
-        for iter in 1:max_iter
-            # assembly of the internal and external loading
-            assemble_all!(K_int, r_int, dh, scv, u, mat)
-            assemble_pressure_region!(K_plv, F_plv, scv, u, dh, "Plv")
-            # Update K_eff values in-place (same sparsity pattern as K_int and K_plv).
-            K_eff.nzval .= K_int.nzval .- p .* K_plv.nzval
-            rhs1 = p .* F_plv .- r_int           # −R(u,p): negative equilibrium residual
-            apply_zero!(K_eff, rhs1, ch)        # zero BC rows/cols of K_eff, BC entries of rhs1
-            if norm(rhs1) < tol
-                converged = true; n_iter = iter - 1; break
-            end
-            n_iter = iter
-            lu!(F_lu, K_eff)        # numeric refactorisation only; reuses symbolic analysis
-            ldiv!(v1, F_lu, rhs1)   # equilibrium correction
-            u .+= v1
-            apply!(u, ch)          # reset BC DOFs to zero
-        end
+# tol_nl = 1e-6
+# n_pre   = 30          # NR steps before arc-length
+# println("Phase 1: NR warm-up (λ = 0 → $λ_pre in $n_pre steps)")
+# println("  step |    λ    | iters")
+# for step in 1:n_pre
+#     λ = step / n_pre
+#     Ferrite.update!(ch, λ)
+#     converged_pre = false; n_iter_pre = 0
+#     for iter in 1:max_iter
+#         assemble_all!(K_int, r_int, dh, scv, u, mat)
+#         assemble_pressure_region!(K_plv, F_plv, scv, u, dh, "Plv")
+#         K_eff.nzval .= K_int.nzval .- λ * p_max .* K_plv.nzval
+#         rhs1 = λ * p_max .* F_plv .- r_int
+#         apply_zero!(K_eff, rhs1, ch)
+#         norm(rhs1[free]) < tol_nl && (converged_pre = true; n_iter_pre = iter - 1; break)
+#         n_iter_pre = iter
+#         lu!(F_lu, K_eff); ldiv!(v1, F_lu, rhs1)
+#         u .+= v1; apply!(u, ch)
+#     end
+#     !converged_pre && @warn "NR warm-up step $step did not converge"
+#     un .= u
+#     @printf("  %4d |   %.4f | %d   | %4f\n", step, λ, n_iter_pre, λ * p_max)
+# end
 
-        if !converged
-            @warn "step $step did not converge after $max_iter iters (p=$p)"
-            break
-        end
-
-        VTKGridFile("minilimo-$(vtk_step[])", dh) do vtk
-            vtk_step[] += 1
-            write_solution(vtk, dh, u)
-            Ferrite.write_constraints(vtk, ch)
-            color(vtk, grid, "Pact")
-            color(vtk, grid, "Plv")
-            pvd[float(step)] = vtk
-        end
-        p_final[] = p
-        @printf("  %4d |   %.3f | %d\n", step, λ, n_iter)
-    end
-    u_final .= u
-end
-
-# using JLD2
-# jldsave("inflation.jld2"; u_final, p_final)
-# data = jldopen("inflation.jld2", "r")
-# u_final = data["u_final"]
-# p_final = data["p_final"]
+using JLD2
+# jldsave("inflation.jld2"; u_final=u, p_final=p_max)
+data = jldopen("inflation.jld2", "r")
+u_final = data["u_final"]
+p_final = data["p_final"]
 
 # what's the volume in this configuration
 vol = -2compute_volume(dh, scv, u_final) * m3_to_ml
@@ -310,12 +286,10 @@ vtarget = []
 
 # new FE arrays
 dVdu = zeros(N)
-fsi_data = [] # storage for FSI
-Xs = reduce(hcat, [[get_node_coordinate(grid, i).data...] for i in 1:getnnodes(grid)])
 
 # start with the initial condition from the morphing step
 @time let u = copy(u_final), p = p_final[], k₀ = length(pvd.timeSteps)
-    println("3D-0D Lie–Trotter coupling (RM Q4, n=$n, dt_cpl=$(dt_cpl) s)")
+    println("3D-0D Lie–Trotter coupling (RM Q4, dt_cpl=$(dt_cpl) s)")
     println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
 
     step = 0
@@ -375,45 +349,26 @@ Xs = reduce(hcat, [[get_node_coordinate(grid, i).data...] for i in 1:getnnodes(g
         push!(pres, p * Pa2mmHg)            # pressure [mmHg]
         push!(pact, Pact_mmHg)
 
-        # save the last cycle
-        u_node = zeros(3, getnnodes(dh.grid))
-        Xs = reduce(hcat, [[get_node_coordinate(grid, i).data...] for i in 1:getnnodes(grid)])
-        if integrator.t ≥ 9.0
-            for cell in CellIterator(dh)
-                sd = shelldofs(cell)
-                for (I, nid) in enumerate(getnodes(cell))
-                    u_node[:, nid] .= u[sd[5I-4:5I-2]]
-                end
-            end
-            push!(fsi_data, Xs.+u_node)
-        end
-
         if mod(step, 5) == 0
             VTKGridFile("minilimo-$(vtk_step[])", dh) do vtk
                 vtk_step[] += 1
                 write_solution(vtk, dh, u)
-                Ferrite.write_node_data(vtk, u_node, "displacement")
                 Ferrite.write_constraints(vtk, ch)
                 color(vtk, grid, "Pact")
                 color(vtk, grid, "Plv")
                 pvd[k₀+integrator.t] = vtk
             end
-            @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n",
-                    integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter)
+            @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n", integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter)
         end
     end
 end
 vtk_save(pvd);
 
-using JLD2
-connectivity = reduce(hcat, [[cell.nodes...] for cell in grid.cells])
-jldsave("limo_motion.jld2"; coordinates=fsi_data, connectivity=connectivity)
-
-times = collect(0:dt_cpl:integrator.t)
-p1=plot(times, [vols, pres, pact], xlabel="Time [s]",
-        label=["Vlv" "Plv" "Pact"], lw=2)
-p2=plot(vols, pres, label=:none, xlim=(200,300),ylims=(0, 100),
-        xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2,
-        linez=times./maximum(times))
-plot(p1, p2)
-savefig("3D0D_ferriteshells.png")
+# times = collect(0:dt_cpl:integrator.t)
+# p1=plot(times, [vols, pres, pact], xlabel="Time [s]",
+#         label=["Vlv" "Plv" "Pact"], lw=2)
+# p2=plot(vols, pres, label=:none, xlim=(200,300),ylims=(0, 100),
+#         xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2,
+#         linez=times./maximum(times))
+# plot(p1, p2)
+# savefig("3D0D_limo_ferriteshells.png")
