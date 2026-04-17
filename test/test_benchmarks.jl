@@ -2,8 +2,7 @@ using FerriteShells
 using LinearAlgebra
 using Test
 
-# ── Scordelis-Lo roof (RM) ──────────────────────────────────────────────────
-
+# Scordelis-Lo roof (RM)
 function scordelis_lo_rm_solve_test(ns, nt)
     R_sl, L_sl, Φ_sl = 25.0, 50.0, 40π/180
     E_sl, ν_sl, t_sl = 4.32e8, 0.0, 0.25
@@ -67,8 +66,7 @@ function scordelis_lo_rm_solve_test(ns, nt)
     error("ref_point not found")
 end
 
-# ── Pinched cylinder (RM, 1/8 symmetry) ────────────────────────────────────
-
+# Pinched cylinder (RM, 1/8 symmetry)
 function pinched_cylinder_rm_solve_test(ns, na)
     R_pc, L_pc = 300.0, 600.0
     E_pc, ν_pc, t_pc = 3.0e6, 0.3, 3.0
@@ -133,8 +131,7 @@ function pinched_cylinder_rm_solve_test(ns, na)
     error("load_point not found")
 end
 
-# ── Tests ───────────────────────────────────────────────────────────────────
-
+# Tests
 @testset "Scordelis-Lo roof (RM) h-convergence" begin
     ref = -0.3024
     ws  = [scordelis_lo_rm_solve_test(n, n) for n in [4, 8, 16]]

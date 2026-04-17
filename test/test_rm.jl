@@ -1,56 +1,8 @@
-using FerriteShells
-using LinearAlgebra
-using Test
-using Random
-
-# Q9 unit square in XY plane, 5 DOFs/node → 45 DOFs per element.
-const X_Q9_UNIT_RM = [
-    Vec{3}((0.0, 0.0, 0.0)),
-    Vec{3}((1.0, 0.0, 0.0)),
-    Vec{3}((1.0, 1.0, 0.0)),
-    Vec{3}((0.0, 1.0, 0.0)),
-    Vec{3}((0.5, 0.0, 0.0)),
-    Vec{3}((1.0, 0.5, 0.0)),
-    Vec{3}((0.5, 1.0, 0.0)),
-    Vec{3}((0.0, 0.5, 0.0)),
-    Vec{3}((0.5, 0.5, 0.0)),
-]
-
-function make_rm_scv(; qr_order=3)
-    ip = Lagrange{RefQuadrilateral, 2}()
-    qr = QuadratureRule{RefQuadrilateral}(qr_order)
-    return ShellCellValues(qr, ip, ip)
-end
-
-function rm_residual(scv, u5, mat)
-    re = zeros(length(u5))
-    membrane_residuals_RM!(re, scv, u5, mat)
-    bending_residuals_RM_FD!(re, scv, u5, mat)
-    return re
-end
-
-function rm_tangent_mat(scv, u5, mat)
-    ke = zeros(length(u5), length(u5))
-    membrane_tangent_RM!(ke, scv, u5, mat)
-    bending_tangent_RM_FD!(ke, scv, u5, mat)
-    return ke
-end
-
-function numerical_rm_tangent(scv, u5, mat; ε=1e-5)
-    n = length(u5)
-    Kfd = zeros(n, n)
-    for j in 1:n
-        up = copy(u5); up[j] += ε
-        um = copy(u5); um[j] -= ε
-        Kfd[:, j] = (rm_residual(scv, up, mat) .- rm_residual(scv, um, mat)) ./ (2ε)
-    end
-    return Kfd
-end
 
 @testset "RM shell" begin
     mat   = LinearElastic(1.0e6, 0.3, 0.01)
-    scv   = make_rm_scv()
-    reinit!(scv, X_Q9_UNIT_RM)
+    scv   = make_q9_scv()
+    reinit!(scv, X_Q9_UNIT)
     n_dof = 45   # 9 nodes × 5 DOFs
 
     # 1. Zero energy and residual at reference state (u=0, φ=0).
@@ -64,12 +16,12 @@ end
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
-    ke_an = rm_tangent_mat(scv, u_pert, mat)
-    ke_fd = numerical_rm_tangent(scv, u_pert, mat)
+    ke_an = rm_tangent(scv, u_pert, mat)
+    ke_fd = rm_fd_tangent(scv, u_pert, mat)
     @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
 
     # 3. Tangent symmetry (Hessian of a scalar energy is symmetric by construction,
@@ -92,8 +44,8 @@ end
     # In-plane rotation (about z-axis): rotate both node positions and DOFs.
     θ = π / 7
     Rz = [cos(θ) -sin(θ) 0.0; sin(θ) cos(θ) 0.0; 0.0 0.0 1.0]
-    x_rot   = [Vec{3}(Tuple(Rz * collect(xi))) for xi in X_Q9_UNIT_RM]
-    scv_rot = make_rm_scv(); reinit!(scv_rot, x_rot)
+    x_rot   = [Vec{3}(Tuple(Rz * collect(xi))) for xi in X_Q9_UNIT]
+    scv_rot = make_q9_scv(); reinit!(scv_rot, x_rot)
     u_rot   = copy(u_pert)
     for I in 1:9
         u_rot[5I-4:5I-2] = Rz * u_pert[5I-4:5I-2]
@@ -110,8 +62,8 @@ end
 
 @testset "RM bending explicit tangent" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
-    scv = make_rm_scv()
-    reinit!(scv, X_Q9_UNIT_RM)
+    scv = make_q9_scv()
+    reinit!(scv, X_Q9_UNIT)
     n_dof = 45
 
     # 1. Consistency with ForwardDiff at reference state.
@@ -123,7 +75,7 @@ end
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
@@ -149,8 +101,8 @@ end
 
 @testset "ForwardDiff and explicit residuals/tangent" begin
     mat   = LinearElastic(1.0e6, 0.3, 0.01)
-    scv   = make_rm_scv()
-    reinit!(scv, X_Q9_UNIT_RM)
+    scv   = make_q9_scv()
+    reinit!(scv, X_Q9_UNIT)
     n_dof = 45   # 9 nodes × 5 DOFs
     # test that the implicit ForwardDiff implemntation of the residuals and the tangent
     # membrane term is the same for the RM shell
@@ -159,7 +111,7 @@ end
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
@@ -246,11 +198,11 @@ end
     # The shear γ_α = a_α·d − A_α·G₃ vanishes for this mode, so W_RM ≈ W_KL.
     α = 1e-4
     mat_kl = LinearElastic(1.0e6, 0.3, 0.01)
-    scv_kl = make_rm_scv(); reinit!(scv_kl, X_Q9_UNIT_RM)
+    scv_kl = make_q9_scv(); reinit!(scv_kl, X_Q9_UNIT)
     u_kl  = zeros(27)   # 9 nodes × 3 DOFs
     u_rm5 = zeros(45)   # 9 nodes × 5 DOFs
     for I in 1:9
-        xI, yI = X_Q9_UNIT_RM[I][1], X_Q9_UNIT_RM[I][2]
+        xI, yI = X_Q9_UNIT[I][1], X_Q9_UNIT[I][2]
         u_kl[3I]    = α * xI * yI
         u_rm5[5I-2] = α * xI * yI
         u_rm5[5I-1] = -α * yI   # φ₁ = -∂u₃/∂x = -α·y
@@ -335,7 +287,7 @@ end
     X_cyl = [Vec{3}((R*sin(s/R), t, R*(1-cos(s/R)))) for (s,t) in ref_st]
 
     mat = LinearElastic(1.0e6, 0.3, 0.01)
-    scv = make_rm_scv(); reinit!(scv, X_cyl)
+    scv = make_q9_scv(); reinit!(scv, X_cyl)
 
     # 1. Membrane residual is exactly zero (membrane energy depends only on stretch,
     #    which is zero at u=0 by construction).
@@ -358,8 +310,8 @@ end
         u_c[5I-1] = 1e-3 * randn()
         u_c[5I  ] = 1e-3 * randn()
     end
-    ke_an = rm_tangent_mat(scv, u_c, mat)
-    ke_fd = numerical_rm_tangent(scv, u_c, mat)
+    ke_an = rm_tangent(scv, u_c, mat)
+    ke_fd = rm_fd_tangent(scv, u_c, mat)
     @test norm(ke_an .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
 
     # 4. Tangent symmetry on the curved element.
@@ -450,3 +402,45 @@ end
     @test all(r -> r >= 1.5, rates)
     @test errors[end] / w_nav < 0.02
 end  # RM bending h-convergence
+
+@testset "RM Cook's membrane" begin
+    # Same mesh and material as the KL test: Q4 32×32, E=1, ν=1/3, t=1.
+    # For a flat in-plane problem, RM membrane = KL membrane, so results must match.
+    corners = [Vec{2}((0.,0.)), Vec{2}((48.,44.)), Vec{2}((48.,60.)), Vec{2}((0.,44.))]
+    grid = generate_grid(Quadrilateral, (32, 32), corners) |> shell_grid
+    addfacetset!(grid, "clamped",  x -> isapprox(x[1], 0.0,  atol=1e-10))
+    addfacetset!(grid, "traction", x -> isapprox(x[1], 48.0, atol=1e-10))
+    addnodeset!(grid, "allnodes",  x -> true)
+
+    ip  = Lagrange{RefQuadrilateral, 1}()
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip)
+    dh  = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    mat = LinearElastic(1.0, 1/3)
+
+    n_el = ndofs_per_cell(dh)
+    K = allocate_matrix(dh); r = zeros(ndofs(dh))
+    asmb = start_assemble(K, r)
+    ke = zeros(n_el, n_el); re = zeros(n_el)
+    for cell in CellIterator(dh)
+        fill!(ke, 0.0); fill!(re, 0.0); reinit!(scv, cell)
+        membrane_tangent_RM!(ke, scv, zeros(n_el), mat)
+        bending_tangent_RM_FD!(ke, scv, zeros(n_el), mat)
+        assemble!(asmb, shelldofs(cell), ke, re)
+    end
+
+    fqr = FacetQuadratureRule{RefQuadrilateral}(2)
+    assemble_traction!(r, dh, getfacetset(grid, "traction"), ip, fqr, Vec{3}((0.0, 1/16, 0.0)))
+
+    dbc = ConstraintHandler(dh)
+    add!(dbc, Dirichlet(:u, getfacetset(grid, "clamped"),  x -> zeros(3), [1,2,3]))
+    add!(dbc, Dirichlet(:θ, getfacetset(grid, "clamped"),  x -> zeros(2), [1,2]))
+    add!(dbc, Dirichlet(:u, getnodeset(grid, "allnodes"),  x -> [0.0],    [3]))
+    close!(dbc); apply!(K, r, dbc)
+    ue = K \ r
+
+    ph     = PointEvalHandler(grid, [Vec{3}((48.0, 60.0, 0.0))])
+    u_eval = first(evaluate_at_points(ph, dh, ue, :u))
+    @test u_eval[1] ≈ -18.5338 atol=1e-2
+    @test u_eval[2] ≈  24.8366 atol=1e-2
+    @test abs(u_eval[3]) < 1e-8
+end

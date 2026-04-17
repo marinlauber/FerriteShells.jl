@@ -1,9 +1,3 @@
-using FerriteShells
-using LinearAlgebra
-using Test
-using Random
-
-# Reuses X_Q9_UNIT_RM defined in test_rm.jl (included first in runtests.jl).
 
 @testset "MITC9 unit element" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
@@ -11,8 +5,8 @@ using Random
     qr  = QuadratureRule{RefQuadrilateral}(3)
     scv_mitc   = ShellCellValues(qr, ip, ip; mitc=MITC9)
     scv_nomitc = ShellCellValues(qr, ip, ip)
-    reinit!(scv_mitc,   X_Q9_UNIT_RM)
-    reinit!(scv_nomitc, X_Q9_UNIT_RM)
+    reinit!(scv_mitc,   X_Q9_UNIT)
+    reinit!(scv_nomitc, X_Q9_UNIT)
     n_dof = 45
 
     # 1. All tying-point shear strains are zero at the reference state.
@@ -26,7 +20,7 @@ using Random
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT_RM[I][1]) * sin(π * X_Q9_UNIT_RM[I][2])
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
@@ -55,12 +49,34 @@ using Random
     re_fd_lg = zeros(n_dof); bending_residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
     @test norm(re_ex_lg .- re_fd_lg) / norm(re_fd_lg) < 1e-2
 
+    # 2b. Consistent MITC9 tangent: bending_tangent_RM! (MITC dispatch) must match
+    #     the ForwardDiff Jacobian of bending_residuals_RM! (not the energy Hessian —
+    #     the MITC explicit residual is not the exact gradient of bending_shear_energy_RM).
+    ke_ex  = zeros(n_dof, n_dof)
+    bending_tangent_RM!(ke_ex, scv_mitc, u_pert, mat)
+    ke_jac = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), n_dof)
+        bending_residuals_RM!(re, scv_mitc, u, mat)
+        re
+    end, u_pert)
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-3
+
+    # At zero state: tangent matches Jacobian of residual to near-machine precision.
+    ke_ex0  = zeros(n_dof, n_dof)
+    bending_tangent_RM!(ke_ex0, scv_mitc, zeros(n_dof), mat)
+    ke_jac0 = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), n_dof)
+        bending_residuals_RM!(re, scv_mitc, u, mat)
+        re
+    end, zeros(n_dof))
+    @test norm(ke_ex0 .- ke_jac0) / norm(ke_jac0) < 1e-8
+
     # 3. Pure in-plane displacement on a flat element: d = G₃ = ẑ everywhere, so
     #    γ_α = a_α · ẑ = 0 — MITC and NoMITC must produce identical bending residuals.
     u_inplane = zeros(n_dof)
     for I in 1:9
-        u_inplane[5I-4] = 1e-3 * X_Q9_UNIT_RM[I][1]
-        u_inplane[5I-3] = 2e-3 * X_Q9_UNIT_RM[I][2]
+        u_inplane[5I-4] = 1e-3 * X_Q9_UNIT[I][1]
+        u_inplane[5I-3] = 2e-3 * X_Q9_UNIT[I][2]
     end
     re_mitc_ip   = zeros(n_dof); bending_residuals_RM!(re_mitc_ip,   scv_mitc,   u_inplane, mat)
     re_nomitc_ip = zeros(n_dof); bending_residuals_RM!(re_nomitc_ip, scv_nomitc, u_inplane, mat)
@@ -71,7 +87,7 @@ using Random
     α_kl = 1e-4
     u_kl = zeros(n_dof)
     for I in 1:9
-        xI, yI = X_Q9_UNIT_RM[I][1], X_Q9_UNIT_RM[I][2]
+        xI, yI = X_Q9_UNIT[I][1], X_Q9_UNIT[I][2]
         u_kl[5I-2] = α_kl * xI * yI
         u_kl[5I-1] = -α_kl * yI
         u_kl[5I  ] = -α_kl * xI
@@ -153,11 +169,6 @@ end
     @test abs(ws_mitc[2] / w_nav - 1) < abs(w_nomitc_2 / w_nav - 1)
 end
 
-# Q4 unit square [0,1]² in XY plane, 5 DOFs/node → 20 DOFs per element.
-const X_Q4_UNIT_RM = [
-    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)),
-    Vec{3}((1.0, 1.0, 0.0)), Vec{3}((0.0, 1.0, 0.0)),
-]
 
 @testset "MITC4 unit element" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
@@ -165,8 +176,8 @@ const X_Q4_UNIT_RM = [
     qr  = QuadratureRule{RefQuadrilateral}(2)
     scv_mitc   = ShellCellValues(qr, ip, ip; mitc=MITC4)
     scv_nomitc = ShellCellValues(qr, ip, ip)
-    reinit!(scv_mitc,   X_Q4_UNIT_RM)
-    reinit!(scv_nomitc, X_Q4_UNIT_RM)
+    reinit!(scv_mitc,   X_Q4_UNIT)
+    reinit!(scv_nomitc, X_Q4_UNIT)
     n_dof = 20
 
     # 1. All tying-point shear strains are zero at the reference state.
@@ -179,7 +190,7 @@ const X_Q4_UNIT_RM = [
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:4
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q4_UNIT_RM[I][1]) * sin(π * X_Q4_UNIT_RM[I][2])
+        u_pert[5I-2] = 1e-2 * sin(π * X_Q4_UNIT[I][1]) * sin(π * X_Q4_UNIT[I][2])
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
@@ -195,12 +206,31 @@ const X_Q4_UNIT_RM = [
     re_ex0 = zeros(n_dof); bending_residuals_RM!(re_ex0, scv_mitc, zeros(n_dof), mat)
     @test norm(re_ex0) ≤ 1e-14
 
+    # 2b. Consistent MITC4 tangent: must match Jacobian of the explicit residual.
+    ke_ex4  = zeros(n_dof, n_dof)
+    bending_tangent_RM!(ke_ex4, scv_mitc, u_pert, mat)
+    ke_jac4 = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), n_dof)
+        bending_residuals_RM!(re, scv_mitc, u, mat)
+        re
+    end, u_pert)
+    @test norm(ke_ex4 .- ke_jac4) / norm(ke_jac4) < 1e-3
+
+    ke_ex40  = zeros(n_dof, n_dof)
+    bending_tangent_RM!(ke_ex40, scv_mitc, zeros(n_dof), mat)
+    ke_jac40 = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), n_dof)
+        bending_residuals_RM!(re, scv_mitc, u, mat)
+        re
+    end, zeros(n_dof))
+    @test norm(ke_ex40 .- ke_jac40) / norm(ke_jac40) < 1e-8
+
     # 3. Kirchhoff mode: u₃ = α·x·y, φ₁ = −α·y, φ₂ = −α·x (zero transverse shear).
     #    MITC4 and NoMITC must produce identical bending energy.
     α_kl = 1e-4
     u_kl = zeros(n_dof)
     for I in 1:4
-        xI, yI = X_Q4_UNIT_RM[I][1], X_Q4_UNIT_RM[I][2]
+        xI, yI = X_Q4_UNIT[I][1], X_Q4_UNIT[I][2]
         u_kl[5I-2] = α_kl * xI * yI
         u_kl[5I-1] = -α_kl * yI
         u_kl[5I  ] = -α_kl * xI

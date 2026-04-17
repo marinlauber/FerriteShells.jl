@@ -1,26 +1,9 @@
-using FerriteShells
-using LinearAlgebra
-using Test
-
-# Q9 unit square in XY plane — same setup as test_rm.jl
-const X_Q9_MASS = [
-    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)), Vec{3}((1.0, 1.0, 0.0)),
-    Vec{3}((0.0, 1.0, 0.0)), Vec{3}((0.5, 0.0, 0.0)), Vec{3}((1.0, 0.5, 0.0)),
-    Vec{3}((0.5, 1.0, 0.0)), Vec{3}((0.0, 0.5, 0.0)), Vec{3}((0.5, 0.5, 0.0)),
-]
-
-function make_mass_scv()
-    ip = Lagrange{RefQuadrilateral, 2}()
-    qr = QuadratureRule{RefQuadrilateral}(3)
-    ShellCellValues(qr, ip, ip)
-end
-
-function make_me(ρ, mat; coords=X_Q9_MASS)
-    scv = make_mass_scv()
+function make_me(ρ, mat; coords=X_Q9_UNIT)
+    scv = make_q9_scv()
     reinit!(scv, coords)
     me = zeros(45, 45)
     mass_matrix!(me, scv, ρ, mat)
-    return me
+    me
 end
 
 @testset "mass_matrix!" begin
@@ -68,7 +51,7 @@ end
     @test me3 ≈ 2 .* me
 
     # 2×2 scaled element (A=4): total mass should be 4× the unit square
-    X_2x2 = [2v for v in X_Q9_MASS]
+    X_2x2 = [2v for v in X_Q9_UNIT]
     me_scaled = make_me(ρ, mat; coords=X_2x2)
     @test sum(me_scaled[x_dofs, x_dofs]) ≈ 4 * expected_mass  rtol=1e-10
 end
