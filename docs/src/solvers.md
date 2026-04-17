@@ -79,6 +79,14 @@ The Schur complement reduction costs exactly two triangular solves against the s
 
 [arc-length pdf](https://img1.wsimg.com/blobby/go/e35e0087-c3c0-4b15-a0c5-d8b4ee6b719d/downloads/ArcLength.pdf?ver=1748029264278#page=13.64)
 
+### Dynamic Relaxation
+
+https://www.sciencedirect.com/science/article/pii/S0263823111001777
+https://www.sciencedirect.com/science/article/pii/0045794988903045
+
+
+DR with kinematic damping approach eliminating the kinetic energy of the system when it reaches a peak. row-lumped mass matrix and a scaling parameters alpha for tunning the speed of convergence of the DR iterations.
+
 ## Time-varying analysis
 
 ### HHT-α method
