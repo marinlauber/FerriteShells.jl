@@ -8,7 +8,7 @@ makedocs(
     sitename = "FerriteShells.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", nothing) == "true",
-        canonical="https://FerriteShells.github.io/FerriteShells.jl/",
+        canonical="https://marinlauber.github.io/FerriteShells.jl/",
         assets=String[],
         mathengine = mathengine = MathJax3(Dict(
             :loader => Dict("load" => ["[tex]/physics"]),
