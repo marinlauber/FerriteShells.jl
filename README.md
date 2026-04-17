@@ -99,33 +99,21 @@ edge traction | `assemble_traction!` |
 point load | `apply_pointload!` |
 volume coupling | `volume_residuals!` | `volume_gradient!`
 
-### Shell obstacle course
+## Examples
 
-Some classical shell benchmarks are available in the `examples/` directory, which can be used to test the different formulations and implementations. These include linear static, non-linear static and dynamic cases.
+Below are some examples of shell problems assembled using this package.
 
-#### Cook's membrane
+### Pillow Inflation
 
-![Cook's membrane](/docs/src/images/cooks_membrane_convergence.png)
+Dynamic inflation of a square pillow made of a thin Reissner-Mindlin shell (MITC9 treatment) under a uniform pressure loading.
 
-#### Scordelis-Lo roof
+![Square airbag](/docs/src/images/pillow.gif)
 
-![Scordelis-Lo roof](/docs/src/images/scordelis_lo_roof_convergence.png)
+### Membrane Shear
 
-<!-- #### Pinched cylinder
+Wrinkling of a Reissner-Mindlin thin shell with MITC4 treatment under pure lateral shear. Non-linear Newthon-Raphson solver with Pseudo-Transient Continuation (PTC) to traverse the unstable equilibrium path.
 
-![Pinched cylinder](/docs/src/images/pinched_cylinder.png)
-
-#### Cantilever roll-up
-
-![Cantilever roll-up](/docs/src/images/cantilever_rollup.png)
-
-#### Hyperbolic paraboloid
-
-![Hyperbolic paraboloid](/docs/src/images/hyperbolic_paraboloid.png)
-
-#### Square airbag
-
-![Square airbag](/docs/src/images/airbag.png) -->
+![Membrane Shear](/docs/src/images/shear.gif)
 
 ### Authors
 
