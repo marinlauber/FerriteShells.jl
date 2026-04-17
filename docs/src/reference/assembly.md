@@ -5,6 +5,10 @@ DocTestSetup = :(using FerriteShells)
 
 # Assembly
 
+```@docs
+mass_matrix!
+```
+
 ## Kirchhof-Love functions
 
 ```@docs
