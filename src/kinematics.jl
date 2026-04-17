@@ -24,6 +24,7 @@ function kinematics(scv, qp, u_e::AbstractVector{T}) where T
     return a₁, a₂, scv.A_metric[qp], a_metric
 end
 
+# TODO remove these or find a better fix
 @inline function kinematics_strains(scv::ShellCellValues{QR,IPG,IPS,T,E}, qp, u_e) where {QR,IPG,IPS,T,E<:LinearStrain}
     n_nodes = getnbasefunctions(scv.ip_shape)
     Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
