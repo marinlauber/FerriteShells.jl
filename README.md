@@ -117,7 +117,7 @@ Wrinkling of a Reissner-Mindlin thin shell with MITC4 treatment under pure later
 
 ### Authors
 
-- Marin Lauber, Delft University of Technology, The Netherlands.
+- [Marin Lauber](https://marinlauber.github.io/), Delft University of Technology, The Netherlands.
 
 ### Contributing
 
@@ -134,5 +134,5 @@ Please use the GitHub issue tracker to report any issues.
 
 FerriteShells is released under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-[docs-stable-img]: https://img.shields.io/badge/docs-latest%20release-blue
-[docs-stable-url]: https://FerriteShells.github.io/FerriteShells.jl/
+[docs-stable-img]: https://img.shields.io/badge/docs-dev-blue
+[docs-stable-url]: https://marinlauber.github.io/FerriteShells.jl/dev/
