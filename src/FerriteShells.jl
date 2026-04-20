@@ -32,6 +32,6 @@ export membrane_residuals_RM_FD!, membrane_tangent_RM_FD!, bending_residuals_RM_
 export assemble_pressure!, assemble_pressure_tangent!, assemble_traction!, apply_pointload!, mass_matrix!
 
 include("utils.jl")
-export shell_grid, shelldofs, get_ferrite_grid, compute_volume, volume_residual, volume_gradient!
+export shell_grid, shelldofs, get_ferrite_grid, compute_volume, volume_residual, volume_gradient!, write_directors!
 
 end # module FerriteShells

@@ -17,7 +17,8 @@ grid3D = shell_grid(grid2D; map=(n)->(n.x[1], n.x[2], n.x[1]^2 - n.x[2]^2))
 """
 function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(T))) where {P<:Union{Triangle,Quadrilateral,
                                                                                                      QuadraticTriangle,QuadraticQuadrilateral},T}
-    return Grid(grid.cells, [Node(Tensors.Vec{3}(map(n))) for n in grid.nodes])
+    return Grid(grid.cells, [Node(Tensors.Vec{3}(map(n))) for n in grid.nodes];
+                facetsets=grid.facetsets, cellsets=grid.cellsets, nodesets=grid.nodesets)
 end
 
 function compute_membrane_strains(Es, scv, u_e)
@@ -216,4 +217,40 @@ function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; 
         uₑ  = u[sd]
         dVdu[sd] .+= ForwardDiff.gradient(v -> volume_residual(scv, coords, v, h, b), uₑ)
     end
+end
+
+# Write deformed Rodrigues director and reference shell normal G₃ as nodal vector fields.
+# Director: d = cos|φ|·G₃ + sinc|φ|·(φ₁T₁+φ₂T₂). Both fields are averaged over
+# elements sharing each node.
+function write_directors!(vtk, dh::DofHandler, scv::ShellCellValues, u)
+    n_nodes = getnnodes(dh.grid)
+    d_sum  = zeros(3, n_nodes)
+    G3_sum = zeros(3, n_nodes)
+    count  = zeros(Int, n_nodes)
+    for cell in CellIterator(dh)
+        reinit!(scv, cell)
+        sd  = shelldofs(cell)
+        u_e = @views u[sd]
+        nq  = getnquadpoints(scv)
+        G3_avg = sum(scv.G₃[q] for q in 1:nq) / nq
+        T1_avg = sum(scv.T₁[q] for q in 1:nq) / nq
+        T2_avg = sum(scv.T₂[q] for q in 1:nq) / nq
+        for (I, nid) in enumerate(cell.nodes)
+            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            cosθ, sincθ = _cos_sinc_sq(φ₁^2 + φ₂^2)
+            d_I = cosθ * G3_avg + sincθ * (φ₁ * T1_avg + φ₂ * T2_avg)
+            @views d_sum[:, nid]  .+= d_I
+            @views G3_sum[:, nid] .+= G3_avg
+            count[nid] += 1
+        end
+    end
+    for i in 1:n_nodes
+        c = count[i]
+        if c > 0
+            @views d_sum[:, i]  ./= c
+            @views G3_sum[:, i] ./= c
+        end
+    end
+    Ferrite.write_node_data(vtk, d_sum,  "director")
+    Ferrite.write_node_data(vtk, G3_sum, "G3")
 end
