@@ -117,70 +117,110 @@ end
 const ρ   = 1200.0       # density [kg/m³]
 mat = LinearElastic(0.35e6, 0.3, 0.002)
 
-# fname = "/home/marin/Workspace/HHH/code/miniLIMO/p6/geom_julia.inp"
-# grid  = get_ferrite_grid(fname)
-grid = make_quarter_pillow_grid(32; primitive=Quadrilateral)
-
+fname = "/home/marin/Workspace/HHH/code/miniLIMO/p6/geom_julia.inp"
+grid  = get_ferrite_grid(fname)
+# grid = make_quarter_pillow_grid(32; primitive=Quadrilateral)
 addnodeset!(grid, "edge", x -> x[2] ≈ 0)
 addfacetset!(grid, "sym", x -> (x[2] ≈ 0.109) || (abs(x[1]) ≈ 0.05058799))
 
-ip  = Lagrange{RefQuadrilateral, 1}()
+# include("limo_grid.jl")
+# grid = make_limo_grid(40, 55; order=1)
+
+# include("limo_pouch_grid.jl")
+# grid = make_limo_pouch_grid(40, 55; order=1)
+
+ip  = Lagrange{RefQuadrilateral, 2}()
 qr  = QuadratureRule{RefQuadrilateral}(3)
-scv = ShellCellValues(qr, ip, ip)
+scv = ShellCellValues(qr, ip, ip; mitc=nothing)
 
 dh = DofHandler(grid)
 add!(dh, :u, ip^3)
 add!(dh, :θ, ip^2)
 close!(dh)
 
+# u = zeros(ndofs(dh))
+# VTKGridFile("pouch_test", dh) do vtk
+#     write_solution(vtk, dh, u)
+# end
+
 # Smooth sinusoidal ramp: λ(t) = ½(1 − cos(πt/T_morph)) for t ≤ T_morph, 1 beyond.
 # Zero velocity at t=0 and t=T_morph avoids impulsive loads.
-const T_morph = 10.0   # morphing duration [s]
-const T_sim   = 10.0   # total simulation  [s]
-const Δt      = 0.001  # time step         [s]
-const n_steps = round(Int, T_sim / Δt)
+T_morph = 10.0   # morphing duration [s]
+T_sim   = 10.0   # total simulation  [s]
+Δt      = 0.1  # time step         [s]
+n_steps = round(Int, T_sim / Δt)
 
 ramp(t) = t < T_morph ? 0.5 * (1 - cos(π * t / T_morph)) : 1.0
 
-function generate_boundary_function(grid, nodeset)
+function generate_boundary_function(grid, nodeset; n_taper=3)
     top_nodes = get_node_coordinate.(getnodes(grid, nodeset))
     idx = sortperm(top_nodes)
     node_sorted = top_nodes[idx]
     Ar = 80.2 / 55.2
     x, y = getindex.(node_sorted, 1), getindex.(node_sorted, 2)
     x_new, y_new = map_initial(x, y, Ar)
+    N = length(x)
     Xs  = vcat(x', y')
     dXs = vcat(x_new' .- x', y_new')
-    (x, t) -> begin
-        i = findmin(dropdims(sum(abs2, Xs .- [x[1], x[2]], dims=1), dims=1))[2]
-        ramp(t) .* dXs[:, i]
+    # (x, t) -> begin
+    #     i = findmin(dropdims(sum(abs2, Xs .- [x[1], x[2]], dims=1), dims=1))[2]
+    #     ramp(t) .* dXs[:, i]
+    # end
+
+    # smooth taper weight: 0 at corner node, 1 after n_taper nodes (sin² profile)
+    w = ones(N)
+    for k in 1:n_taper
+        wk = sin(π/2 * (k-1) / n_taper)^2
+        w[k]     = wk
+        w[N+1-k] = wk
     end
+
+    function phi1_at(λ)
+        x_d = @. x + λ * (x_new - x)
+        z_d = @. λ * y_new
+        φ = zeros(N)
+        for i in 1:N
+            il = max(1, i-1); ir = min(N, i+1)
+            tx = x_d[ir] - x_d[il]
+            tz = z_d[ir] - z_d[il]
+            φ[i] = w[i] * atan(-tz, tx)
+        end
+        φ
+    end
+
+    find_i(x_pt) = findmin(dropdims(sum(abs2, Xs .- [x_pt[1], x_pt[2]], dims=1), dims=1))[2]
+
+    u_fn = (x_pt, t) -> ramp(t) .* dXs[:, find_i(x_pt)]
+    θ_fn = (x_pt, t) -> [phi1_at(ramp(t))[find_i(x_pt)], 0.0]
+
+    u_fn, θ_fn
 end
 
-prescribed_u = generate_boundary_function(grid, "edge")
+# local mapping function
+prescribed_u, prescribed_θ = generate_boundary_function(grid, "edge")
 
 ch = ConstraintHandler(dh)
 add!(ch, Dirichlet(:u, getnodeset(grid, "edge"), (x,t) -> prescribed_u(x, t), [1,3]))
 add!(ch, Dirichlet(:u, getnodeset(grid, "edge"), x -> 0.0,      [2]))
-add!(ch, Dirichlet(:θ, getnodeset(grid, "edge"), x -> zeros(2), [1,2]))
+add!(ch, Dirichlet(:θ, getnodeset(grid, "edge"), (x,t) -> prescribed_θ(x,t),[1,2]))
 add!(ch, Dirichlet(:u, getfacetset(grid, "sym"), x -> 0.0,      [3]))
-add!(ch, Dirichlet(:θ, getfacetset(grid, "sym"), x -> zeros(2), [1,2]))
+# add!(ch, Dirichlet(:θ, getfacetset(grid, "sym"), x -> zeros(2), [1,2]))
 close!(ch); Ferrite.update!(ch, 0.0)
 
-const N_dof = ndofs(dh)
-const free  = ch.free_dofs
+N_dof = ndofs(dh)
+free  = ch.free_dofs
 
 # HHT-α parameters  (α = −0.3: strong high-frequency damping, still stable)
-const α_hht   = -0.3
-const γ_hht   = 0.5 - α_hht
-const β_hht   = (1 - α_hht)^2 / 4
-const α_damp  = 2.0    # mass-proportional Rayleigh damping coefficient [1/s]
-const tol      = 1e-6
-const max_iter = 20
+α_hht   = -0.3
+γ_hht   = 0.5 - α_hht
+β_hht   = (1 - α_hht)^2 / 4
+α_damp  = 100.0    # mass-proportional Rayleigh damping coefficient [1/s]
+tol      = 1e-4
+max_iter = 10
 
 # Pressure ramp: same sinusoidal profile as morphing, up to p_max [Pa]
-const Pa2mmHg = 0.00750062
-const p_max   = 6.0 / Pa2mmHg   # 6 mmHg → Pa
+Pa2mmHg = 0.00750062
+p_max   = 6.0 / Pa2mmHg   # 6 mmHg → Pa
 
 K_int = allocate_matrix(dh)
 K_eff = allocate_matrix(dh)
@@ -188,10 +228,12 @@ K_plv = allocate_matrix(dh)
 M     = allocate_matrix(dh)
 r_int = zeros(N_dof)
 F_plv = zeros(N_dof)
-g_old = zeros(N_dof)   # (1−α) term from previous step: C·v_n + r_int(u_n) − p_n·F_p(u_n)
-R     = zeros(N_dof)
-δu    = zeros(N_dof)
+g_old   = zeros(N_dof)   # (1−α) term from previous step: C·v_n + r_int(u_n) − p_n·F_p(u_n)
+res     = zeros(N_dof)
+δu      = zeros(N_dof)
+u_trial = zeros(N_dof)
 
+# compute mass matrix
 assemble_mass!(M, dh, scv, ρ, mat)
 
 # Effective mass factor (M coefficient in K_eff, updated when Δt changes)
@@ -200,7 +242,7 @@ m_fac(Δt) = 1 / (β_hht * Δt^2) + (1 - α_hht) * α_damp * γ_hht / (β_hht * 
 # Initial symbolic LU factorisation (reused each Newton step via lu!)
 assemble_all!(K_int, r_int, dh, scv, zeros(N_dof), mat)
 K_eff.nzval .= M.nzval .* m_fac(Δt) .+ (1 - α_hht) .* K_int.nzval
-let tmp = zeros(N_dof); apply_zero!(K_eff, tmp, ch); end
+apply_zero!(K_eff, r_int, ch)
 F_lu = lu(K_eff)
 
 # Initial state: at rest, flat reference geometry; g_old = 0 (u=v=0, p=0)
@@ -210,21 +252,34 @@ a = zeros(N_dof)
 
 pvd = paraview_collection("limo_dynamic")
 vtk_step = Ref(0)
+resu = zeros(3, getnnodes(dh.grid))
+resθ = zeros(2, getnnodes(dh.grid))
+for cell in CellIterator(dh)
+    sd = shelldofs(cell)
+    for (I, nid) in enumerate(cell.nodes)
+        resu[:, nid] .= res[sd[5I-4:5I-2]]
+        resθ[:, nid] .= res[sd[5I-1:5I  ]]
+    end
+end
 VTKGridFile("limo_dynamic-0", dh) do vtk
-    write_solution(vtk, dh, u); pvd[0.0] = vtk
+    write_solution(vtk, dh, u)
+    Ferrite.write_node_data(vtk, resu, "ru")
+    Ferrite.write_node_data(vtk, resθ, "rθ")
+    write_directors!(vtk, dh, scv, u)
+    Ferrite.write_cellset(vtk, dh.grid)
+    pvd[0.0] = vtk
 end
 
-@printf("%-6s  %-8s  %-8s  %-8s  %-6s\n", "step", "t [s]", "λ", "p [mmHg]", "iters")
+@printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "λ", "p [mmHg]", "iters", "Δt")
 
-p = 0.0   # current pressure [Pa]
-
-for step in 1:n_steps
-    t_new = step * Δt
+let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
+@time while t < T_sim - 1e-10
+    t_new = min(t + Δt_cur, T_sim)
     p_new = p_max * ramp(t_new)
 
     # Predictor
-    ũ = u .+ Δt .* v .+ (Δt^2 * (0.5 - β_hht)) .* a
-    ṽ = v .+ (Δt * (1 - γ_hht)) .* a
+    ũ = u .+ Δt_cur .* v .+ (Δt_cur^2 * (0.5 - β_hht)) .* a
+    ṽ = v .+ (Δt_cur * (1 - γ_hht)) .* a
 
     u_new = copy(ũ)
     Ferrite.update!(ch, t_new)
@@ -237,39 +292,68 @@ for step in 1:n_steps
         assemble_all!(K_int, r_int, dh, scv, u_new, mat)
         assemble_pressure_all!(K_plv, F_plv, dh, scv, u_new)
 
-        a_new = (u_new .- ũ) ./ (β_hht * Δt^2)
-        v_new = ṽ .+ (Δt * γ_hht) .* a_new
+        a_new = (u_new .- ũ) ./ (β_hht * Δt_cur^2)
+        v_new = ṽ .+ (Δt_cur * γ_hht) .* a_new
 
         # HHT residual: M ä + (1−α)[C v + r_int − p F_p] + α g_old = 0
-        R .= M * a_new .+ (1 - α_hht) .* (α_damp .* (M * v_new) .+ r_int .- p_new .* F_plv) .+ α_hht .* g_old
-        apply_zero!(R, ch)
+        res .= M * a_new .+ (1 - α_hht) .* (α_damp .* (M * v_new) .+ r_int .- p_new .* F_plv) .+ α_hht .* g_old
+        apply_zero!(res, ch)
+        res_norm = norm(@views res[free])
+        res_norm < tol && (converged = true; break)
 
-        norm(@views R[free]) < tol && (converged = true; break)
-
-        K_eff.nzval .= M.nzval .* m_fac(Δt) .+ (1 - α_hht) .* (K_int.nzval .- p_new .* K_plv.nzval)
-        rhs = .-R
+        K_eff.nzval .= M.nzval .* m_fac(Δt_cur) .+ (1 - α_hht) .* (K_int.nzval .- p_new .* K_plv.nzval)
+        rhs = .-res
         apply_zero!(K_eff, rhs, ch)
         lu!(F_lu, K_eff)
         ldiv!(δu, F_lu, rhs)
-        u_new .+= δu
-        apply!(u_new, ch)
+
+        # Backtracking line search: halve step if residual increases
+        α_ls = 1.0
+        for _ in 1:8
+            u_trial .= u_new .+ α_ls .* δu
+            apply!(u_trial, ch)
+            assemble_all!(K_int, r_int, dh, scv, u_trial, mat)
+            assemble_pressure_all!(K_plv, F_plv, dh, scv, u_trial)
+            a_t = (u_trial .- ũ) ./ (β_hht * Δt_cur^2)
+            v_t = ṽ .+ (Δt_cur * γ_hht) .* a_t
+            res .= M * a_t .+ (1 - α_hht) .* (α_damp .* (M * v_t) .+ r_int .- p_new .* F_plv) .+ α_hht .* g_old
+            apply_zero!(res, ch)
+            norm(@views res[free]) ≤ res_norm && break
+            α_ls /= 2
+        end
+        u_new .= u_trial
     end
 
-    !converged && @warn "Step $step (t=$(round(t_new, digits=3)) s): no convergence in $max_iter iters"
+    if converged
+        step += 1
+        a .= (u_new .- ũ) ./ (β_hht * Δt_cur^2)
+        v .= ṽ .+ (Δt_cur * γ_hht) .* a
+        g_old .= α_damp .* (M * v) .+ r_int .- p_new .* F_plv
+        p = p_new; u .= u_new; t = t_new
+        Δt_cur = min(Δt_cur * 1.2, Δt)
 
-    a .= (u_new .- ũ) ./ (β_hht * Δt^2)
-    v .= ṽ .+ (Δt * γ_hht) .* a
-    # store g_old = C·v + r_int(u) − p·F_p(u) for the α-offset in next step
-    g_old .= α_damp .* (M * v) .+ r_int .- p_new .* F_plv
-    p  = p_new
-    u .= u_new
-
-    vtk_step[] += 1
-    VTKGridFile("limo_dynamic-$(vtk_step[])", dh) do vtk
-        write_solution(vtk, dh, u); pvd[t_new] = vtk
+        vtk_step[] += 1
+        for cell in CellIterator(dh)
+            sd = shelldofs(cell)
+            for (I, nid) in enumerate(cell.nodes)
+                resu[:, nid] .= res[sd[5I-4:5I-2]]
+                resθ[:, nid] .= res[sd[5I-1:5I  ]]
+            end
+        end
+        VTKGridFile("limo_dynamic-$(vtk_step[])", dh) do vtk
+            write_solution(vtk, dh, u)
+            Ferrite.write_node_data(vtk, resu, "ru")
+            Ferrite.write_node_data(vtk, resθ, "rθ")
+            write_directors!(vtk, dh, scv, u)
+            pvd[t] = vtk
+        end
+        step % 10 == 0 && @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
+                                    step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
+    else
+        Δt_cur /= 2
+        Δt_cur < 1e-5 && error("minimum Δt reached at t=$(round(t, digits=4)) s")
+        @printf("  → step rejected at t=%.3f, Δt → %.4e\n", t, Δt_cur)
     end
 
-    step % 10 == 0 && @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d\n",
-                               step, t_new, ramp(t_new), p_new * Pa2mmHg, iters)
-end
+end; end
 close(pvd)
