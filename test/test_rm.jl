@@ -221,8 +221,6 @@ end
 
     grid2d = generate_grid(QuadraticQuadrilateral, (10, 1), Vec{2}((0.0, 0.0)), Vec{2}((L, W_b)))
     grid3d = shell_grid(grid2d)
-    addnodeset!(grid3d, "left",  x -> isapprox(x[1], 0.0, atol=1e-10))
-    addfacetset!(grid3d, "right", x -> isapprox(x[1], L,  atol=1e-10))
 
     ip_b  = Lagrange{RefQuadrilateral,2}()
     scv_b = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_b, ip_b)
@@ -248,7 +246,7 @@ end
                        Vec{3}((0.0, 0.0, P_b/W_b)))
 
     ch_b = ConstraintHandler(dh_b)
-    add!(ch_b, Dirichlet(:u, getnodeset(grid3d, "left"), x -> zeros(5), [1,2,3,4,5]))
+    add!(ch_b, Dirichlet(:u, getfacetset(grid3d, "left"), x -> zeros(5), [1,2,3,4,5]))
     close!(ch_b); Ferrite.update!(ch_b, 0.0)
     apply!(K_b, f_b, ch_b)
     u_b = K_b \ f_b

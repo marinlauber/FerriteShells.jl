@@ -240,7 +240,6 @@ end
     # Fix: detect two-field layout and use the 3-DOF block (3I-2:3I) for u only.
     grid = shell_grid(generate_grid(Quadrilateral, (1, 1),
                                    Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0))))
-    addfacetset!(grid, "right", x -> isapprox(x[1], 1.0, atol=1e-10))
 
     ip  = Lagrange{RefQuadrilateral, 1}()
     fqr = FacetQuadratureRule{RefQuadrilateral}(2)
@@ -268,8 +267,6 @@ end
     # If traction landed on θ-DOFs instead of u₃-DOFs, the tip would not deflect.
     grid2 = shell_grid(generate_grid(Quadrilateral, (4, 1),
                                     Vec{2}((0.0, 0.0)), Vec{2}((4.0, 1.0))))
-    addfacetset!(grid2, "right", x -> isapprox(x[1], 4.0, atol=1e-10))
-    addnodeset!(grid2, "left",  x -> isapprox(x[1], 0.0, atol=1e-10))
 
     ip2  = Lagrange{RefQuadrilateral, 1}()
     fqr2 = FacetQuadratureRule{RefQuadrilateral}(2)
@@ -292,8 +289,8 @@ end
         assemble!(asmb3, shelldofs(cell), ke3, re3)
     end
     dbc3 = ConstraintHandler(dh3)
-    add!(dbc3, Dirichlet(:u, getnodeset(grid2, "left"), x -> zeros(3), [1,2,3]))
-    add!(dbc3, Dirichlet(:θ, getnodeset(grid2, "left"), x -> zeros(2), [1,2]))
+    add!(dbc3, Dirichlet(:u, getfacetset(grid2, "left"), x -> zeros(3), [1,2,3]))
+    add!(dbc3, Dirichlet(:θ, getfacetset(grid2, "left"), x -> zeros(2), [1,2]))
     close!(dbc3); Ferrite.update!(dbc3, 0.0)
     apply!(K3, f3, dbc3)
     u3 = K3 \ f3
