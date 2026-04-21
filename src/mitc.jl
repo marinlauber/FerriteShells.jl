@@ -1,13 +1,14 @@
 abstract type AbstractMITC end
+
 """
     MITC{N,M,T}
 
 Mixed Interpolation of Tensorial Components data for the N-node shell element (Bucalem & Bathe 1993).
-Eliminates transverse shear locking by evaluating the covariant shear strains γ_α = a_α·d at fixed
+Eliminates transverse shear locking by evaluating the covariant shear strains ``\\gamma_\\alpha = a_\\alpha \\cdot d`` at fixed
 tying points and interpolating back to Gauss points.
 
-Static fields (N_tie, dNdξ_tie, h_tie) are precomputed once at construction.
-Mutable fields (A*_tie, G₃_tie, T*_tie) are updated each `reinit!` call.
+Static fields (`N_tie`, `dNdξ_tie`, `h_tie`) are precomputed once at construction.
+Mutable fields (`A*_tie`, `G₃_tie`, `T*_tie`) are updated each [`reinit!`](@ref) call.
 """
 struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     N_tie_1    :: Matrix{T}          # shape functions at γ₁ tying pts  [n_shape × 6]
@@ -54,6 +55,15 @@ end
 struct NoMITC <: AbstractMITC end
 
 import Ferrite: reinit!
+
+"""
+    reinit!(mitc, ip_geo, x)
+
+Update the MITC data for a cell with cell coordinates `x`.
+The reference geometry at the tying points is recomputed and stored.
+"""
+reinit!
+
 reinit!(::NoMITC, args...) = nothing
 function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}}) where {N,M,T}
     n_geo = getnbasefunctions(ip_geo)
@@ -88,9 +98,9 @@ end
 """
     tying_shear_strains(mitc::MITC{N,M,T}, u_e)
 
-Compute the covariant shear strains γ₁ = a₁·d and γ₂ = a₂·d at all `M` MITC tying points
-from the current DOF vector `u_e` (5 DOFs/node: [u₁,u₂,u₃,φ₁,φ₂,…]).
-Returns `(γ₁_k, γ₂_k)` as two NTuples of length `M`, ForwardDiff-safe.
+Compute the covariant shear strains ``\\gamma_1 = a_1 \\cdot d`` and ``\\gamma_2 = a_2 \\cdot d`` at all `M` MITC tying points
+from the current DOF vector `u_e` (5 DOFs/node: [``u_1``,``u_2``,``u_3``,``\\varphi_1``,``\\varphi_2``,``\\cdots``]).
+Returns (`γ₁_k`, `γ₂_k`) as two NTuples of length `M`, ForwardDiff-safe.
 Call once before the quadrature-point loop and pass to `shear_strains`.
 """
 function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
@@ -127,7 +137,7 @@ end
 """
     shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
 
-Return `(γ₁, γ₂)` at quadrature point `qp`.
+Return (`γ₁`, `γ₂`) at quadrature point `qp`.
 With MITC: weighted sum of tying-point values from `tying_shear_strains`.
 Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`.
 """

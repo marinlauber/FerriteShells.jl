@@ -9,8 +9,8 @@ DocTestSetup = :(using FerriteShells)
 This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff–Love linear, C⁰ Koiter (non-linear Kirchhoff–Love), Reissner–Mindlin, and Naghi (non-linear Reissner–Mindlin) shells.
 Specifically, the classical membrane, bending, and shear contributions to the residuals and the consistent tangent stiffness matrix can be integrated and used with [Ferrite.jl](https://ferrite-fem.github.io/Ferrite.jl/stable/).
 
-> [!NOTE]
-> This package assumes that the shell is defined by a 2D mesh embeded in 3D space `Grid{3, P, T}` where `P<:Union{Triangle, Quadrilateral, QuadraticTriangle, QuadraticQuadrilateral}`. To embed Ferrte's `generate_grid` into 3D space, we provide a simple helper function `shell_grid(grid::Grid{2, P, T}; map) -> Grid{3, P, T}` , where the `map` can be used to map the 2D grid into 3D space.
+!!! note
+    This package assumes that the shell is defined by a 2D mesh embeded in 3D space `Grid{3, P, T}` where `P<:Union{Triangle, Quadrilateral, QuadraticTriangle, QuadraticQuadrilateral}`. To embed Ferrte's `generate_grid` into 3D space, we provide a simple helper function `shell_grid(grid::Grid{2, P, T}; map) -> Grid{3, P, T}` , where the `map` can be used to map the 2D grid into 3D space.
 
 Some formulation that can be assembled with this package:
 
@@ -27,12 +27,12 @@ MITC |  |   | :construction_worker:
 
 We refer the reader to the documentation for the specific weak form, numerical implementation and limitation of the different shell models.
 
-> [!WARNING]
-> Kirchhoff–Love shells with C⁰ continuity between elements is fundamentally wrong; it works in some cases with small deformations and specific boundary conditions. I would suggest using the Reissner–Mindlin shell instead.
+!!! warning
+    Kirchhoff–Love shells with C⁰ continuity between elements is fundamentally wrong; it works in some cases with small deformations and specific boundary conditions. I would suggest using the Reissner–Mindlin shell instead.
 
 ### `ShellCellValues`
 
-Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinatre system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor $\bf{E}$ of the elasticity tensor $\mathbb{C}$, change.
+Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinate system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor ``\bf{E}`` of the elasticity tensor ``\mathbb{C}``, change.
 
 To help assemble these specific surface metrics, this package uses a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but additionally holds covariant basis vectors, metric tensors, and surface Jacobian at the integration points, which are used in the assembly of the different terms of the different formulations.
 
@@ -55,13 +55,13 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
 end
 ```
 
-Calling `reinit!(scv::ShellCellValues)` computes the fixed covariant basis vectors $\bf{A}_1$ and $\bf{A}_2$ from the geometry of the shell's midsurface, while the current covariant basis vectors $\bf{a}_1$ and $\bf{a}_2$ are computed from the current configuration of the shell. The metric tensors $\bf{A}_{\alpha\beta}$ and $\bf{a}_{\alpha\beta}$ are then obtained as the inner product of the corresponding covariant basis vectors.
+Calling `reinit!(scv::ShellCellValues)` computes the fixed covariant basis vectors ``\bf{A}_1`` and ``\bf{A}_2`` from the geometry of the shell's midsurface, while the current covariant basis vectors ``\bf{a}_1`` and ``\bf{a}_2`` are computed from the current configuration of the shell. The metric tensors ``\bf{A}_{\alpha\beta}`` and ``\bf{a}_{\alpha\beta}`` are then obtained as the inner product of the corresponding covariant basis vectors.
 
-From these surface measures and the contravariant elasticity tensor $\mathbb{C}^{\alpha\beta\gamma\delta}$, the membrane, bending and shear strains can be computed, which are used in the assembly of the different terms in the different formulations.
+From these surface measures and the contravariant elasticity tensor ``\mathbb{C}^{\alpha\beta\gamma\delta}``, the membrane, bending and shear strains can be computed, which are used in the assembly of the different terms in the different formulations.
 
 ## Quickstart
 
-Assembling the element contributions into the global sustem is identical to Ferrite, but instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
+Assembling the element contributions into the global system is identical to Ferrite, but instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
 
 ```julia
 function assemble_shell!(K_int, r_int, dh, scv, u, mat)
@@ -84,5 +84,5 @@ end
 
 where `shelldofs` is a helper function (similar to `celldofs`) to get the degrees of freedom of the shell element, which are ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
 
-> [!WARNING]
-> `shelldofs` is only usefull for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements, and the rotations are obtained from the displacements. In this case, `celldofs` must be used instead of `shelldofs`.
+!!! warning
+    `shelldofs` is only usefull for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements, and the rotations are obtained from the displacements. In this case, `celldofs` must be used instead of `shelldofs`.

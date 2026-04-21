@@ -23,12 +23,14 @@ end
 
 import Ferrite: CellCache
 """
-    shelldofs()
+    shelldofs(cell)
 
-Reorder DOFs from a two-field DofHandler layout (:u as ip^3, :θ as ip^2)
+Reorder DOFs from a two-field `DofHandler` layout (`:u` as ip³, `:θ` as ip²)
 to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
-Input:  [u1x,u1y,u1z, u2x,...,unz | θ1₁,θ1₂, θ2₁,...,θn₂]
-Output: [u1x,u1y,u1z,θ1₁,θ1₂, u2x,u2y,u2z,θ2₁,θ2₂, ...]
+
+Input layout: ``[u_{1x},u_{1y},u_{1z},\\, u_{2x},\\ldots,u_{nz} \\mid \\theta_{1,1},\\theta_{1,2},\\, \\theta_{2,1},\\ldots,\\theta_{n,2}]``
+
+Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_{2y},u_{2z},\\theta_{2,1},\\theta_{2,2},\\ldots]``
 """
 function shelldofs(cell::CellCache)
     dofs = cell.dofs
@@ -191,8 +193,8 @@ end
 """
     volume_gradient!(dVdu, dh, scv, u; h, b)
 
-Compute the volume gradient ∂V₃D/∂u into `dVdu` via ForwardDiff.
-Each element contribution is `ForwardDiff.gradient(uₑ -> volume_residual(..., uₑ, h, b), uₑ)`
+Compute the volume gradient ``\\partial V_{3D}/\\partial u`` into `dVdu` via ForwardDiff.
+Each element contribution is `ForwardDiff.gradient(ue -> volume_residual(..., ue, h, b), ue)`
 assembled into the global DOF vector using the shell DOF permutation.
 """
 function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T

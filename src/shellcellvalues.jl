@@ -1,17 +1,30 @@
 
 """
-    ShellCellValues{}
+    ShellCellValues(geom_interpol::Interpolation, func_interpol::Interpolation, quad_rule::AbstractQuadratureRule)
 
-Stores precomputed shape function data and reference geometry for a shell element.
-Works with Vec{3} node coordinates — no manual 2D projection required.
+A `ShellCellValues` object stores precomputed shape function data and reference geometry for a shell element.
+Works with `Vec{3}` node coordinates — no manual 2D projection required.
 
-Shape function data (N, dNdξ, d2Ndξ2) are computed once at construction time from `ip_shape` and `qr`.
+Shape function data (`N`, `dNdξ`, `d2Ndξ2`) are computed once at construction time from `ip_shape` and `qr`.
 The reference coordinates in the physical space then computed on the fly using the geometric interpolation `ip_geo`
 ``x(\\xi) = \\sum N_{i}^\\text{geo}(\\xi) x_{i}`` and the solution field are interpolated via the shape
 functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
 
-`reinit!` computes the reference geometry (A₁, A₂, G₃, B, …) by differentiating the coordinate map using `ip_geo`.
+**Arguments:**
+* `geom_interpol`: an instance of an `Interpolation` which is used to interpolate the geometry.
+    By default linear Lagrange interpolation is used.
+* `func_interpol`: an instance of an `Interpolation` used to interpolate the approximated function
+* `quad_rule`: an instance of a `AbstractQuadratureRule`
+
+**Keyword arguments:** The following keyword arguments are experimental and may change in future minor releases
+* `mitc`:  an instant of [`MITC`](@ref) to specify the shear treatment used in the element (default `NoMITC`)
+* `E` : an instance of `AbstractStrainMeasure` to specify the strain measure used in the element (default `GreenLagrangeStrain`)
+
+**Common methods:**
+* [`reinit!`](@ref) computes the reference geometry (``A_1``, ``A_2``, ``G_3``, ``B``, ``\\cdots``) by differentiating the coordinate map using `ip_geo`.
 """
+ShellCellValues
+
 struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure, M} <: AbstractCellValues
     qr       :: QR
     ip_geo   :: IPG
@@ -79,8 +92,8 @@ end
 """
     function_value(scv, qp, u_e)
 
-Interpolate the displacement field at quadrature point `qp` from a flat DOF vector ``u_e``.
-Works for both KL (3 DOFs/node: ``[u₁,u₂,u₃,…]``) and RM (5 DOFs/node: ``[u₁,u₂,u₃,φ₁,φ₂,…]``).
+Interpolate the displacement field at quadrature point `qp` from a flat DOF vector `u_e`.
+Works for both KL (3 DOFs/node: ``[u_1,u_2,u_3,\\cdots]``) and RM (5 DOFs/node: ``[u_1,u_2,u_3,\\varphi_1,\\varphi_2,\\cdots]``).
 The DOF stride is inferred from `length(u_e) ÷ n_nodes`; only the first 3 DOFs of each node
 (the displacement components) are used.
 """
@@ -120,17 +133,23 @@ end
 end
 
 """
-    reinit!()
+    reinit!(scv::ShellCellValues, x::AbstractVector)
+    reinit!(scv::ShellCellValues, cc::CellCache)
+    reinit!(scv::ShellCellValues, cell::AbstractCell)
 
-Reinit the `ShellCellValues`
+Update the `ShellCellValues` object for a cell with cell coordinates `x`.
+The derivatives of the shape functions, and the new integration weights are computed.
+
+The reference surface measures such as the covariant basis are recomputed and stored per
+quadrature point.
+
+**Note:**
+For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
 """
+reinit!
+
 reinit!(scv::ShellCellValues, cell) = reinit!(scv, getcoordinates(cell))
 reinit!(scv::ShellCellValues, cc::CellCache) = reinit!(scv, getcoordinates(cc))
-"""
-    reinit!()
-
-Reinit the `ShellCellValues`
-"""
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     n_geo = getnbasefunctions(scv.ip_geo)
     for q in eachindex(scv.qr.weights)

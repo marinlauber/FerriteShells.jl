@@ -3,12 +3,12 @@
     kinematics(scv, qp, u_e)
 
 Compute current kinematics at quadrature point `qp` given nodal displacements `u_e`
-(flat vector of length `3 * n_nodes`: [u₁, v₁, w₁, …]).
+(flat vector of length `3 * n_nodes`: [``u_1``, ``v_1``, ``w_1``, ``\\cdots``]).
 
-Reference geometry (A₁, A₂, A_metric) is read from `scv`, which must have been
+Reference geometry (`A_1`, `A_2`, `A_metric`) is read from `scv`, which must have been
 `reinit!`-ed with the element coordinates before calling this function.
 
-Returns `(a₁, a₂, A_metric, a_metric)`.
+Returns ``(a_1, a_2, A_\\text{metric}, a_\\text{metric})``.
 """
 function kinematics(scv, qp, u_e::AbstractVector{T}) where T
     n_nodes = getnbasefunctions(scv.ip_shape)

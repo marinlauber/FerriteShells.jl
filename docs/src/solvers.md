@@ -1,7 +1,7 @@
 
 # Linear and non-linear solvers
 
-## Linear analysis
+## 1.1 Linear analysis
 
 ```julia
 u = K \ r
@@ -14,9 +14,9 @@ K_factor = factorize(K)
 u = K_factor \ r
 ```
 
-## Nonlinear analysis
+## 1.2Nonlinear analysis
 
-### Newton–Raphson method
+### 1.2.1 Newton–Raphson method
 
 ```julia
 u = zeros(n_dofs)
@@ -29,10 +29,10 @@ while norm(residual) > tol
 end
 ```
 
-### Load-controlled Newton-Raphson
+### 1.2.2 Load-controlled Newton-Raphson
 
 
-### Displacement-controlled Newton-Raphson
+### 1.2.3 Displacement-controlled Newton-Raphson
 <!-- https://doi.org/10.1016/j.compstruc.2021.106674 -->
 
 The displacement-controlled Newton-Raphson method uses a bordering technique to enforce prescribed displacements at a selected node in the mesh. The pressure is then treated as an additional constrain on the system. The equilibrium is given by
@@ -55,7 +55,7 @@ where the intermediat vector ``\mathbf{v}_1`` and ``\mathbf{v}_2`` are the equil
 ```math
 \delta \lambda_p = \frac{u_\text{target} - u(\mathbf{x}_\text{T}) - \mathbf{v}_1(\mathbf{x}_\text{T})}{\mathbf{v}_2(\mathbf{x}_\text{T})}.
 ```
-Here ``\lambda_p`` plays the role of a Lagrange multiplier — it's the unknown force that enforces the displacement constraint. The bordered 2×2 system:
+Here ``\lambda_p`` plays the role of a Lagrange multiplier — it's the unknown force that enforces the displacement constraint. The bordered ``2×2`` system:
 ```math
 \begin{bmatrix}K_\text{eff} & -\mathbf{f}_\text{ext} \\ \mathbf{e}^{\top}_{wc} & 0\end{bmatrix}
 \begin{bmatrix}\delta\mathbf{u}\\ \delta \lambda_p\end{bmatrix} =
@@ -75,29 +75,28 @@ which then gives
 ```
 The Schur complement reduction costs exactly two triangular solves against the same factorisation —  which is optimal for a rank-1 augmentation.
 
-### Arc-length method
+### 1.2.3 Arc-length method
 
 [arc-length pdf](https://img1.wsimg.com/blobby/go/e35e0087-c3c0-4b15-a0c5-d8b4ee6b719d/downloads/ArcLength.pdf?ver=1748029264278#page=13.64)
 
-### Dynamic Relaxation
-
+### 1.2.4 Dynamic Relaxation
 https://www.sciencedirect.com/science/article/pii/S0263823111001777
 https://www.sciencedirect.com/science/article/pii/0045794988903045
 
 
 DR with kinematic damping approach eliminating the kinetic energy of the system when it reaches a peak. row-lumped mass matrix and a scaling parameters alpha for tunning the speed of convergence of the DR iterations.
 
-## Time-varying analysis
+## 1.3 Time-varying analysis
 
-### HHT-α method
+### 1.3.1 HHT-α method
 
-Adding inertia M·ü regularizes the problem — the structure accelerates dynamically through the unstable branch rather than Newton stalling at the limit point. The tangent matrix becomes K_eff + (4/Δt²)·M (Newmark), which is better conditioned near the snap-through because the   mass term prevents the stiffness singularity from being reached.
+Adding inertia ``M·ü`` regularizes the problem — the structure accelerates dynamically through the unstable branch rather than Newton stalling at the limit point. The tangent matrix becomes ``K_eff + (4/Δ t^2)\cdot M`` (Newmark), which is better conditioned near the snap-through because the   mass term prevents the stiffness singularity from being reached.
 
-!!! Warning
-  the elastic wave speed c ∝ √(E/ρ)/t is very high for thin shells. For explicit time integration (central differences), the
-   CFL condition gives a critical time step Δt_crit ~ h·t/L·(1/c) that is extremely small — potentially microseconds for a 2 mm thick shell. You'd need implicit time integration (Newmark/HHT-α) to use physiologically relevant time steps (~1 ms).
+!!! warning
+  the elastic wave speed ``c ∝ √(E/ρ)/t`` is very high for thin shells. For explicit time integration (central differences), the
+   CFL condition gives a critical time step ``Δt_crit ~ h·t/L·(1/c)`` that is extremely small — potentially microseconds for a 2 mm thick shell. You'd need implicit time integration (Newmark/HHT-α) to use physiologically relevant time steps (``\sim``1 ms).
 
-### Tip for solving non-convergence issues
+## 1.4 Tip for solving non-convergence issues
 
 The key diagnostic is whether the residual is:
   - Growing → wrong tangent (sign error, missing term)
