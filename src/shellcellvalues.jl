@@ -125,6 +125,7 @@ end
 Reinit the `ShellCellValues`
 """
 reinit!(scv::ShellCellValues, cell) = reinit!(scv, getcoordinates(cell))
+reinit!(scv::ShellCellValues, cc::CellCache) = reinit!(scv, getcoordinates(cc))
 """
     reinit!()
 
