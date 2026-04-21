@@ -7,7 +7,7 @@ Works with Vec{3} node coordinates — no manual 2D projection required.
 
 Shape function data (N, dNdξ, d2Ndξ2) are computed once at construction time from `ip_shape` and `qr`.
 The reference coordinates in the physical space then computed on the fly using the geometric interpolation `ip_geo`
-``x(\\xi) = \\sum N_{i}^\\text{geo}(\\xi) x_{i}`` and the solution field are interpolated via the shape 
+``x(\\xi) = \\sum N_{i}^\\text{geo}(\\xi) x_{i}`` and the solution field are interpolated via the shape
 functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
 
 `reinit!` computes the reference geometry (A₁, A₂, G₃, B, …) by differentiating the coordinate map using `ip_geo`.
