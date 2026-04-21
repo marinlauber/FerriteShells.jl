@@ -4,7 +4,7 @@ DocTestSetup = :(using FerriteShells)
 
 # FerriteShells
 
-## Introduction and Quickstart
+## Introduction
 
 This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff–Love linear, C⁰ Koiter (non-linear Kirchhoff–Love), Reissner–Mindlin, and Naghi (non-linear Reissner–Mindlin) shells.
 Specifically, the classical membrane, bending, and shear contributions to the residuals and the consistent tangent stiffness matrix can be integrated and used with [Ferrite.jl](https://ferrite-fem.github.io/Ferrite.jl/stable/).
@@ -59,7 +59,7 @@ Calling `reinit!(scv::ShellCellValues)` computes the fixed covariant basis vecto
 
 From these surface measures and the contravariant elasticity tensor $\mathbb{C}^{\alpha\beta\gamma\delta}$, the membrane, bending and shear strains can be computed, which are used in the assembly of the different terms in the different formulations.
 
-### Global assembly
+## Quickstart
 
 Assembling the element contributions into the global sustem is identical to Ferrite, but instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
 
