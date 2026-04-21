@@ -234,13 +234,47 @@ end
     end
 end
 
+@testset "director_field" begin
+    # Flat Q9 plate in the x-y plane: G₃ = ê_z at all nodes.
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2),
+                                    Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0))))
+    ip  = Lagrange{RefQuadrilateral, 2}()
+    qr  = QuadratureRule{RefQuadrilateral}(3)
+    scv = ShellCellValues(qr, ip, ip)
+    dh  = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    n_nodes = getnnodes(grid)
+
+    # Zero displacement: director must equal G₃ everywhere, both unit vectors.
+    d, G3 = director_field(dh, scv, zeros(ndofs(dh)))
+    @test size(d)  == (3, n_nodes)
+    @test size(G3) == (3, n_nodes)
+    @test all(norm(G3[:, i]) ≈ 1.0 for i in 1:n_nodes)
+    @test all(d[:, i] ≈ G3[:, i] for i in 1:n_nodes)   # no rotation → d = G₃
+    @test all(G3[3, i] ≈ 1.0 for i in 1:n_nodes)        # flat plate → G₃ = ê_z
+
+    # Known rotation: set φ₁ = angle for all nodes; director must rotate by angle about T₁.
+    # For a flat x-y plate: T₁ ≈ ê_x, T₂ ≈ ê_y, G₃ = ê_z.
+    # Rodrigues: d = cos(angle)·ê_z + sin(angle)·ê_x
+    angle = π / 6
+    u_rot = zeros(ndofs(dh))
+    for cell in CellIterator(dh)
+        cd = celldofs(cell); n_loc = length(cell.nodes)
+        for I in 1:n_loc; u_rot[cd[3n_loc + 2I-1]] = angle; end  # φ₁ = angle
+    end
+    d2, _ = director_field(dh, scv, u_rot)
+    for i in 1:n_nodes
+        @test norm(d2[:, i]) ≈ 1.0 atol=1e-12          # unit length (Rodrigues exact)
+        @test d2[1, i] ≈ sin(angle) atol=1e-12          # T₁ component
+        @test d2[3, i] ≈ cos(angle) atol=1e-12          # G₃ component
+    end
+end
+
 @testset "assemble_traction! regression: two-field DofHandler" begin
     # Regression for the bug where assemble_traction! used the interleaved 5-DOF
     # block (5I-4:5I-2) for a two-field DofHandler, scattering force into θ-DOFs.
     # Fix: detect two-field layout and use the 3-DOF block (3I-2:3I) for u only.
     grid = shell_grid(generate_grid(Quadrilateral, (1, 1),
                                    Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0))))
-    addfacetset!(grid, "right", x -> isapprox(x[1], 1.0, atol=1e-10))
 
     ip  = Lagrange{RefQuadrilateral, 1}()
     fqr = FacetQuadratureRule{RefQuadrilateral}(2)
@@ -268,8 +302,6 @@ end
     # If traction landed on θ-DOFs instead of u₃-DOFs, the tip would not deflect.
     grid2 = shell_grid(generate_grid(Quadrilateral, (4, 1),
                                     Vec{2}((0.0, 0.0)), Vec{2}((4.0, 1.0))))
-    addfacetset!(grid2, "right", x -> isapprox(x[1], 4.0, atol=1e-10))
-    addnodeset!(grid2, "left",  x -> isapprox(x[1], 0.0, atol=1e-10))
 
     ip2  = Lagrange{RefQuadrilateral, 1}()
     fqr2 = FacetQuadratureRule{RefQuadrilateral}(2)
@@ -292,8 +324,8 @@ end
         assemble!(asmb3, shelldofs(cell), ke3, re3)
     end
     dbc3 = ConstraintHandler(dh3)
-    add!(dbc3, Dirichlet(:u, getnodeset(grid2, "left"), x -> zeros(3), [1,2,3]))
-    add!(dbc3, Dirichlet(:θ, getnodeset(grid2, "left"), x -> zeros(2), [1,2]))
+    add!(dbc3, Dirichlet(:u, getfacetset(grid2, "left"), x -> zeros(3), [1,2,3]))
+    add!(dbc3, Dirichlet(:θ, getfacetset(grid2, "left"), x -> zeros(2), [1,2]))
     close!(dbc3); Ferrite.update!(dbc3, 0.0)
     apply!(K3, f3, dbc3)
     u3 = K3 \ f3

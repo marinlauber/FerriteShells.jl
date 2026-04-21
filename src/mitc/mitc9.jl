@@ -3,11 +3,11 @@
 
 Mixed Interpolation of Tensorial Components data for the 9-node quadrilateral shell element.
 
-Tying points (reference domain [-1,1]²):
-  γ₁ = a₁·d: (±1/√3, -1), (±1/√3,  0), (±1/√3, +1)   [6 points, linear in ξ₁ between ±1/√3, quadratic in ξ₂]
-  γ₂ = a₂·d: (-1, ±1/√3), ( 0, ±1/√3), (+1, ±1/√3)   [6 points, quadratic in ξ₁, linear in ξ₂ between ±1/√3]
+Tying points (reference domain ``[-1,1]^2``):
+  ``\\gamma_1 = a_1\\cdot d``: (``\\pm1/\\sqrt{3}``, ``-1``), (``\\pm1/\\sqrt{3}``, ``0``), (``\\pm1/\\sqrt{3}``, ``+1``) 6 points, linear in ``\\xi_1`` between ``\\pm1/\\sqrt{3}``, quadratic in ``\\xi_2``
+  ``\\gamma_2 = a_2\\cdot d``: (``-1``, ``\\pm1/\\sqrt{3}``), (``0``, ``\\pm1/\\sqrt{3}``), (``+1``, ``\\pm1/\\sqrt{3}``) 6 points, quadratic in ``\\xi_1``, linear in ``\\xi_2`` between ``\\pm1/\\sqrt{3}``
 
-The points ±1/√3 are superconvergent points for linear functions.
+The points ``\\pm1/\\sqrt{3}`` are superconvergent points for linear functions.
 """
 function MITC9(ip_shape::Interpolation, qr::QuadratureRule)
     T    = Float64

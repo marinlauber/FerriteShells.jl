@@ -1,4 +1,4 @@
-# 1. Shell formulations
+# Shell formulations
 
 ## 1.1 Shell theory comparison
 
@@ -53,7 +53,7 @@ b_{\alpha\beta} = \hat{\mathbf{a}}_3\cdot \mathbf{a}_{\alpha,\beta} = -\mathbf{a
 
 ## 2.1 Green-Lagrange strain tensor
 
-The Green-Lagrange strain tensor is given by half the increment in the metric tensor [chapelle2011](@cite)
+The Green-Lagrange strain tensor is given by half the increment in the metric tensor [chapelle2011](@citet)
 ```math
 e_{ij} = \frac{1}{2}\left(g_{ij} - G_{ji}\right).
 ```
@@ -66,7 +66,7 @@ For linear analysis, it is common to expand the second expression with the defin
 ```math
 g_{ij} = \frac{\partial\Phi(\xi^1,\xi^2,\xi^3)}{\partial\xi^i}\cdot\frac{\partial\Phi(\xi^1,\xi^2,\xi^3)}{\partial\xi^j} \quad G_{ij} = \frac{\partial\Phi^0(\xi^1,\xi^2,\xi^3)}{\partial\xi^i}\cdot\frac{\partial\Phi^0(\xi^1,\xi^2,\xi^3)}{\partial\xi^j}
 ```
-where the mapping in the current configuration can be through the displacement field 
+where the mapping in the current configuration can be through the displacement field
 ```math
 \mathbf{u}(\xi^1,\xi^2,\xi^3) = \Phi(\xi^1,\xi^2,\xi^3) - \Phi^0(\xi^1,\xi^2,\xi^3)
 ```
@@ -114,7 +114,7 @@ g_{33} &= \hat{\mathbf{a}}_{3} \cdot \hat{\mathbf{a}}_{3}= 1.
 ```
 since ``\hat{\mathbf{a}}_3 \cdot \mathbf{a}_\alpha = 0`` and ``\hat{\mathbf{a}}_{3}\cdot\hat{\mathbf{a}}_{3,\alpha} = \frac{1}{2} (\hat{\mathbf{a}}_{3}\cdot\hat{\mathbf{a}}_{3})_{,\alpha} = 0``.
 
-A common assumtion made in shells is to ommit the ``(\xi^3)^2`` term in ``g_{\alpha\beta}``, this assumption is called the Love--Kirchhoff strain assumption and requires the smallest radius of curvature of the shell ``R_\text{min}>t/2`` where ``t`` is the shell's thickness, see [ciarlet2005](@cite).
+A common assumtion made in shells is to ommit the ``(\xi^3)^2`` term in ``g_{\alpha\beta}``, this assumption is called the Love--Kirchhoff strain assumption and requires the smallest radius of curvature of the shell ``R_\text{min}>t/2`` where ``t`` is the shell's thickness, see [ciarlet2005](@citet).
 
 !!! info
     The Love Kirchhoff **strain** assumption is not to be confused the the Kirchhoff-Love **kinematics** assumption.
@@ -153,7 +153,7 @@ To obtain the residual equation, we apply the principal of stationnary action in
 ```
 
 !!! info
-    $\mathcal{W}(\gamma+\epsilon\delta\gamma) = \int_\omega\lim_{\epsilon\to0}\frac{d}{d\epsilon}\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\gamma_{\gamma\delta}+\epsilon\delta\gamma_{\gamma\delta})\gamma_{\alpha\beta}\right)\sqrt{a}\text{ d}y$
+    ``\mathcal{W}(\gamma+\epsilon\delta\gamma) = \int_\omega\lim_{\epsilon\to0}\frac{d}{d\epsilon}\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\gamma_{\gamma\delta}+\epsilon\delta\gamma_{\gamma\delta})\gamma_{\alpha\beta}\right)\sqrt{a}\text{ d}y``
 
 The variation of the membrane term is given by
 ```math
@@ -219,7 +219,7 @@ The Reissner-Mindlin kinematic relaxes the kirchhoff-Love zero shear strain assu
 ```math
 \Phi(\xi^1,\xi^2,\xi^3) = \phi(\xi^1,\xi^2) + \xi^3\theta^\lambda(\xi^1,\xi^2) \mathbf{a}_\lambda(\xi^1,\xi^2) = \phi(\xi^1,\xi^2) + \xi^3\mathbf{d}(\xi^1,\xi^2)
 ```
-where $\mathbf{d}(\xi^1,\xi^2)$ is the director at a point $(\xi^1,\xi^2)$ on the midsurface and $\gamma_\alpha=\mathbf{d}⋅ \mathbf{a}_\alpha$.
+where ``\mathbf{d}(\xi^1,\xi^2)`` is the director at a point ``(\xi^1,\xi^2)`` on the midsurface and ``\gamma_\alpha=\mathbf{d}⋅ \mathbf{a}_\alpha``.
 
 The surface basis vector are given by
 ```math
@@ -239,7 +239,7 @@ g_{\alpha 3} &= g_{3\alpha} = (\mathbf{a}_\alpha+\xi^3\mathbf{d}_{,\alpha})\cdot
 g_{33} &= 1.
 \end{split}
 ```
-where the plane stress assumption results in $g_{33}=1$ and the shear contributions are non-zero $g_{3\alpha}\neq0$. As a result, the strain tensor is now
+where the plane stress assumption results in ``g_{33}=1`` and the shear contributions are non-zero ``g_{3\alpha}\neq0``. As a result, the strain tensor is now
 ```math
 \begin{split}
 e_{\alpha\beta} &= \frac{1}{2}(g_{\alpha\beta} - G_{\alpha\beta})\\
@@ -248,34 +248,33 @@ e_{33} &= 0.
 \end{split}
 ```
 
-!!! Note
-    Interestingly, the plane stress assumption now results in non-zero transverse strains $e_{3\alpha}\neq0$. This is expected since shear also results in ... This component scales with the thickness squared and is usually very small. We can recover it as a post-processing step from the in-plane strain via
+!!! note
+    Interestingly, the plane stress assumption now results in non-zero transverse strains ``e_{3\alpha}\neq0``. This is expected since shear also results in ... This component scales with the thickness squared and is usually very small. We can recover it as a post-processing step from the in-plane strain via
     ```math
     e_{3\alpha} = ...
     ```
 
 ### 2.3.1 Director parametrization
 
-There are a few ways to parametrize the the director vector, and the different choice lead to different discertization. One way is to discretize each of its components, leading to an additional 3 degrees of freedom per node. This is the simplest way, but requires enforcing $\Vert\mathbf{d}\Vert=1$ through a Lagrange multiplier approach and static condensation, which results in an overall complex implementation.
+There are a few ways to parametrize the the director vector, and the different choice lead to different discertization. One way is to discretize each of its components, leading to an additional 3 degrees of freedom per node. This is the simplest way, but requires enforcing ``\Vert\mathbf{d}\Vert=1`` through a Lagrange multiplier approach and static condensation, which results in an overall complex implementation.
 
 Another way is to use additive vector rotations starting from the midsurface normal
 ```math
 \mathbf{d} = \hat{\mathbf{a}}_3 + \theta_1\mathbf{T}_1 + \theta_2\mathbf{T}_2
 ```
-which removes one unknown since we only require $\theta_1,\theta_2$ to fully describe $\mathbf{d}$. One issue with this formulation is that the unitarity of the director is not enforced $\Vert\mathbf{d}\Vert\neq1$. This limits the formulation to small rotations $\Vert\mathbf{\theta}\Vert\ll1$ as large $\Vert\mathcal{d}\Vert$ would lead to large shear strains ($\gamma_\alpha=\mathbf{a}_\alpha\cdot\mathbf{d}$) resulting in shear locking as all the internal energy is taken by shear.
+which removes one unknown since we only require ``\theta_1,\theta_2`` to fully describe ``\mathbf{d}``. One issue with this formulation is that the unitarity of the director is not enforced ``\Vert\mathbf{d}\Vert\neq1``. This limits the formulation to small rotations ``\Vert\mathbf{\theta}\Vert\ll1`` as large ``\Vert\mathcal{d}\Vert`` would lead to large shear strains (``\gamma_\alpha=\mathbf{a}_\alpha\cdot\mathbf{d}``) resulting in shear locking as all the internal energy is taken by shear.
 
-For finite rotation nonlinear shell, we would like to parametrize $\mathbf{d}$ in a way that naturally enforces the $\Vert\mathbf{d}\Vert=1$ constraint. One way to do this is through Rodrigue's parametrization
+For finite rotation nonlinear shell, we would like to parametrize ``\mathbf{d}`` in a way that naturally enforces the ``\Vert\mathbf{d}\Vert=1`` constraint. One way to do this is through Rodrigue's parametrization
 ```math
 \mathbf{d} = \cos{\Vert\mathbf{\theta}\Vert}\cdot\hat{\mathbf{a}}_3 + \text{sinc}{\Vert\theta\Vert}\cdot(\theta_1\cdot\mathbf{T}_1 + \theta_2\cdot\mathbf{T}_2)
 ```
-which guarantees $\Vert\mathcal{d}\Vert=1$ for rotations that satisfy $\mathbf{\theta}^2 = \theta_1^2 + \theta_2^2$ . This formulation is also limited by a singularity in the Rodrigue parametrization for $\theta=\pi$ rotations. This could be solved with quarterion parametrization, but in practice, an updated Lagrange formation can be used to enforce $\theta<\phi$.
-
+which guarantees ``\Vert\mathcal{d}\Vert=1`` for rotations that satisfy ``\mathbf{\theta}^2 = \theta_1^2 + \theta_2^2`` . This formulation is also limited by a singularity in the Rodrigue parametrization for ``\theta=\pi`` rotations. This could be solved with quarterion parametrization, but in practice, an updated Lagrange formation can be used to enforce ``\theta<\phi``.
 In the following, we will keep the director variation terms general since explicit variation of the director is messy, especially here since we use a Rodrigue's parametrization.
 
 !!! info
-    In practice, we use $\theta^2$ in the trigonometric functions to enforce directly the constraint on the rotations, but this means that for small rotations, we could take the square-root of a very small number, which could lead to overflow. To avoid this, we use a Taylor-series expansion to evaluate the trigonometric functions for $\mathbf{\theta}^2<10^{-6}$, and the normal expression otherwise.
+    In practice, we use ``\theta^2`` in the trigonometric functions to enforce directly the constraint on the rotations, but this means that for small rotations, we could take the square-root of a very small number, which could lead to overflow. To avoid this, we use a Taylor-series expansion to evaluate the trigonometric functions for ``\mathbf{\theta}^2<10^{-6}``, and the normal expression otherwise.
 
-### 2.3.2 
+### 2.3.2
 
 # References
 

@@ -3,10 +3,9 @@ CurrentModule = FerriteShells
 DocTestSetup = :(using FerriteShells)
 ```
 
-# ShellCellValues
+# Shell Cell Values
 
 ## Main types
-[`ShellCellValues`](@ref)
 
 ```@docs
 ShellCellValues

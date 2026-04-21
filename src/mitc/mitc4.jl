@@ -3,9 +3,9 @@
 
 Mixed Interpolation of Tensorial Components data for the 4-node quadrilateral shell element.
 
-Tying points (reference domain [-1,1]²):
-  γ₁ = a₁·d: (0, ±1)   [2 points, constant in ξ₁, linear in ξ₂]
-  γ₂ = a₂·d: (±1, 0)   [2 points, linear in ξ₁, constant in ξ₂]
+Tying points (reference domain ``[-1,1]^2``):
+  ``\\gamma_1 = a_1 \\cdot d``: (``0,`` ``\\pm1``)   2 points, constant in ``\\xi_1``, linear in ``\\xi_2``
+  ``\\gamma_2 = a_2 \\cdot d``: (``\\pm1``,`` 0``)   2 points, linear in ``\\xi_1``, constant in ``\\xi_2``
 """
 function MITC4(ip_shape::Interpolation, qr::QuadratureRule)
     T    = Float64

@@ -81,7 +81,7 @@ end
 """
     membrane_residuals_KL!(re, scv, u_e, mat)
 
-Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
+Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
 """
 function membrane_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -102,7 +102,7 @@ end
 """
     membrane_tangent_KL!(ke, scv, u_e, mat)
 
-Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
+Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
 """
 function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -135,10 +135,18 @@ function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
 end
 
 """
-Kirchhoff–Love bending strain energy.
-Curvature change κ_{\\alpha\\beta} = b_{\\alpha\\beta} - B_{\\alpha\\beta} (current minus reference second fundamental form).
-Requires Q2+ elements for full κ (Q4 only captures twist κ₁₂).
-`u_e` is a flat vector of length 3·n_nodes: [u₁,u₂,u₃, …].
+    bending_energy_KL(u_flat, scv::ShellCellValues, mat)
+
+Computes the Kirchhoff–Love bending energy through the curvature change ``\\kappa_{\\alpha\\beta} = b_{\\alpha\\beta} - B_{\\alpha\\beta}``
+(current minus reference second fundamental form).
+
+**Arguments:**
+* `u_flat`: a flat vector of length 3·`n_nodes` containing the displacement degrees of freedom of that element [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+* `scv`: a [`ShellCellValues`](@ref) object containing the precomputed shape function values and derivatives.
+* `mat`: an instance of an `AbstractMaterial` describing the material properties.
+
+**Note:**
+To capture the full curvature change ``\\kappa``, quadratic elements are required (linear element only captures twist ``\\kappa_{12}``).
 """
 function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
@@ -173,9 +181,11 @@ function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
 end
 
 """
+    membrane_energy_RM(u_flat, scv::ShellCellValues, mat)
+
 Reissner–Mindlin membrane strain energy.
-DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vector of length 5·n_nodes).
-Only the displacement DOFs (indices 5I-4:5I-2) contribute to membrane energy.
+DOF layout: 5 DOFs per node — [``u_1``,``u_2``,``u_3``, ``\\varphi_1``, ``\\varphi_2``, ``\\cdots``] (flat vector of length 5·`n_nodes`).
+Only the displacement DOFs (indices `5I-4:5I-2``) contribute to membrane energy.
 """
 function membrane_energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
@@ -193,7 +203,7 @@ end
 """
     membrane_residuals_RM_FD!(re, scv, u_e, mat)
 
-Reissner–Mindlin membrane residual. `u_e` is a flat vector of length 5·n_nodes.
+Reissner–Mindlin membrane residual. `u_e` is a flat vector of length 5·`n_nodes`.
 """
 function membrane_residuals_RM_FD!(re, scv, u_e, mat)
     re .+= ForwardDiff.gradient(u -> membrane_energy_RM(u, scv, mat), u_e)
@@ -202,7 +212,7 @@ end
 """
     membrane_residuals_RM!(re, scv, u_e, mat)
 
-RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta dΩ``.
+RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta \\, d\\Omega``.
 Stress resultant rows ``P_\\alpha = N^{\\alpha\\beta} a_\\beta`` are precomputed once per QP.
 """
 function membrane_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
@@ -225,7 +235,7 @@ end
 """
     membrane_tangent_RM_FD!(ke, scv, u_e, mat)
 
-Reissner–Mindlin membrane tangent. `u_e` is a flat vector of length 5·n_nodes.
+Reissner–Mindlin membrane tangent. `u_e` is a flat vector of length 5·`n_nodes`.
 """
 function membrane_tangent_RM_FD!(ke, scv, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> membrane_energy_RM(u, scv, mat), u_e)
@@ -248,7 +258,7 @@ RM membrane tangent.
 Material part: ``K^\\text{mat}_{IJ} = \\partial N_I^\\alpha \\partial N_J^\\delta M_{\\alpha\\delta}`` where
 ``M_{\\alpha\\delta} = C^{\\alpha\\beta\\gamma\\delta} a_\\beta\\otimes a_\\gamma``.
 Geometric part: ``K^\\text{geo}_{IJ} = (\\partial N_I^\\alpha N^{\\alpha\\beta} \\partial N_J^\\beta) \\mathbb{h}_3``.
-Both M_{\\alphaδ} and N are precomputed once per QP outside the node loops.
+Both ``M_{\\alpha\\delta}`` and ``N`` are precomputed once per QP outside the node loops.
 """
 function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -272,16 +282,19 @@ function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
 end # 19.969 μs (0 allocations: 0 bytes) on a 45x45 matrix (50x speedup)
 
 """
+    bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
+
 Reissner–Mindlin bending + transverse shear strain energy.
-DOF layout: 5 DOFs per node — [u₁, u₂, u₃, φ₁, φ₂, …] (flat vector of length 5·n_nodes).
+DOF layout: 5 DOFs per node — [``u_1``,``u_2``,``u_3``, ``\\varphi_1``, ``\\varphi_2``, ``\\cdots``] (flat vector of length 5·`n_nodes`).
 
-Director parametrization: d_I = G₃ + φ₁_I·T₁ + φ₂_I·T₂
-where G₃ is the reference unit normal and T₁, T₂ are reference tangents from scv.
+Director: ``d_I = G_3 + \\varphi_{1,I} T_1 + \\varphi_{2,I} T_2`` where ``G_3`` is the reference unit normal
+and ``T_1``, ``T_2`` are reference tangents from `scv`.
 
-Bending strain:  κ_{\\alpha\\beta} = ½(a_\\alpha·d,\\beta + a_\\beta·d,\\alpha) - B_{\\alpha\\beta}
-Transverse shear: γ_\\alpha = a_\\alpha·d
+Bending strain: ``\\kappa_{\\alpha\\beta} = \\frac{1}{2}(a_\\alpha \\cdot d_{,\\beta} + a_\\beta \\cdot d_{,\\alpha}) - B_{\\alpha\\beta}``
 
-Shear correction factor κ_s = 5/6 is applied.
+Transverse shear: ``\\gamma_\\alpha = a_\\alpha \\cdot d``
+
+Shear correction factor ``\\kappa_s = 5/6`` is applied.
 """
 function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
@@ -318,11 +331,13 @@ end
 
 RM bending + transverse shear residual, explicit index-notation form.
 
-Displacement DOFs: `r_I^u = (∂₁N_I P¹ + ∂₂N_I P²) dΩ`
-where `P^\\alpha = M^{\\alpha\\beta} d_{,\\beta} + Q^\\alpha d`, M = D⊡κ (bending moment), Q^\\alpha = κ_s G t A^{\\alpha\\beta} γ_\\beta.
+Displacement DOFs: ``r_I^u = (\\partial_1 N_I P^1 + \\partial_2 N_I P^2) \\, d\\Omega``
+where ``P^\\alpha = M^{\\alpha\\beta} d_{,\\beta} + Q^\\alpha d``, ``M = D : \\kappa`` (bending moment),
+``Q^\\alpha = \\kappa_s G t A^{\\alpha\\beta} \\gamma_\\beta``.
 
-Rotation DOFs: `r_{I,k}^φ = F_I · (∂d_I/∂φ_k) dΩ`
-where `F_I = ∂₁N_I S¹ + ∂₂N_I S² + N_I (Q₁ a₁ + Q₂ a₂)`, S^\\alpha = M^{\\alpha\\beta} a_\\beta.
+Rotation DOFs: ``r_{I,k}^\\varphi = F_I \\cdot (\\partial d_I/\\partial \\varphi_k) \\, d\\Omega``
+where ``F_I = \\partial_1 N_I S^1 + \\partial_2 N_I S^2 + N_I (Q_1 a_1 + Q_2 a_2)``,
+``S^\\alpha = M^{\\alpha\\beta} a_\\beta``.
 """
 function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -371,17 +386,23 @@ end
     bending_tangent_RM!(ke, scv, u_e, mat)  [MITC dispatch]
 
 Consistent RM bending + transverse shear tangent for MITC elements.
-The MITC shear sensitivities ∂γ_α/∂u are obtained by differentiating through the
+The MITC shear sensitivities ``\\partial\\gamma_\\alpha/\\partial u`` are obtained by differentiating through the
 tying interpolation:
 
-    ∂γ_α(q)/∂u_J        = Σ_k h_tie_α[q,k] · dNdξ_tie_α[J,k][α] · d(ξ_k)
-    ∂γ_α(q)/∂φ_{J,l}   = Σ_k h_tie_α[q,k] · N_tie_α[J,k] · dot(a_α_tie(k), ∂d_J/∂φ_l(ξ_k))
+```math
+\\frac{\\partial\\gamma_\\alpha(q)}{\\partial u_J}
+  = \\sum_k h^\\alpha_{qk} \\frac{\\partial N_J}{\\partial\\xi_\\alpha}(\\xi_k)\\cdot d(\\xi_k)
+```
+```math
+\\frac{\\partial\\gamma_\\alpha(q)}{\\partial\\varphi_{J,l}}
+  = \\sum_k h^\\alpha_{qk}\\, N_J(\\xi_k)\\left(a_\\alpha(\\xi_k)\\cdot\\frac{\\partial d_J}{\\partial\\varphi_l}(\\xi_k)\\right)
+```
 
-where `∂d_J/∂φ_l(ξ_k)` is the Rodrigues Jacobian at node J evaluated with the reference
-geometry (G₃,T₁,T₂) at tying point k.  This ensures exact consistency with
+where ``\\partial d_J/\\partial\\varphi_l(\\xi_k)`` is the Rodrigues Jacobian at node J evaluated with the reference
+geometry ``(G_3, T_1, T_2)`` at tying point k.  This ensures exact consistency with
 `bending_residuals_RM!` so Newton converges quadratically.
 
-Bending (κ) terms are unchanged from the NoMITC path — only shear (Q) terms differ.
+Bending (``\\kappa``) terms are unchanged from the NoMITC path — only shear (``Q``) terms differ.
 """
 function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,E,M}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,E<:AbstractStrainMeasure,M<:MITC,T}
     mitc    = scv.mitc
@@ -536,12 +557,12 @@ end
 """
     bending_tangent_RM!(ke, scv, u_e, mat)
 
-RM bending + transverse shear tangent, explicit index-notation form. Four blocks per (I,J) pair:
+RM bending and transverse shear tangent, explicit index-notation form. Four blocks per (I,J) pair:
 
-- **uu** (3×3): `∂_\\alphaN_I ∂_γN_J (D^{\\alpha\\betaγδ} d_{,\\beta}⊗d_{,δ}) + q_{IJ}(d⊗d)` — frame_stiffness with d₁,d₂.
-- **uφ** (3×2): `∂_\\alphaN_I[δM^{\\alpha\\beta}d_{,\\beta} + δQ^\\alpha N_J d] + (g_{IJ}+q_I N_J)dd_{Jl}`.
-- **φu** (2×3): filled by transposing the uφ block for (I,J) into the (J,I) position.
-- **φφ** (2×2): material part `∂F_I/∂φ_{lJ}·dd_{Ik}` + geometric part `F_I·∂²d_I/∂φ_k∂φ_l` (J=I only).
+- **uu** (3×3): ``\\partial_\\alpha N_I \\partial_\\gamma N_J (D^{\\alpha\\beta\\gamma\\delta} d_{,\\beta} \\otimes d_{,\\delta}) + q_{IJ}(d \\otimes d)`` — frame stiffness with ``d_1, d_2``.
+- **uφ** (3×2): ``\\partial_\\alpha N_I [\\delta M^{\\alpha\\beta} d_{,\\beta} + \\delta Q^\\alpha N_J d] + (g_{IJ}+q_I N_J) \\mathrm{dd}_{Jl}``.
+- **φu** (2×3): filled by transposing the **uφ** block for (I,J) into the (J,I) position.
+- **φφ** (2×2): material part ``\\partial F_I/\\partial\\varphi_{l,J} \\cdot \\mathrm{dd}_{Ik}`` + geometric part ``F_I \\cdot \\partial^2 d_I/\\partial\\varphi_k\\partial\\varphi_l`` (J=I only).
 """
 function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -647,7 +668,7 @@ end
 
 """
 Assemble external traction into force vector f for embedded shell elements (2D mesh in 3D).
-`traction` is either a Vec{3} (uniform) or a callable x::Vec{3} -> Vec{3}.
+`traction` is either a `Vec{3}` (uniform) or a callable `x::Vec{3} -> Vec{3}`.
 Uses a `FacetQuadratureRule` and computes the edge length element directly from 3D node positions,
 bypassing the sdim mismatch that prevents standard `FacetValues` from working on embedded meshes.
 Works for RefQuadrilateral and RefTriangle of any interpolation order.
@@ -685,9 +706,11 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
 end
 
 """
-scv.detJdV[qp] = ‖A₁ × A₂‖ · w (reference area × weight).
-cross(a₁, a₂) already has magnitude ‖a₁ × a₂‖ (current area per parametric area).
-multiplying by w integrates over the parameter domain
+    assemble_pressure!(re, scv, u_e, p)
+
+Follower pressure residual for embedded shell elements.
+``\\mathrm{detJdV}[q] = \\|A_1 \\times A_2\\| \\cdot w`` (reference area times quadrature weight).
+``\\mathrm{cross}(a_1, a_2)`` has magnitude ``\\|a_1 \\times a_2\\|`` (current area per parametric area).
 """
 # Follower pressure residual
 function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
@@ -706,9 +729,19 @@ end
 @inline spin(v::Vec{3,T}) where T = Tensor{2,3,T}((zero(T), v[3], -v[2], -v[3], zero(T), v[1], v[2], -v[1], zero(T)))
 
 """
-Load-stiffness K_pres = ∂F_p/∂u. Follower pressure n = a₁×a₂ depends on u through a₁,a₂.
-∂n/∂u_J = ∂₁N_J (eₗ×a₂) + ∂₂N_J (a₁×eₗ) = ∂₁N_J (-spin(a₂)) + ∂₂N_J spin(a₁).
-K_IJ = p N_I w [∂₁N_J (-spin(a₂)) + ∂₂N_J spin(a₁)]  (displacement-displacement block only).
+    assemble_pressure_tangent!(ke, scv, u_e, p)
+
+Load-stiffness ``K_\\text{pres} = \\partial F_p/\\partial u``. Follower pressure ``n = a_1 \\times a_2``
+depends on `u` through ``a_1, a_2``.
+
+```math
+\\frac{\\partial n}{\\partial u_J} = \\partial_1 N_J (e_l \\times a_2) + \\partial_2 N_J (a_1 \\times e_l)
+ = \\partial_1 N_J (-\\mathrm{spin}(a_2)) + \\partial_2 N_J\\,\\mathrm{spin}(a_1)
+```
+```math
+K_{IJ} = p N_I w \\bigl[\\partial_1 N_J (-\\mathrm{spin}(a_2)) + \\partial_2 N_J\\,\\mathrm{spin}(a_1)\\bigr]
+```
+(displacement-displacement block only).
 """
 function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)

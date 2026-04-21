@@ -21,27 +21,16 @@ function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(
                 facetsets=grid.facetsets, cellsets=grid.cellsets, nodesets=grid.nodesets)
 end
 
-function compute_membrane_strains(Es, scv, u_e)
-    for qp in 1:getnquadpoints(scv)
-        _, _, A_metric, a_metric = kinematics(scv, qp, u_e)
-        Es[qp] = 0.5 * (a_metric - A_metric)
-    end
-end
-
-# K.J - Bath https://doi.org/10.1016/S0045-7949(03)00010-5
-function s_norm(u, uₕ)
-    nothing
-end
-
-
 import Ferrite: CellCache
 """
-    shelldofs()
+    shelldofs(cell)
 
-Reorder DOFs from a two-field DofHandler layout (:u as ip^3, :θ as ip^2)
+Reorder DOFs from a two-field `DofHandler` layout (`:u` as ip³, `:θ` as ip²)
 to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
-Input:  [u1x,u1y,u1z, u2x,...,unz | θ1₁,θ1₂, θ2₁,...,θn₂]
-Output: [u1x,u1y,u1z,θ1₁,θ1₂, u2x,u2y,u2z,θ2₁,θ2₂, ...]
+
+Input layout: ``[u_{1x},u_{1y},u_{1z},\\, u_{2x},\\ldots,u_{nz} \\mid \\theta_{1,1},\\theta_{1,2},\\, \\theta_{2,1},\\ldots,\\theta_{n,2}]``
+
+Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_{2y},u_{2z},\\theta_{2,1},\\theta_{2,2},\\ldots]``
 """
 function shelldofs(cell::CellCache)
     dofs = cell.dofs
@@ -204,8 +193,8 @@ end
 """
     volume_gradient!(dVdu, dh, scv, u; h, b)
 
-Compute the volume gradient ∂V₃D/∂u into `dVdu` via ForwardDiff.
-Each element contribution is `ForwardDiff.gradient(uₑ -> volume_residual(..., uₑ, h, b), uₑ)`
+Compute the volume gradient ``\\partial V_{3D}/\\partial u`` into `dVdu` via ForwardDiff.
+Each element contribution is `ForwardDiff.gradient(ue -> volume_residual(..., ue, h, b), ue)`
 assembled into the global DOF vector using the shell DOF permutation.
 """
 function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
@@ -219,10 +208,35 @@ function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; 
     end
 end
 
-# Write deformed Rodrigues director and reference shell normal G₃ as nodal vector fields.
-# Director: d = cos|φ|·G₃ + sinc|φ|·(φ₁T₁+φ₂T₂). Both fields are averaged over
-# elements sharing each node.
-function write_directors!(vtk, dh::DofHandler, scv::ShellCellValues, u)
+"""
+    director_field(dh, scv, u) -> (d, G3)
+
+Compute per-node deformed director `d` and reference shell normal `G3` from the
+displacement/rotation solution `u`. Both are returned as `3 × n_nodes` matrices.
+
+Each nodal value is the element-average of the QP-level frame vectors, accumulated
+and averaged over all elements sharing the node.
+
+The director is computed from the Rodrigues rotation formula
+
+```math
+d_I = \\cos|\\varphi|\\, G_3 + \\operatorname{sinc}|\\varphi|\\,(\\varphi_1 T_1 + \\varphi_2 T_2)
+```
+
+which preserves unit length exactly for any rotation magnitude.
+Requires a two-field `DofHandler` with `:u` (ip³) and `:θ` (ip²).
+
+# Example
+```julia
+d, G3 = director_field(dh, scv, u)
+VTKGridFile("output", dh) do vtk
+    write_solution(vtk, dh, u)
+    Ferrite.write_node_data(vtk, d,  "director")
+    Ferrite.write_node_data(vtk, G3, "G3")
+end
+```
+"""
+function director_field(dh::DofHandler, scv::ShellCellValues, u)
     n_nodes = getnnodes(dh.grid)
     d_sum  = zeros(3, n_nodes)
     G3_sum = zeros(3, n_nodes)
@@ -251,6 +265,5 @@ function write_directors!(vtk, dh::DofHandler, scv::ShellCellValues, u)
             @views G3_sum[:, i] ./= c
         end
     end
-    Ferrite.write_node_data(vtk, d_sum,  "director")
-    Ferrite.write_node_data(vtk, G3_sum, "G3")
+    return d_sum, G3_sum
 end

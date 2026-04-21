@@ -33,7 +33,7 @@ We refer the reader to the documentation for the specific weak form, numerical i
 
 ### `ShellCellValues`
 
-Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinatre system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor $\bf{E}$ of the elasticity tensor $\mathbb{C}$, change.
+Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinate system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor ``\bf{E}`` of the elasticity tensor ``\mathbb{C}``, change.
 
 To help assemble these specific surface metrics, this package uses a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but additionally holds covariant basis vectors, metric tensors, and surface Jacobian at the integration points, which are used in the assembly of the different terms of the different formulations.
 
@@ -62,7 +62,7 @@ From these surface measures and the contravariant elasticity tensor $\mathbb{C}^
 
 ### Global assembly
 
-Assembling the element contributions into the global sustem is identical to Ferrite, but instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
+Assembling the element contributions into the global system is identical to Ferrite, but instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
 
 ```julia
 function assemble_shell!(K_int, r_int, dh, scv, u, mat)
