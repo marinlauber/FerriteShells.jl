@@ -21,19 +21,6 @@ function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(
                 facetsets=grid.facetsets, cellsets=grid.cellsets, nodesets=grid.nodesets)
 end
 
-function compute_membrane_strains(Es, scv, u_e)
-    for qp in 1:getnquadpoints(scv)
-        _, _, A_metric, a_metric = kinematics(scv, qp, u_e)
-        Es[qp] = 0.5 * (a_metric - A_metric)
-    end
-end
-
-# K.J - Bath https://doi.org/10.1016/S0045-7949(03)00010-5
-function s_norm(u, uₕ)
-    nothing
-end
-
-
 import Ferrite: CellCache
 """
     shelldofs()
@@ -219,10 +206,35 @@ function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; 
     end
 end
 
-# Write deformed Rodrigues director and reference shell normal G₃ as nodal vector fields.
-# Director: d = cos|φ|·G₃ + sinc|φ|·(φ₁T₁+φ₂T₂). Both fields are averaged over
-# elements sharing each node.
-function write_directors!(vtk, dh::DofHandler, scv::ShellCellValues, u)
+"""
+    director_field(dh, scv, u) -> (d, G3)
+
+Compute per-node deformed director `d` and reference shell normal `G3` from the
+displacement/rotation solution `u`. Both are returned as `3 × n_nodes` matrices.
+
+Each nodal value is the element-average of the QP-level frame vectors, accumulated
+and averaged over all elements sharing the node.
+
+The director is computed from the Rodrigues rotation formula
+
+```math
+d_I = \\cos|\\varphi|\\, G_3 + \\operatorname{sinc}|\\varphi|\\,(\\varphi_1 T_1 + \\varphi_2 T_2)
+```
+
+which preserves unit length exactly for any rotation magnitude.
+Requires a two-field `DofHandler` with `:u` (ip³) and `:θ` (ip²).
+
+# Example
+```julia
+d, G3 = director_field(dh, scv, u)
+VTKGridFile("output", dh) do vtk
+    write_solution(vtk, dh, u)
+    Ferrite.write_node_data(vtk, d,  "director")
+    Ferrite.write_node_data(vtk, G3, "G3")
+end
+```
+"""
+function director_field(dh::DofHandler, scv::ShellCellValues, u)
     n_nodes = getnnodes(dh.grid)
     d_sum  = zeros(3, n_nodes)
     G3_sum = zeros(3, n_nodes)
@@ -251,6 +263,5 @@ function write_directors!(vtk, dh::DofHandler, scv::ShellCellValues, u)
             @views G3_sum[:, i] ./= c
         end
     end
-    Ferrite.write_node_data(vtk, d_sum,  "director")
-    Ferrite.write_node_data(vtk, G3_sum, "G3")
+    return d_sum, G3_sum
 end
