@@ -33,7 +33,7 @@ We refer the reader to the documentation for the specific weak form, numerical i
 
 ### `ShellCellValues`
 
-Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinate system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor ``\bf{E}`` of the elasticity tensor ``\mathbb{C}``, change.
+Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinate system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor $\bf{E}$ of the elasticity tensor $\mathbb{C}$, change.
 
 To help assemble these specific surface metrics, this package uses a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but additionally holds covariant basis vectors, metric tensors, and surface Jacobian at the integration points, which are used in the assembly of the different terms of the different formulations.
 
@@ -90,7 +90,7 @@ where `shelldofs` is a helper function (similar to `celldofs`) to get the degree
 
 ### External loadings
 
-The package also provides helper functions to assemble external loading contributions, such as follower pressure loads or edge tractions, which are often used in shell problems. For terms that depend on the current configuration of the shel (i.e. follower pressure loads) the contribution of these loadings is included in the consistent tangent stiffness matrix, which is necessary for quadratic convergence of the non-linear solver.
+The package also provides helper functions to assemble external loading contributions, such as follower pressure loads or edge tractions, which are often used in shell problems. For terms that depend on the current configuration of the shell (i.e. follower pressure loads) the contribution of these loadings is included in the consistent tangent stiffness matrix, which is necessary for quadratic convergence of the non-linear solver.
 
 Loading | residual | consistent tangent
 :------------ | :-------------| :-------------
@@ -111,7 +111,7 @@ Dynamic inflation of a square pillow made of a thin Reissner-Mindlin shell (MITC
 
 ### Membrane Shear
 
-Wrinkling of a Reissner-Mindlin thin shell with MITC4 treatment under pure lateral shear. Non-linear Newthon-Raphson solver with Pseudo-Transient Continuation (PTC) to traverse the unstable equilibrium path.
+Wrinkling of a Reissner-Mindlin thin shell with MITC4 treatment under pure lateral shear. Non-linear Newton-Raphson solver with Pseudo-Transient Continuation (PTC) to traverse the unstable equilibrium path.
 
 ![Membrane Shear](/docs/src/images/shear.gif)
 
