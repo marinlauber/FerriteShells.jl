@@ -43,6 +43,9 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure,
     T₁       :: Vector{Vec{3, T}}
     T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
+    G₃_elem  :: Vector{Vec{3, T}}   # element-centroid frame (length 1) — shared by all QPs
+    T₁_elem  :: Vector{Vec{3, T}}
+    T₂_elem  :: Vector{Vec{3, T}}
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
 end
 
@@ -85,6 +88,9 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp),
         fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
+        fill(zero(Vec{3, T}), 1),
+        fill(zero(Vec{3, T}), 1),
+        fill(zero(Vec{3, T}), 1),
         m
     )
 end
@@ -174,5 +180,19 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃[q]       = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
         scv.B[q]        = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
-    reinit!(scv.mitc, scv.ip_geo, x)
+    # Centroid frame at ξ=(0,0) — single consistent director frame for the whole element.
+    # Using one frame per element eliminates the spurious shear strains that arise when
+    # QP-specific T₁[qp] = A₁(ξ_qp)/|A₁| varies across quadrature points in distorted
+    # or curved elements.
+    A₁_c = zero(Vec{3,Float64}); A₂_c = zero(Vec{3,Float64})
+    for i in 1:n_geo
+        dN, _ = Ferrite.reference_shape_gradient_and_value(scv.ip_geo, zero(Vec{2,Float64}), i)
+        A₁_c += x[i] * dN[1]; A₂_c += x[i] * dN[2]
+    end
+    n_c  = A₁_c × A₂_c
+    G₃_c = n_c / norm(n_c)
+    T₁_c = A₁_c / norm(A₁_c)
+    T₂_c = (G₃_c × T₁_c) / norm(G₃_c × T₁_c)
+    scv.G₃_elem[1] = G₃_c; scv.T₁_elem[1] = T₁_c; scv.T₂_elem[1] = T₂_c
+    reinit!(scv.mitc, scv.ip_geo, x, G₃_c, T₁_c, T₂_c)
 end

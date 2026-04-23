@@ -302,12 +302,13 @@ function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
     W = zero(T)
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
     G_sh = mat.E / (2*(1 + mat.ν))
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
-        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
         D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         Aup  = inv(scv.A_metric[qp])
         W_bend  = 0.5 * (κ ⊡ D ⊡ κ)
@@ -343,12 +344,13 @@ function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T},
     n_nodes = getnbasefunctions(scv.ip_shape)
     G_sh = mat.E / (2*(1 + mat.ν))
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
-        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes, G₃, T₁, T₂)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
         D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         M   = D ⊡ κ
         Aup = inv(scv.A_metric[qp])
@@ -470,12 +472,13 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,E,M}, u_e::A
     Bγ₂φ1 = Vector{T}(undef, n_nodes)
     Bγ₂φ2 = Vector{T}(undef, n_nodes)
 
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
-        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes, G₃, T₁, T₂)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
         D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         Mb  = D ⊡ κ
         Aup = inv(scv.A_metric[qp])
@@ -568,12 +571,13 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
     n_nodes = getnbasefunctions(scv.ip_shape)
     G_sh = mat.E / (2*(1 + mat.ν))
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
-        G₃ = scv.G₃[qp]; T₁ = scv.T₁[qp]; T₂ = scv.T₂[qp]
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes, G₃, T₁, T₂)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
         D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         M   = D ⊡ κ
         Aup = inv(scv.A_metric[qp])

@@ -401,6 +401,50 @@ end
     @test errors[end] / w_nav < 0.02
 end  # RM bending h-convergence
 
+@testset "rigid-body rotation patch test (QP-frame consistency)" begin
+    # A rigid y-axis rotation R_y(α) maps each node (X,Y,0) → (X cos α, Y, X sin α)
+    # and rotates the shell normal ê_z → (−sin α, 0, cos α).
+    # In the centroid frame {G₃_c, T₁_c, T₂_c}, the director DOFs that reproduce this
+    # rotation exactly are φ₁ = −α·(T₁_c·ê_x), φ₂ = −α·(T₂_c·ê_x).
+    # For a rectangular element T₁_c = ê_x so φ₁ = −α, φ₂ = 0 as usual.
+    # With the centroid-frame fix, the residual is exactly zero on any flat element.
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    scv = make_q9_scv()
+
+    # Irregular quad: bottom and top edges both tilted → T₁ would vary per QP
+    # without the centroid-frame fix.
+    x_skew = [Vec{3}((0.0,  0.0,   0.0)), Vec{3}((1.0,  0.3,  0.0)),
+              Vec{3}((0.8,  1.2,   0.0)), Vec{3}((0.0,  1.0,  0.0)),
+              Vec{3}((0.5,  0.15,  0.0)), Vec{3}((0.9,  0.75, 0.0)),
+              Vec{3}((0.4,  1.1,   0.0)), Vec{3}((0.0,  0.5,  0.0)),
+              Vec{3}((0.45, 0.625, 0.0))]
+
+    α = 0.1
+    function rigid_dofs(x_nodes, T₁_c, T₂_c)
+        # φ₁/φ₂ project the ê_y-axis rotation onto the centroid frame.
+        φ₁ = -α * T₁_c[1]; φ₂ = -α * T₂_c[1]
+        u_e = zeros(5 * length(x_nodes))
+        for I in eachindex(x_nodes)
+            x = x_nodes[I][1]
+            u_e[5I-4] = x * (cos(α) - 1)
+            u_e[5I-2] = x * sin(α)
+            u_e[5I-1] = φ₁; u_e[5I] = φ₂
+        end
+        u_e
+    end
+
+    for (label, x_nodes) in (("rectangular", X_Q9_UNIT), ("distorted", x_skew))
+        reinit!(scv, x_nodes)
+        T₁_c = scv.T₁_elem[1]; T₂_c = scv.T₂_elem[1]
+        u_e = rigid_dofs(x_nodes, T₁_c, T₂_c)
+        re = zeros(45)
+        membrane_residuals_RM!(re, scv, u_e, mat)
+        bending_residuals_RM!(re, scv, u_e, mat)
+        @test norm(re) < 1e-8  # label=$label
+    end
+end
+
+
 @testset "RM Cook's membrane" begin
     # Same mesh and material as the KL test: Q4 32×32, E=1, ν=1/3, t=1.
     # For a flat in-plane problem, RM membrane = KL membrane, so results must match.

@@ -65,7 +65,8 @@ The reference geometry at the tying points is recomputed and stored.
 reinit!
 
 reinit!(::NoMITC, args...) = nothing
-function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}}) where {N,M,T}
+function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}},
+                 G₃_c::Vec{3}, T₁_c::Vec{3}, T₂_c::Vec{3}) where {N,M,T}
     n_geo = getnbasefunctions(ip_geo)
     for (k, ξ_k) in enumerate(mitc.ξ_tie_1)
         A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
@@ -73,10 +74,8 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
             dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
         end
-        G₃ = (A₁ × A₂) / norm(A₁ × A₂)
-        T₁ = A₁ / norm(A₁); T₂ = (G₃ × T₁) / norm(G₃ × T₁)
         mitc.A₁_tie_1[k] = A₁; mitc.A₂_tie_1[k] = A₂
-        mitc.G₃_tie_1[k] = G₃; mitc.T₁_tie_1[k] = T₁; mitc.T₂_tie_1[k] = T₂
+        mitc.G₃_tie_1[k] = G₃_c; mitc.T₁_tie_1[k] = T₁_c; mitc.T₂_tie_1[k] = T₂_c
     end
     for (k, ξ_k) in enumerate(mitc.ξ_tie_2)
         A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
@@ -84,10 +83,8 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
             dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
         end
-        G₃ = (A₁ × A₂) / norm(A₁ × A₂)
-        T₁ = A₁ / norm(A₁); T₂ = (G₃ × T₁) / norm(G₃ × T₁)
         mitc.A₁_tie_2[k] = A₁; mitc.A₂_tie_2[k] = A₂
-        mitc.G₃_tie_2[k] = G₃; mitc.T₁_tie_2[k] = T₁; mitc.T₂_tie_2[k] = T₂
+        mitc.G₃_tie_2[k] = G₃_c; mitc.T₁_tie_2[k] = T₁_c; mitc.T₂_tie_2[k] = T₂_c
     end
 end
 
@@ -114,7 +111,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             d_k += mitc.N_tie_1[I,k] * (cosθ*G₃_k + sincθ*(φ₁*T₁_k + φ₂*T₂_k))
         end
-        dot(mitc.A₁_tie_1[k] + Δa₁, d_k)
+        dot(mitc.A₁_tie_1[k] + Δa₁, d_k) - dot(mitc.A₁_tie_1[k], mitc.G₃_tie_1[k])
     end
     γ₂_k = ntuple(Val(M)) do k
         G₃_k = mitc.G₃_tie_2[k]; T₁_k = mitc.T₁_tie_2[k]; T₂_k = mitc.T₂_tie_2[k]
@@ -126,7 +123,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             d_k += mitc.N_tie_2[I,k] * (cosθ*G₃_k + sincθ*(φ₁*T₁_k + φ₂*T₂_k))
         end
-        dot(mitc.A₂_tie_2[k] + Δa₂, d_k)
+        dot(mitc.A₂_tie_2[k] + Δa₂, d_k) - dot(mitc.A₂_tie_2[k], mitc.G₃_tie_2[k])
     end
     γ₁_k, γ₂_k
 end
