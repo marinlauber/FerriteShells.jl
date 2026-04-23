@@ -14,11 +14,24 @@ const X_Q9_UNIT = [
     Vec{3}((0.5, 0.5, 0.0)),
 ]
 
+# T3: right triangle corners; T6: corners + midpoints (Ferrite order: v1,v2,v3,mid12,mid23,mid31)
+const X_T3_UNIT = [
+    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)), Vec{3}((0.0, 1.0, 0.0)),
+]
+const X_T6_UNIT = [
+    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)), Vec{3}((0.0, 1.0, 0.0)),
+    Vec{3}((0.5, 0.0, 0.0)), Vec{3}((0.5, 0.5, 0.0)), Vec{3}((0.0, 0.5, 0.0)),
+]
+
 # Cell value constructors
 make_q4_scv(; qr_order=1) = ShellCellValues(QuadratureRule{RefQuadrilateral}(qr_order),
                                              Lagrange{RefQuadrilateral,1}(), Lagrange{RefQuadrilateral,1}())
 make_q9_scv(; qr_order=3) = ShellCellValues(QuadratureRule{RefQuadrilateral}(qr_order),
                                              Lagrange{RefQuadrilateral,2}(), Lagrange{RefQuadrilateral,2}())
+make_t3_scv() = ShellCellValues(QuadratureRule{RefTriangle}(2),
+                                Lagrange{RefTriangle,1}(), Lagrange{RefTriangle,1}())
+make_t6_scv(; qr_order=4) = ShellCellValues(QuadratureRule{RefTriangle}(qr_order),
+                                             Lagrange{RefTriangle,2}(), Lagrange{RefTriangle,2}())
 
 # In-plane rotation about z
 @inline R(θ) = Tensor{2,3}([cos(θ) -sin(θ) 0; sin(θ) cos(θ) 0; 0 0 1])
