@@ -22,7 +22,9 @@ makedocs(
     authors = "Marin Lauber",
     pages = Any[
         "Introduction"      => "index.md",
-        "Formulations"      => ["shell.md", "solvers.md"],
+        "Formulations"      => ["shell.md", "KirchhoffLove.md",
+                                "ReissnerMindlin.md", "shell_models.md",
+                                "solvers.md", "References.md"],
         "API reference"     => "reference/index.md",
     ],
     plugins=[bib]
