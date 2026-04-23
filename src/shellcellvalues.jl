@@ -181,9 +181,10 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.B[q]        = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
     # Centroid frame at ξ=(0,0) — single consistent director frame for the whole element.
-    # Using one frame per element eliminates the spurious shear strains that arise when
-    # QP-specific T₁[qp] = A₁(ξ_qp)/|A₁| varies across quadrature points in distorted
-    # or curved elements.
+    # T₁_c is chosen by Gram-Schmidt projection of a global reference vector (ê_x) onto
+    # the element tangent plane. For flat shells this gives T₁_c = ê_x and T₂_c = ê_y
+    # for every element regardless of shape, eliminating both within-element (QP-to-QP)
+    # and inter-element (shared-node) frame inconsistency.
     A₁_c = zero(Vec{3,Float64}); A₂_c = zero(Vec{3,Float64})
     for i in 1:n_geo
         dN, _ = Ferrite.reference_shape_gradient_and_value(scv.ip_geo, zero(Vec{2,Float64}), i)
@@ -191,8 +192,10 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     end
     n_c  = A₁_c × A₂_c
     G₃_c = n_c / norm(n_c)
-    T₁_c = A₁_c / norm(A₁_c)
-    T₂_c = (G₃_c × T₁_c) / norm(G₃_c × T₁_c)
+    ref  = abs(G₃_c[1]) < 0.9 ? Vec{3}((1.,0.,0.)) : Vec{3}((0.,1.,0.))
+    t₁   = ref - (ref ⋅ G₃_c) * G₃_c
+    T₁_c = t₁ / norm(t₁)
+    T₂_c = G₃_c × T₁_c
     scv.G₃_elem[1] = G₃_c; scv.T₁_elem[1] = T₁_c; scv.T₂_elem[1] = T₂_c
     reinit!(scv.mitc, scv.ip_geo, x, G₃_c, T₁_c, T₂_c)
 end

@@ -42,6 +42,9 @@
           FerriteShells.bending_shear_energy_RM(u_pert,  scv, mat) rtol=1e-10
 
     # In-plane rotation (about z-axis): rotate both node positions and DOFs.
+    # With the global frame (T₁=ê_x, T₂=ê_y fixed for all elements), φ is a
+    # tangent-plane vector that must be rotated explicitly: φ_rot = Rz2d·φ.
+    # The energy is then invariant because a_α_rot = Rz·a_α, d_rot = Rz·d.
     θ = π / 7
     Rz = [cos(θ) -sin(θ) 0.0; sin(θ) cos(θ) 0.0; 0.0 0.0 1.0]
     x_rot   = [Vec{3}(Tuple(Rz * collect(xi))) for xi in X_Q9_UNIT]
@@ -49,9 +52,9 @@
     u_rot   = copy(u_pert)
     for I in 1:9
         u_rot[5I-4:5I-2] = Rz * u_pert[5I-4:5I-2]
-        # φ rotates the director, which lives in the tangent plane;
-        # for a z-rotation the in-plane frame rotates too, but since
-        # G₃ = ẑ is unchanged the bending/shear energy is frame-invariant.
+        φ₁, φ₂ = u_pert[5I-1], u_pert[5I]
+        u_rot[5I-1] = cos(θ)*φ₁ - sin(θ)*φ₂
+        u_rot[5I  ] = sin(θ)*φ₁ + cos(θ)*φ₂
     end
     @test FerriteShells.membrane_energy_RM(u_rot, scv_rot, mat) ≈
           FerriteShells.membrane_energy_RM(u_pert, scv, mat) rtol=1e-8
@@ -191,6 +194,171 @@ end
     apply!(K_p, r_p2, ch2)
     u_sol = K_p \ r_p2
     @test norm(u_sol[ch2.free_dofs] .- u_ex[ch2.free_dofs]) ≤ 1e-8 * norm(u_ex[ch2.free_dofs])
+
+    # Q9 version: same 5-element topology with midside and center nodes (25 nodes total).
+    nodes_q9m = [
+        Vec{3}(( 0.0,   0.0,   0.0)),  # 1  A
+        Vec{3}((10.0,   0.0,   0.0)),  # 2  B
+        Vec{3}((10.0,  10.0,   0.0)),  # 3  C
+        Vec{3}(( 0.0,  10.0,   0.0)),  # 4  D
+        Vec{3}(( 2.0,   2.0,   0.0)),  # 5  P
+        Vec{3}(( 8.0,   3.0,   0.0)),  # 6  Q
+        Vec{3}(( 8.0,   7.0,   0.0)),  # 7  R
+        Vec{3}(( 4.0,   7.0,   0.0)),  # 8  S
+        Vec{3}(( 5.0,   0.0,   0.0)),  # 9  mid(AB)
+        Vec{3}((10.0,   5.0,   0.0)),  # 10 mid(BC)
+        Vec{3}(( 5.0,  10.0,   0.0)),  # 11 mid(CD)
+        Vec{3}(( 0.0,   5.0,   0.0)),  # 12 mid(DA)
+        Vec{3}(( 9.0,   1.5,   0.0)),  # 13 mid(BQ)
+        Vec{3}(( 9.0,   8.5,   0.0)),  # 14 mid(CR)
+        Vec{3}(( 2.0,   8.5,   0.0)),  # 15 mid(DS)
+        Vec{3}(( 1.0,   1.0,   0.0)),  # 16 mid(AP)
+        Vec{3}(( 5.0,   2.5,   0.0)),  # 17 mid(PQ)
+        Vec{3}(( 8.0,   5.0,   0.0)),  # 18 mid(QR)
+        Vec{3}(( 6.0,   7.0,   0.0)),  # 19 mid(RS)
+        Vec{3}(( 3.0,   4.5,   0.0)),  # 20 mid(SP)
+        Vec{3}(( 5.5,   4.75,  0.0)),  # 21 center(central)
+        Vec{3}(( 5.0,   1.25,  0.0)),  # 22 center(bottom)
+        Vec{3}(( 9.0,   5.0,   0.0)),  # 23 center(right)
+        Vec{3}(( 5.5,   8.5,   0.0)),  # 24 center(top)
+        Vec{3}(( 1.5,   4.75,  0.0)),  # 25 center(left)
+    ]
+    cells_q9m = [QuadraticQuadrilateral(c) for c in [
+        ( 1, 2, 6, 5,  9,13,17,16,22),
+        ( 2, 3, 7, 6, 10,14,18,13,23),
+        ( 3, 4, 8, 7, 11,15,19,14,24),
+        ( 4, 1, 5, 8, 12,16,20,15,25),
+        ( 5, 6, 7, 8, 17,18,19,20,21),
+    ]]
+    grid_q9m = Grid(cells_q9m, Node.(nodes_q9m))
+    addnodeset!(grid_q9m, "boundary",
+        x -> isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+             isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10))
+    addnodeset!(grid_q9m, "interior",
+        x -> !(isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+               isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10)))
+    ip_q9m = Lagrange{RefQuadrilateral,2}()
+    scv_q9m = ShellCellValues(QuadratureRule{RefQuadrilateral}(4), ip_q9m, ip_q9m)
+    dh_q9m  = DofHandler(grid_q9m); add!(dh_q9m, :u, ip_q9m^5); close!(dh_q9m)
+    n_q9m   = ndofs(dh_q9m)
+
+    u_ex9 = zeros(n_q9m)
+    for cell in CellIterator(dh_q9m)
+        coords = getcoordinates(cell); dofs = celldofs(cell)
+        for (i, xi) in enumerate(coords)
+            u_ex9[dofs[5i-4]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
+            u_ex9[dofs[5i-3]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
+        end
+    end
+
+    r_q9m = zeros(n_q9m); re_q9m = zeros(ndofs_per_cell(dh_q9m))
+    for cell in CellIterator(dh_q9m)
+        fill!(re_q9m, 0.0); reinit!(scv_q9m, cell)
+        membrane_residuals_RM!(re_q9m, scv_q9m, u_ex9[celldofs(cell)], mat_p)
+        bending_residuals_RM_FD!(re_q9m, scv_q9m, u_ex9[celldofs(cell)], mat_p)
+        r_q9m[celldofs(cell)] .+= re_q9m
+    end
+    ch_tmp9 = ConstraintHandler(dh_q9m)
+    add!(ch_tmp9, Dirichlet(:u, getnodeset(grid_q9m, "boundary"), x -> zeros(5), [1,2,3,4,5]))
+    close!(ch_tmp9)
+    @test norm(r_q9m[ch_tmp9.free_dofs]) ≤ 1e-8 * norm(r_q9m)
+
+    K_q9m = allocate_matrix(dh_q9m); r2_q9m = zeros(n_q9m)
+    asmb_q9m = start_assemble(K_q9m, r2_q9m)
+    ke_q9m = zeros(ndofs_per_cell(dh_q9m), ndofs_per_cell(dh_q9m))
+    re2_q9m = zeros(ndofs_per_cell(dh_q9m))
+    for cell in CellIterator(dh_q9m)
+        fill!(ke_q9m, 0.0); fill!(re2_q9m, 0.0); reinit!(scv_q9m, cell)
+        u0 = zeros(ndofs_per_cell(dh_q9m))
+        membrane_tangent_RM!(ke_q9m, scv_q9m, u0, mat_p)
+        bending_tangent_RM_FD!(ke_q9m, scv_q9m, u0, mat_p)
+        assemble!(asmb_q9m, celldofs(cell), ke_q9m, re2_q9m)
+    end
+    ch2_q9m = ConstraintHandler(dh_q9m)
+    add!(ch2_q9m, Dirichlet(:u, getnodeset(grid_q9m, "boundary"),
+         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0, 0.0, 0.0], [1,2,3,4,5]))
+    add!(ch2_q9m, Dirichlet(:u, getnodeset(grid_q9m, "interior"), x -> zeros(3), [3,4,5]))
+    close!(ch2_q9m); Ferrite.update!(ch2_q9m, 0.0)
+    apply!(K_q9m, r2_q9m, ch2_q9m)
+    u_sol9 = K_q9m \ r2_q9m
+    @test norm(u_sol9[ch2_q9m.free_dofs] .- u_ex9[ch2_q9m.free_dofs]) ≤ 1e-8 * norm(u_ex9[ch2_q9m.free_dofs])
+end
+
+@testset "RM bending patch test" begin
+    # Q9 5-element distorted mesh (same 10×10 topology as the membrane patch test).
+    # Exact field: u₃ quadratic, φ₁ and φ₂ linear, satisfying the Kirchhoff constraint
+    # (zero transverse shear). The constant curvature state is exactly representable by
+    # Q9, so the linearised stiffness recovers the exact interior field.
+    # Q4 is excluded: it cannot represent quadratic u₃ or linear φ exactly.
+    κ₁₁, κ₂₂, κ₁₂ = 1e-3, 2e-3, 5e-4
+
+    nodes_b = [
+        Vec{3}(( 0.0,   0.0,  0.0)),  Vec{3}((10.0,   0.0,  0.0)),
+        Vec{3}((10.0,  10.0,  0.0)),  Vec{3}(( 0.0,  10.0,  0.0)),
+        Vec{3}(( 2.0,   2.0,  0.0)),  Vec{3}(( 8.0,   3.0,  0.0)),
+        Vec{3}(( 8.0,   7.0,  0.0)),  Vec{3}(( 4.0,   7.0,  0.0)),
+        Vec{3}(( 5.0,   0.0,  0.0)),  Vec{3}((10.0,   5.0,  0.0)),
+        Vec{3}(( 5.0,  10.0,  0.0)),  Vec{3}(( 0.0,   5.0,  0.0)),
+        Vec{3}(( 9.0,   1.5,  0.0)),  Vec{3}(( 9.0,   8.5,  0.0)),
+        Vec{3}(( 2.0,   8.5,  0.0)),  Vec{3}(( 1.0,   1.0,  0.0)),
+        Vec{3}(( 5.0,   2.5,  0.0)),  Vec{3}(( 8.0,   5.0,  0.0)),
+        Vec{3}(( 6.0,   7.0,  0.0)),  Vec{3}(( 3.0,   4.5,  0.0)),
+        Vec{3}(( 5.5,   4.75, 0.0)),  Vec{3}(( 5.0,   1.25, 0.0)),
+        Vec{3}(( 9.0,   5.0,  0.0)),  Vec{3}(( 5.5,   8.5,  0.0)),
+        Vec{3}(( 1.5,   4.75, 0.0)),
+    ]
+    cells_b = [QuadraticQuadrilateral(c) for c in [
+        ( 1, 2, 6, 5,  9,13,17,16,22),
+        ( 2, 3, 7, 6, 10,14,18,13,23),
+        ( 3, 4, 8, 7, 11,15,19,14,24),
+        ( 4, 1, 5, 8, 12,16,20,15,25),
+        ( 5, 6, 7, 8, 17,18,19,20,21),
+    ]]
+    grid_b = Grid(cells_b, Node.(nodes_b))
+    addnodeset!(grid_b, "boundary",
+        x -> isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+             isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10))
+    addnodeset!(grid_b, "allnodes", x -> true)
+
+    ip_b  = Lagrange{RefQuadrilateral,2}()
+    scv_b = ShellCellValues(QuadratureRule{RefQuadrilateral}(4), ip_b, ip_b)
+    dh_b  = DofHandler(grid_b); add!(dh_b, :u, ip_b^5); close!(dh_b)
+    mat_b = LinearElastic(1.0e6, 0.3, 0.01)
+    n_b   = ndofs(dh_b)
+
+    # Exact field: φ₁ = −κ₁₁·x − κ₁₂·y, φ₂ = −κ₂₂·y − κ₁₂·x (Kirchhoff: γ = 0)
+    u_exb = zeros(n_b)
+    for cell in CellIterator(dh_b)
+        coords = getcoordinates(cell); dofs = celldofs(cell)
+        for (i, xi) in enumerate(coords)
+            u_exb[dofs[5i-2]] =  0.5κ₁₁*xi[1]^2 + 0.5κ₂₂*xi[2]^2 + κ₁₂*xi[1]*xi[2]
+            u_exb[dofs[5i-1]] = -κ₁₁*xi[1] - κ₁₂*xi[2]
+            u_exb[dofs[5i  ]] = -κ₂₂*xi[2] - κ₁₂*xi[1]
+        end
+    end
+
+    # Assemble linearised stiffness at u=0.
+    K_b = allocate_matrix(dh_b); r_b = zeros(n_b)
+    asmb_b = start_assemble(K_b, r_b)
+    ke_b = zeros(ndofs_per_cell(dh_b), ndofs_per_cell(dh_b))
+    re_b = zeros(ndofs_per_cell(dh_b))
+    for cell in CellIterator(dh_b)
+        fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
+        u0 = zeros(ndofs_per_cell(dh_b))
+        membrane_tangent_RM!(ke_b, scv_b, u0, mat_b)
+        bending_tangent_RM_FD!(ke_b, scv_b, u0, mat_b)
+        assemble!(asmb_b, celldofs(cell), ke_b, re_b)
+    end
+
+    ch_b = ConstraintHandler(dh_b)
+    add!(ch_b, Dirichlet(:u, getnodeset(grid_b, "allnodes"), x -> zeros(2), [1,2]))
+    add!(ch_b, Dirichlet(:u, getnodeset(grid_b, "boundary"),
+         x -> [0.5κ₁₁*x[1]^2+0.5κ₂₂*x[2]^2+κ₁₂*x[1]*x[2],
+                -κ₁₁*x[1]-κ₁₂*x[2], -κ₂₂*x[2]-κ₁₂*x[1]], [3,4,5]))
+    close!(ch_b); Ferrite.update!(ch_b, 0.0)
+    apply!(K_b, r_b, ch_b)
+    u_sol_b = K_b \ r_b
+    @test norm(u_sol_b[ch_b.free_dofs] .- u_exb[ch_b.free_dofs]) ≤ 1e-8 * norm(u_exb[ch_b.free_dofs])
 end
 
 @testset "RM Kirchhoff limit (zero shear)" begin
@@ -401,47 +569,232 @@ end
     @test errors[end] / w_nav < 0.02
 end  # RM bending h-convergence
 
-@testset "rigid-body rotation patch test (QP-frame consistency)" begin
-    # A rigid y-axis rotation R_y(α) maps each node (X,Y,0) → (X cos α, Y, X sin α)
-    # and rotates the shell normal ê_z → (−sin α, 0, cos α).
-    # In the centroid frame {G₃_c, T₁_c, T₂_c}, the director DOFs that reproduce this
-    # rotation exactly are φ₁ = −α·(T₁_c·ê_x), φ₂ = −α·(T₂_c·ê_x).
-    # For a rectangular element T₁_c = ê_x so φ₁ = −α, φ₂ = 0 as usual.
-    # With the centroid-frame fix, the residual is exactly zero on any flat element.
+@testset "rigid-body rotation patch test (single element, QP-frame consistency)" begin
+    # A rigid y-axis rotation R_y(-α) maps (X,Y,0) → (X cosα, Y, X sinα) and rotates
+    # the shell normal ê_z → (-sinα, 0, cosα). With the global centroid frame
+    # T₁_c = ê_x for all flat elements, the Rodrigues parameters are φ₁ = -α, φ₂ = 0.
     mat = LinearElastic(1.0e6, 0.3, 0.01)
     scv = make_q9_scv()
 
-    # Irregular quad: bottom and top edges both tilted → T₁ would vary per QP
-    # without the centroid-frame fix.
     x_skew = [Vec{3}((0.0,  0.0,   0.0)), Vec{3}((1.0,  0.3,  0.0)),
               Vec{3}((0.8,  1.2,   0.0)), Vec{3}((0.0,  1.0,  0.0)),
               Vec{3}((0.5,  0.15,  0.0)), Vec{3}((0.9,  0.75, 0.0)),
               Vec{3}((0.4,  1.1,   0.0)), Vec{3}((0.0,  0.5,  0.0)),
               Vec{3}((0.45, 0.625, 0.0))]
-
     α = 0.1
-    function rigid_dofs(x_nodes, T₁_c, T₂_c)
-        # φ₁/φ₂ project the ê_y-axis rotation onto the centroid frame.
-        φ₁ = -α * T₁_c[1]; φ₂ = -α * T₂_c[1]
-        u_e = zeros(5 * length(x_nodes))
+
+    function rigid_dofs_q9(x_nodes)
+        u_e = zeros(45)
         for I in eachindex(x_nodes)
-            x = x_nodes[I][1]
-            u_e[5I-4] = x * (cos(α) - 1)
-            u_e[5I-2] = x * sin(α)
-            u_e[5I-1] = φ₁; u_e[5I] = φ₂
+            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[5I-2] = x_nodes[I][1] * sin(α)
+            u_e[5I-1] = -α
         end
         u_e
     end
 
-    for (label, x_nodes) in (("rectangular", X_Q9_UNIT), ("distorted", x_skew))
+    for x_nodes in (X_Q9_UNIT, x_skew)
         reinit!(scv, x_nodes)
-        T₁_c = scv.T₁_elem[1]; T₂_c = scv.T₂_elem[1]
-        u_e = rigid_dofs(x_nodes, T₁_c, T₂_c)
+        u_e = rigid_dofs_q9(x_nodes)
         re = zeros(45)
         membrane_residuals_RM!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
-        @test norm(re) < 1e-8  # label=$label
+        @test norm(re) < 1e-8
     end
+
+    # Q4: same rigid-body rotation, 4-node elements (rectangular and distorted)
+    scv4s = make_q4_scv()
+    x_skew_q4 = [Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.3, 0.0)),
+                 Vec{3}((0.8, 1.2, 0.0)), Vec{3}((0.0, 1.0, 0.0))]
+    for x_nodes in (X_Q4_UNIT, x_skew_q4)
+        reinit!(scv4s, x_nodes)
+        u_e = zeros(20)
+        for I in eachindex(x_nodes)
+            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[5I-2] = x_nodes[I][1] * sin(α)
+            u_e[5I-1] = -α
+        end
+        re = zeros(20)
+        membrane_residuals_RM!(re, scv4s, u_e, mat)
+        bending_residuals_RM!(re, scv4s, u_e, mat)
+        @test norm(re) < 1e-8
+    end
+end
+
+@testset "rigid-body rotation patch test (multi-element, inter-element frame consistency)" begin
+    # 5 Q4 elements: outer unit square [0,1]² with a central element that is a square
+    # rotated ≈30° (nodes 5–8). Before the global-frame fix, different elements assign
+    # different meanings to the shared φ DOFs, so the assembled residual is nonzero.
+    X_patch = [
+        Vec{3}((0.0,   0.0,   0.0)),   # 1 outer corner
+        Vec{3}((1.0,   0.0,   0.0)),   # 2
+        Vec{3}((1.0,   1.0,   0.0)),   # 3
+        Vec{3}((0.0,   1.0,   0.0)),   # 4
+        Vec{3}((0.409, 0.159, 0.0)),   # 5 inner (rotated square, ≈30°)
+        Vec{3}((0.841, 0.409, 0.0)),   # 6
+        Vec{3}((0.591, 0.841, 0.0)),   # 7
+        Vec{3}((0.159, 0.591, 0.0)),   # 8
+    ]
+    connectivity = [[5,6,7,8], [1,2,6,5], [2,3,7,6], [3,4,8,7], [4,1,5,8]]
+    n_p  = length(X_patch)
+    ip4  = Lagrange{RefQuadrilateral, 1}()
+    scv4 = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip4, ip4)
+    mat4 = LinearElastic(1.0e6, 0.3, 0.01)
+    α    = 0.1
+
+    # RM: φ₁ = -α, φ₂ = 0 in the global frame (T₁_c = ê_x for all flat elements)
+    u_rm = zeros(5n_p)
+    for (I, X) in enumerate(X_patch)
+        u_rm[5I-4] = X[1] * (cos(α) - 1); u_rm[5I-2] = X[1] * sin(α); u_rm[5I-1] = -α
+    end
+    r_rm = zeros(5n_p)
+    for en in connectivity
+        reinit!(scv4, [X_patch[i] for i in en])
+        u_e = zeros(20); re = zeros(20)
+        for (l, g) in enumerate(en), d in 1:5
+            u_e[5(l-1)+d] = u_rm[5(g-1)+d]
+        end
+        membrane_residuals_RM!(re, scv4, u_e, mat4)
+        bending_residuals_RM!(re, scv4, u_e, mat4)
+        for (l, g) in enumerate(en), d in 1:5
+            r_rm[5(g-1)+d] += re[5(l-1)+d]
+        end
+    end
+    @test norm(r_rm) < 1e-8
+
+    # KL: same rigid-body displacement, 3 DOFs/node, no rotation DOFs
+    u_kl = zeros(3n_p)
+    for (I, X) in enumerate(X_patch)
+        u_kl[3I-2] = X[1] * (cos(α) - 1); u_kl[3I] = X[1] * sin(α)
+    end
+    r_kl = zeros(3n_p)
+    for en in connectivity
+        reinit!(scv4, [X_patch[i] for i in en])
+        u_e = zeros(12); re = zeros(12)
+        for (l, g) in enumerate(en), d in 1:3
+            u_e[3(l-1)+d] = u_kl[3(g-1)+d]
+        end
+        membrane_residuals_KL!(re, scv4, u_e, mat4)
+        bending_residuals_KL!(re, scv4, u_e, mat4)
+        for (l, g) in enumerate(en), d in 1:3
+            r_kl[3(g-1)+d] += re[3(l-1)+d]
+        end
+    end
+    @test norm(r_kl) < 1e-8
+
+    # Q9 version: same 5-element topology with midside and center nodes added.
+    # 25 nodes: 8 corners + 4 outer-edge midpoints + 4 cross-edge midpoints
+    #           + 4 central-edge midpoints + 5 element centers.
+    X_p9 = [
+        Vec{3}((0.0,    0.0,    0.0)),  # 1  A
+        Vec{3}((1.0,    0.0,    0.0)),  # 2  B
+        Vec{3}((1.0,    1.0,    0.0)),  # 3  C
+        Vec{3}((0.0,    1.0,    0.0)),  # 4  D
+        Vec{3}((0.409,  0.159,  0.0)),  # 5  P
+        Vec{3}((0.841,  0.409,  0.0)),  # 6  Q
+        Vec{3}((0.591,  0.841,  0.0)),  # 7  R
+        Vec{3}((0.159,  0.591,  0.0)),  # 8  S
+        Vec{3}((0.5,    0.0,    0.0)),  # 9  mid(AB)
+        Vec{3}((1.0,    0.5,    0.0)),  # 10 mid(BC)
+        Vec{3}((0.5,    1.0,    0.0)),  # 11 mid(CD)
+        Vec{3}((0.0,    0.5,    0.0)),  # 12 mid(DA)
+        Vec{3}((0.9205, 0.2045, 0.0)),  # 13 mid(BQ)
+        Vec{3}((0.7955, 0.9205, 0.0)),  # 14 mid(CR)
+        Vec{3}((0.0795, 0.7955, 0.0)),  # 15 mid(DS)
+        Vec{3}((0.2045, 0.0795, 0.0)),  # 16 mid(AP)
+        Vec{3}((0.625,  0.284,  0.0)),  # 17 mid(PQ)
+        Vec{3}((0.716,  0.625,  0.0)),  # 18 mid(QR)
+        Vec{3}((0.375,  0.716,  0.0)),  # 19 mid(RS)
+        Vec{3}((0.284,  0.375,  0.0)),  # 20 mid(SP)
+        Vec{3}((0.5,    0.5,    0.0)),  # 21 center(Central)
+        Vec{3}((0.5625, 0.142,  0.0)),  # 22 center(Bottom)
+        Vec{3}((0.858,  0.5625, 0.0)),  # 23 center(Right)
+        Vec{3}((0.4375, 0.858,  0.0)),  # 24 center(Top)
+        Vec{3}((0.142,  0.4375, 0.0)),  # 25 center(Left)
+    ]
+    # Q9 ordering: [c1,c2,c3,c4, mid12,mid23,mid34,mid41, center]
+    conn9 = [
+        [ 5, 6, 7, 8, 17, 18, 19, 20, 21],   # Central
+        [ 1, 2, 6, 5,  9, 13, 17, 16, 22],   # Bottom
+        [ 2, 3, 7, 6, 10, 14, 18, 13, 23],   # Right
+        [ 3, 4, 8, 7, 11, 15, 19, 14, 24],   # Top
+        [ 4, 1, 5, 8, 12, 16, 20, 15, 25],   # Left
+    ]
+    n_p9 = length(X_p9)
+    scv9 = make_q9_scv()
+
+    u_rm9 = zeros(5n_p9)
+    for (I, X) in enumerate(X_p9)
+        u_rm9[5I-4] = X[1] * (cos(α) - 1); u_rm9[5I-2] = X[1] * sin(α); u_rm9[5I-1] = -α
+    end
+    r_rm9 = zeros(5n_p9)
+    for en in conn9
+        reinit!(scv9, [X_p9[i] for i in en])
+        u_e = zeros(45); re = zeros(45)
+        for (l, g) in enumerate(en), d in 1:5
+            u_e[5(l-1)+d] = u_rm9[5(g-1)+d]
+        end
+        membrane_residuals_RM!(re, scv9, u_e, mat4)
+        bending_residuals_RM!(re, scv9, u_e, mat4)
+        for (l, g) in enumerate(en), d in 1:5
+            r_rm9[5(g-1)+d] += re[5(l-1)+d]
+        end
+    end
+    @test norm(r_rm9) < 1e-8
+
+    u_kl9 = zeros(3n_p9)
+    for (I, X) in enumerate(X_p9)
+        u_kl9[3I-2] = X[1] * (cos(α) - 1); u_kl9[3I] = X[1] * sin(α)
+    end
+    r_kl9 = zeros(3n_p9)
+    for en in conn9
+        reinit!(scv9, [X_p9[i] for i in en])
+        u_e = zeros(27); re = zeros(27)
+        for (l, g) in enumerate(en), d in 1:3
+            u_e[3(l-1)+d] = u_kl9[3(g-1)+d]
+        end
+        membrane_residuals_KL!(re, scv9, u_e, mat4)
+        bending_residuals_KL!(re, scv9, u_e, mat4)
+        for (l, g) in enumerate(en), d in 1:3
+            r_kl9[3(g-1)+d] += re[3(l-1)+d]
+        end
+    end
+    @test norm(r_kl9) < 1e-8
+
+    # MITC variants: verify that the MITC shear interpolation is consistent with the
+    # global frame — the assembled residual must still be zero under rigid-body motion.
+    scv_m4 = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip4, ip4; mitc=MITC4)
+    r_m4 = zeros(5n_p)
+    for en in connectivity
+        reinit!(scv_m4, [X_patch[i] for i in en])
+        u_e = zeros(20); re = zeros(20)
+        for (l, g) in enumerate(en), d in 1:5
+            u_e[5(l-1)+d] = u_rm[5(g-1)+d]
+        end
+        membrane_residuals_RM!(re, scv_m4, u_e, mat4)
+        bending_residuals_RM!(re, scv_m4, u_e, mat4)
+        for (l, g) in enumerate(en), d in 1:5
+            r_m4[5(g-1)+d] += re[5(l-1)+d]
+        end
+    end
+    @test norm(r_m4) < 1e-8
+
+    ip_m9 = Lagrange{RefQuadrilateral, 2}()
+    scv_m9 = ShellCellValues(QuadratureRule{RefQuadrilateral}(4), ip_m9, ip_m9; mitc=MITC9)
+    r_m9 = zeros(5n_p9)
+    for en in conn9
+        reinit!(scv_m9, [X_p9[i] for i in en])
+        u_e = zeros(45); re = zeros(45)
+        for (l, g) in enumerate(en), d in 1:5
+            u_e[5(l-1)+d] = u_rm9[5(g-1)+d]
+        end
+        membrane_residuals_RM!(re, scv_m9, u_e, mat4)
+        bending_residuals_RM!(re, scv_m9, u_e, mat4)
+        for (l, g) in enumerate(en), d in 1:5
+            r_m9[5(g-1)+d] += re[5(l-1)+d]
+        end
+    end
+    @test norm(r_m9) < 1e-8
 end
 
 
