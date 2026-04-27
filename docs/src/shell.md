@@ -1,40 +1,40 @@
 # Curvilinear elasticity
-
+Most shells theories rely on the definition of a smooth injective immersion ``\Phi:\Omega\to\mathbf{E}^3``, which is a ``\mathcal{C}^1(\Omega,\mathbf{E}^3)`` difeomerophism, that maps from the curvilinear coordinate system defined on the open set ``\Omega\in\mathbb{R}^3`` onto the Euclidean space ``\mathbf{E}^3``. This immersion is fully characterized by the metric tensor ``g_{ij}=\mathbf{g}_i\cdot\mathbf{g}_j``, where the covariant basis vector are defined as
+```math
+\mathbf{g}_i=\frac{\partial \Phi(\xi^1,\xi^2,\xi^3)}{\partial \xi^i}, \quad i\in 1,2,3.
+```
+For an immersed 2D shell, where the curvilinear coordinates are obtained from an open set ``\omega\in\mathbb{R}^2``, see Figure 1. The immersion is fully characterized by two sets of equations, the **surface** metric tensor and the **curvature** tensor, both of which play an important role in shell theories.
 ```@raw html
-<img src="./images/shell_kinematic_init.png" style="background-color:white;" />
+<img src="./images/shell_kinematic_init.png" style="background-color:white" figcaption="**Figure 1**:" />
 ```
-
-Curvilinear covariant basis vector (3D)
+The surface metric tensor ``a_{\alpha\beta}=\mathbf{a}_\alpha\cdot\mathbf{a}_\beta`` and the curvature tensor ``b_{\alpha\beta}=\hat{\mathbf{a}}_3\cdot\partial_\alpha\mathbf{a}_\beta`` are derive from the **surface** basis vectors
 ```math
-\mathbf{g}_i=\frac{\partial \Phi(\xi^1,\xi^2,\xi^3)}{\partial \xi^i}, \quad i\in 1,2,3
+\mathbf{a}_\alpha=\frac{\partial \phi(\xi^1,\xi^2)}{\partial \xi^\alpha}, \quad \alpha\in 1,2,
 ```
-where the latin indices run from 1 to 3. The **surface** covariant basis vector
+where the (unit) surface normal is given by
 ```math
-\mathbf{a}_\alpha=\frac{\partial \phi(\xi^1,\xi^2)}{\partial \xi^\alpha}, \quad \alpha\in 1,2
+\hat{\mathbf{a}}_3 = \frac{\mathbf{a}_1 \times \mathbf{a}_2}{\|\mathbf{a}_1 \times \mathbf{a}_2\|},
 ```
-with greek indices running from 1 to 2. The first fundamental form or **metric tensor** of the surface and the curvilinear coordinate is then given
+which obviously satisfies ``\hat{\mathbf{a}}_3\cdot\mathbf{a}_\alpha=0``. This allows to transform the second fundamental form of the surface
 ```math
-a_{\alpha\beta} = \mathbf{a}_\alpha \cdot \mathbf{a}_\beta, \quad g_{\alpha\beta} = \mathbf{g}_\alpha \cdot \mathbf{g}_\beta
+\begin{split}
+\partial_\beta(\hat{\mathbf{a}}_3\cdot\mathbf{a}_\alpha) &= \hat{\mathbf{a}}_3\cdot \partial_\beta\mathbf{a}_{\alpha} + \partial_\beta\hat{\mathbf{a}}_{3}\cdot\mathbf{a}_\alpha = 0,\\
+-\mathbf{a}_\alpha\cdot \partial_\beta\hat{\mathbf{a}}_{3} &= \hat{\mathbf{a}}_3\cdot \partial_\beta\mathbf{a}_{\alpha} = b_{\alpha\beta}.\\
+\end{split}
 ```
-inverse of the **surface** first fundamental form
+The first fundamental form or **metric tensor** of the surface has an inverse
 ```math
 a^{\alpha\beta} = [a_{\alpha\beta}]^{-1}
 ```
 which allows to transform covariant quantities into their contravariant form
 ```math
-\mathbf{a}^\alpha = a^{\alpha\beta}\mathbf{a}_\beta
+\mathbf{a}^\alpha = a^{\alpha\beta}\mathbf{a}_\beta.
 ```
 
-The (unit) surface normal is then
-```math
-\hat{\mathbf{a}}_3 = \frac{\mathbf{a}_1 \times \mathbf{a}_2}{\|\mathbf{a}_1 \times \mathbf{a}_2\|}
-```
-which satisfies ``\mathbf{a}_3\cdot\mathbf{a}_\alpha=0``, and thus the second fundamental form of the surface is found
-```math
-b_{\alpha\beta} = \hat{\mathbf{a}}_3\cdot \mathbf{a}_{\alpha,\beta} = -\mathbf{a}_\alpha\cdot \hat{\mathbf{a}}_{3,\beta}
-```
+!!! note
+    In the following, we use the notation ``\mathbf{a}_{\alpha,\beta}`` and ``\partial_\beta\mathbf{a}_\alpha`` for ``\frac{\partial\mathbf{a}_\alpha}{\partial\xi^\beta}``.
 
-## 1. Green-Lagrange strain tensor
+## Green-Lagrange strain tensor
 
 The Green-Lagrange strain tensor is given by half the increment in the metric tensor [chapelle2011](@citet)
 ```math
@@ -49,7 +49,7 @@ For linear analysis, it is common to expand the second expression with the defin
 ```math
 g_{ij} = \frac{\partial\Phi(\xi^1,\xi^2,\xi^3)}{\partial\xi^i}\cdot\frac{\partial\Phi(\xi^1,\xi^2,\xi^3)}{\partial\xi^j} \quad G_{ij} = \frac{\partial\Phi^0(\xi^1,\xi^2,\xi^3)}{\partial\xi^i}\cdot\frac{\partial\Phi^0(\xi^1,\xi^2,\xi^3)}{\partial\xi^j}
 ```
-where the mapping in the current configuration can be through the displacement field
+where we can substitute the displacement field for the mapping in the current configuration
 ```math
 \mathbf{u}(\xi^1,\xi^2,\xi^3) = \Phi(\xi^1,\xi^2,\xi^3) - \Phi^0(\xi^1,\xi^2,\xi^3)
 ```

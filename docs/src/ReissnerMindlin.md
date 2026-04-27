@@ -1,10 +1,10 @@
 # Reissner-Mindlin / Naghdi shell
 
+## 1. Kinematics
+
 ```@raw html
 <img src="./images/shell_kinematic.png" style="background-color:white;" />
 ```
-
-## 1. Kinematics
 
 The Reissner-Mindlin kinematic relaxes the kirchhoff-Love zero shear strain assumption through orthogonality of material lines. The shear strain measures the rotation of these material lines around the normal vector of the shell's midsurface ``\hat{\mathbf{a}}_3``
 ```math
@@ -47,19 +47,19 @@ e_{33} &= 0.
 
 ### 1.1 Director parametrization
 
-There are a few ways to parametrize the the director vector, and the different choice lead to different discertization. One way is to discretize each of its components, leading to an additional 3 degrees of freedom per node. This is the simplest way, but requires enforcing ``\Vert\mathbf{d}\Vert=1`` through a Lagrange multiplier approach and static condensation, which results in an overall complex implementation.
+There are a few ways to parametrize the the director vector, and the different choice lead to different discretization. One way is to discretize each of its components, leading to an additional 3 degrees of freedom per node. This is the simplest way, but requires enforcing ``\Vert\mathbf{d}\Vert=1`` through a Lagrange multiplier approach and static condensation, which results in an overall complex implementation.
 
 Another way is to use additive vector rotations starting from the midsurface normal
 ```math
 \mathbf{d} = \hat{\mathbf{a}}_3 + \theta_1\mathbf{T}_1 + \theta_2\mathbf{T}_2
 ```
-which removes one unknown since we only require ``\theta_1,\theta_2`` to fully describe ``\mathbf{d}``. One issue with this formulation is that the unitarity of the director is not enforced ``\Vert\mathbf{d}\Vert\neq1``. This limits the formulation to small rotations ``\Vert\mathbf{\theta}\Vert\ll1`` as large ``\Vert\mathcal{d}\Vert`` would lead to large shear strains (``\gamma_\alpha=\mathbf{a}_\alpha\cdot\mathbf{d}``) resulting in shear locking as all the internal energy is taken by shear.
+which removes one unknown since we only require ``\theta_1,\theta_2`` to fully describe ``\mathbf{d}``. One issue with this formulation is that the unitary of the director is not enforced ``\Vert\mathbf{d}\Vert\neq1``. This limits the formulation to small rotations ``\Vert\mathbf{\theta}\Vert\ll1`` as large ``\Vert\mathcal{d}\Vert`` would lead to large shear strains (``\gamma_\alpha=\mathbf{a}_\alpha\cdot\mathbf{d}``) resulting in shear locking as all the internal energy is taken by shear.
 
 For finite rotation nonlinear shell, we would like to parametrize ``\mathbf{d}`` in a way that naturally enforces the ``\Vert\mathbf{d}\Vert=1`` constraint. One way to do this is through Rodrigue's parametrization
 ```math
 \mathbf{d} = \cos{\Vert\mathbf{\theta}\Vert}\cdot\hat{\mathbf{a}}_3 + \text{sinc}{\Vert\theta\Vert}\cdot(\theta_1\cdot\mathbf{T}_1 + \theta_2\cdot\mathbf{T}_2)
 ```
-which guarantees ``\Vert\mathcal{d}\Vert=1`` for rotations that satisfy ``\mathbf{\theta}^2 = \theta_1^2 + \theta_2^2`` . This formulation is also limited by a singularity in the Rodrigue parametrization for ``\theta=\pi`` rotations. This could be solved with quarterion parametrization, but in practice, an updated Lagrange formation can be used to enforce ``\theta<\phi``.
+which guarantees ``\Vert\mathcal{d}\Vert=1`` for rotations that satisfy ``\mathbf{\theta}^2 = \theta_1^2 + \theta_2^2`` . This formulation is also limited by a singularity in the Rodrigues parametrization for ``\theta=\pi`` rotations. This could be solved with quaternion parametrization, but in practice, an updated Lagrange formation can be used to enforce ``\theta<\phi``.
 In the following, we will keep the director variation terms general since explicit variation of the director is messy, especially here since we use a Rodrigue's parametrization.
 
 !!! info
