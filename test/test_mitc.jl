@@ -302,3 +302,97 @@ end
     w_nomitc_4 = ss_plate_center_q4(4; use_mitc=false)
     @test abs(ws_mitc[2] / w_nav - 1) < abs(w_nomitc_4 / w_nav - 1)
 end
+
+@testset "MITC locking-free convergence: t/L sweep" begin
+    # Simply-supported square plate [0,1]² under sinusoidal load q₀·sin(πx)·sin(πy).
+    # Metric: L2 norm of the transverse displacement error against the Navier exact field
+    #   w_exact(x,y) = W·sin(πx)·sin(πy),  W = q₀/(4π⁴D) + q₀/(2κGtπ²).
+    # Using L2 rather than the center value avoids the super-convergence artefact (the
+    # sinusoidal mode lies in the Q9 polynomial space, making the center deflection
+    # converge to floating-point noise by n=8 for t/L=0.01).
+    #
+    # MITC9 convergence rates at t/L=0.001 (4 mesh levels, 3 rates): ≈ 3.0 (optimal for Q9).
+    # MITC4 convergence rates at t/L=0.01 and 0.001 (4 mesh levels, 3 rates): ≈ 2.0 (optimal for Q4).
+    # Without MITC, rates collapse to ≈ 0 for thin plates (locked stiffness, solution ≈ 0).
+    E, ν, q0 = 1e4, 0.3, 1.0
+
+    navier_ref(t) = let D = E*t^3 / (12*(1-ν^2)), G = E / (2*(1+ν))
+        q0 / (4*π^4*D) + q0 / (2*(5/6)*G*t*π^2)
+    end
+
+    function ss_plate_l2err(n, t, ::Type{CT}, ip, qr; mitc_type=nothing) where CT
+        W   = navier_ref(t)
+        scv = ShellCellValues(qr, ip, ip; mitc=mitc_type)
+        mat = LinearElastic(E, ν, t)
+        n_base = getnbasefunctions(ip)
+        grid = shell_grid(generate_grid(CT, (n, n), Vec{2}((0.,0.)), Vec{2}((1.,1.))))
+        addnodeset!(grid, "boundary",
+            x -> isapprox(x[1],0.,atol=1e-10) || isapprox(x[1],1.,atol=1e-10) ||
+                 isapprox(x[2],0.,atol=1e-10) || isapprox(x[2],1.,atol=1e-10))
+        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+        K = allocate_matrix(dh); f = zeros(ndofs(dh))
+        asmb = start_assemble(K, zeros(ndofs(dh)))
+        ke = zeros(5n_base, 5n_base); re = zeros(5n_base); fe = zeros(5n_base)
+        for cell in CellIterator(dh)
+            fill!(ke, 0.); fill!(re, 0.); fill!(fe, 0.)
+            reinit!(scv, cell)
+            x   = getcoordinates(cell); u_e = zeros(5n_base)
+            membrane_tangent_RM!(ke, scv, u_e, mat)
+            bending_tangent_RM_FD!(ke, scv, u_e, mat)
+            assemble!(asmb, shelldofs(cell), ke, re)
+            for qp in 1:getnquadpoints(scv)
+                ξ = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
+                xp = sum(Ferrite.reference_shape_value(ip, ξ, I) * x[I] for I in 1:n_base)
+                q  = q0 * sin(π*xp[1]) * sin(π*xp[2])
+                for I in 1:n_base
+                    fe[5I-2] += Ferrite.reference_shape_value(ip, ξ, I) * q * dΩ
+                end
+            end
+            @views f[shelldofs(cell)] .+= fe
+        end
+        dbc = ConstraintHandler(dh)
+        add!(dbc, Dirichlet(:u, getnodeset(grid, "boundary"), x -> zeros(3), [1,2,3]))
+        close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
+        u_sol = K \ f
+        err_sq = 0.0
+        for cell in CellIterator(dh)
+            reinit!(scv, cell)
+            x   = getcoordinates(cell)
+            u_e = u_sol[shelldofs(cell)]
+            for qp in 1:getnquadpoints(scv)
+                dΩ  = scv.detJdV[qp]
+                xp  = Ferrite.spatial_coordinate(scv, qp, x)
+                w_h = Ferrite.function_value(scv, qp, u_e)[3]
+                err_sq += (w_h - W * sin(π*xp[1]) * sin(π*xp[2]))^2 * dΩ
+            end
+        end
+        sqrt(err_sq)
+    end
+
+    # MITC9 (Q9, n=2,4,8,16): rates ≥ 2.5 at t/L=0.001.
+    # At t/L=0.01 MITC9 reaches near-machine-precision error by n=8 (the element is
+    # that accurate), so only the anti-locking comparison is checked there.
+    let ip9 = Lagrange{RefQuadrilateral,2}(), qr9 = QuadratureRule{RefQuadrilateral}(4)
+        errs_mitc = [ss_plate_l2err(n, 0.001, QuadraticQuadrilateral, ip9, qr9; mitc_type=MITC9) for n in [2, 4, 8, 16]]
+        rates_mitc = [log2(errs_mitc[i] / errs_mitc[i+1]) for i in 1:3]
+        @test all(r -> r >= 2.5, rates_mitc)
+
+        for t in [0.01, 0.001]
+            err_mitc   = ss_plate_l2err(4, t, QuadraticQuadrilateral, ip9, qr9; mitc_type=MITC9)
+            err_nomitc = ss_plate_l2err(4, t, QuadraticQuadrilateral, ip9, qr9)
+            @test err_mitc < err_nomitc / 5    # MITC9 must be at least 5× more accurate
+        end
+    end
+
+    # MITC4 (Q4, n=4,8,16,32): rates ≥ 1.5 for both t/L=0.01 and t/L=0.001.
+    # No-MITC Q4 is almost entirely locked (error ≈ solution magnitude) for both thicknesses.
+    let ip4 = Lagrange{RefQuadrilateral,1}(), qr4 = QuadratureRule{RefQuadrilateral}(3)
+        for t in [0.01, 0.001]
+            errs_mitc   = [ss_plate_l2err(n, t, Quadrilateral, ip4, qr4; mitc_type=MITC4) for n in [4, 8, 16, 32]]
+            errs_nomitc = [ss_plate_l2err(n, t, Quadrilateral, ip4, qr4) for n in [4, 8, 16, 32]]
+            rates_mitc  = [log2(errs_mitc[i] / errs_mitc[i+1]) for i in 1:3]
+            @test all(r -> r >= 1.5, rates_mitc)
+            @test errs_mitc[end] < errs_nomitc[end] / 5   # MITC4 at least 5× more accurate at finest mesh
+        end
+    end
+end
