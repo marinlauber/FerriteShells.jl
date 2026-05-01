@@ -43,6 +43,9 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure,
     T₁       :: Vector{Vec{3, T}}
     T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
+    G₃_elem  :: Vector{Vec{3, T}}   # element-centroid frame (length 1) — shared by all QPs
+    T₁_elem  :: Vector{Vec{3, T}}
+    T₂_elem  :: Vector{Vec{3, T}}
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
 end
 
@@ -73,19 +76,14 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
     m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
     ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, E, typeof(m)}(
         qr, ip_geo, ip_shape,
-        N, dNdξ, d2Ndξ2,
-        zeros(T, n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(Vec{3, T}), n_qp),
-        fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
-        m
+        N, dNdξ, d2Ndξ2, zeros(T, n_qp),
+        fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
+        fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
+        fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
+        fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
+        fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
+        fill(zero(Vec{3, T}), 1), fill(zero(Vec{3, T}), 1),
+        fill(zero(Vec{3, T}), 1), m
     )
 end
 
@@ -174,5 +172,27 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃[q]       = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
         scv.B[q]        = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
-    reinit!(scv.mitc, scv.ip_geo, x)
+    # Centroid frame — single consistent director frame for the whole element.
+    # T₁_c is chosen by Gram-Schmidt projection of a global reference vector (ê_x) onto
+    # the element tangent plane. For flat shells this gives T₁_c = ê_x and T₂_c = ê_y
+    # for every element regardless of shape, eliminating both within-element (QP-to-QP)
+    # and inter-element (shared-node) frame inconsistency.
+    ξ_c  = reference_centroid(scv.ip_geo)
+    A₁_c = zero(Vec{3,Float64}); A₂_c = zero(Vec{3,Float64})
+    for i in 1:n_geo
+        dN, _ = Ferrite.reference_shape_gradient_and_value(scv.ip_geo, ξ_c, i)
+        A₁_c += x[i] * dN[1]; A₂_c += x[i] * dN[2]
+    end
+    n_c  = A₁_c × A₂_c
+    G₃_c = n_c / norm(n_c)
+    ref  = abs(G₃_c[1]) < 0.9 ? Vec{3}((1.,0.,0.)) : Vec{3}((0.,1.,0.))
+    t₁   = ref - (ref ⋅ G₃_c) * G₃_c
+    T₁_c = t₁ / norm(t₁)
+    T₂_c = G₃_c × T₁_c
+    scv.G₃_elem[1] = G₃_c; scv.T₁_elem[1] = T₁_c; scv.T₂_elem[1] = T₂_c
+    reinit!(scv.mitc, scv.ip_geo, x, G₃_c, T₁_c, T₂_c)
 end
+
+# compute the centroid coordinates for different element topologies
+@inline reference_centroid(::Interpolation{RefQuadrilateral}) = Vec{2}((0.0, 0.0))
+@inline reference_centroid(::Interpolation{RefTriangle})      = Vec{2}((1/3, 1/3))
