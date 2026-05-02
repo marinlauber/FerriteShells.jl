@@ -281,7 +281,6 @@ Returns:
 """
 function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
 
     Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
     for I in 1:n_nodes
@@ -294,14 +293,15 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     E = membrane_strain(a₁, a₂, scv.A_metric[qp])
 
-    d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes, G₃, T₁, T₂)
+    d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
 
     κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
 
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
-    γ₁ -= dot(scv.A₁[qp], G₃)
-    γ₂ -= dot(scv.A₂[qp], G₃)
+    d₀  = reference_director(scv, qp, n_nodes)
+    γ₁ -= dot(scv.A₁[qp], d₀)
+    γ₂ -= dot(scv.A₂[qp], d₀)
 
     return E, κ, Vec{2,T}((γ₁, γ₂))
 end
@@ -315,3 +315,71 @@ stress tensors to VTK (ParaView expects 6-component symmetric tensors).
 """
 @inline embed23(S::SymmetricTensor{2,2,T}) where T =
     SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
+
+"""
+    NodeFrames
+
+Per-node area-weighted averaged director frames for a shell mesh. Eliminates the
+O(h/R) inter-element frame inconsistency that occurs when adjacent curved-shell
+elements each derive their own centroid frame.
+
+Construct via `NodeFrames(grid, ip_geo)`. Pass to `reinit!(scv, x, nf, node_ids)`
+instead of the plain `reinit!(scv, x)` to activate per-node frames.
+
+For flat shells the result is identical to the centroid-frame approach.
+"""
+struct NodeFrames
+    G₃ :: Vector{Vec{3,Float64}}
+    T₁ :: Vector{Vec{3,Float64}}
+    T₂ :: Vector{Vec{3,Float64}}
+end
+
+function NodeFrames(grid::Grid, ip_geo::Interpolation)
+    n_nodes = getnnodes(grid)
+    G₃_sum  = fill(zero(Vec{3,Float64}), n_nodes)
+
+    for cellid in 1:getncells(grid)
+        cell     = getcells(grid, cellid)
+        node_ids = collect(cell.nodes)
+        x        = [grid.nodes[nid].x for nid in node_ids]
+        ξ_c      = reference_centroid(ip_geo)
+        A₁ = zero(Vec{3,Float64}); A₂ = zero(Vec{3,Float64})
+        n_geo = getnbasefunctions(ip_geo)
+        for i in 1:n_geo
+            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_c, i)
+            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
+        end
+        n_vec = A₁ × A₂
+        area  = norm(n_vec)
+        G₃_c  = n_vec / area
+        for nid in node_ids
+            G₃_sum[nid] += area * G₃_c
+        end
+    end
+
+    G₃ = Vector{Vec{3,Float64}}(undef, n_nodes)
+    T₁ = Vector{Vec{3,Float64}}(undef, n_nodes)
+    T₂ = Vector{Vec{3,Float64}}(undef, n_nodes)
+    for i in 1:n_nodes
+        g      = G₃_sum[i]
+        g_norm = norm(g)
+        g_norm < 1e-14 && continue
+        G₃[i] = g / g_norm
+        ref    = abs(G₃[i][1]) < 0.9 ? Vec{3}((1.,0.,0.)) : Vec{3}((0.,1.,0.))
+        t₁     = ref - (ref ⋅ G₃[i]) * G₃[i]
+        T₁[i]  = t₁ / norm(t₁)
+        T₂[i]  = G₃[i] × T₁[i]
+    end
+    NodeFrames(G₃, T₁, T₂)
+end
+
+function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
+    reinit!(scv, x)
+    n_geo = getnbasefunctions(scv.ip_geo)
+    for I in 1:n_geo
+        scv.G₃_elem[I] = nf.G₃[node_ids[I]]
+        scv.T₁_elem[I] = nf.T₁[node_ids[I]]
+        scv.T₂_elem[I] = nf.T₂[node_ids[I]]
+    end
+    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
+end

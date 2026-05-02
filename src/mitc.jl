@@ -22,6 +22,9 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     A₁_tie_2 :: Vector{Vec{3,T}}; A₂_tie_2 :: Vector{Vec{3,T}}  # ref geometry at γ₂ tying pts
     G₃_tie_2 :: Vector{Vec{3,T}}; T₁_tie_2 :: Vector{Vec{3,T}}; T₂_tie_2 :: Vector{Vec{3,T}}
     ξ_tie_1::Vector{Vec{2,T}};  ξ_tie_2::Vector{Vec{2,T}} # local coorindates of the tying points
+    G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
+    T₁_node :: Vector{Vec{3,T}}
+    T₂_node :: Vector{Vec{3,T}}
 end
 function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) where N
     n_shape = getnbasefunctions(ip_shape)
@@ -48,6 +51,7 @@ function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) 
         fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
         fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
         ξ_tie_1, ξ_tie_2,
+        fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N),
     )
 end
 
@@ -66,25 +70,38 @@ reinit!
 
 reinit!(::NoMITC, args...) = nothing
 function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}},
-                 G₃_c::Vec{3}, T₁_c::Vec{3}, T₂_c::Vec{3}) where {N,M,T}
+                 G₃_nodes::AbstractVector{<:Vec{3}}, T₁_nodes::AbstractVector{<:Vec{3}}, T₂_nodes::AbstractVector{<:Vec{3}}) where {N,M,T}
     n_geo = getnbasefunctions(ip_geo)
+    for I in 1:N
+        mitc.G₃_node[I] = G₃_nodes[I]
+        mitc.T₁_node[I] = T₁_nodes[I]
+        mitc.T₂_node[I] = T₂_nodes[I]
+    end
     for (k, ξ_k) in enumerate(mitc.ξ_tie_1)
-        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
+        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
         for i in 1:n_geo
             dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
+            G₃_avg += Ferrite.reference_shape_value(ip_geo, ξ_k, i) * G₃_nodes[i]
         end
+        G₃_k = G₃_avg / norm(G₃_avg)
+        ref = abs(G₃_k[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
+        t₁ = ref - (ref ⋅ G₃_k) * G₃_k; T₁_k = t₁ / norm(t₁); T₂_k = G₃_k × T₁_k
         mitc.A₁_tie_1[k] = A₁; mitc.A₂_tie_1[k] = A₂
-        mitc.G₃_tie_1[k] = G₃_c; mitc.T₁_tie_1[k] = T₁_c; mitc.T₂_tie_1[k] = T₂_c
+        mitc.G₃_tie_1[k] = G₃_k; mitc.T₁_tie_1[k] = T₁_k; mitc.T₂_tie_1[k] = T₂_k
     end
     for (k, ξ_k) in enumerate(mitc.ξ_tie_2)
-        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
+        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
         for i in 1:n_geo
             dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
+            G₃_avg += Ferrite.reference_shape_value(ip_geo, ξ_k, i) * G₃_nodes[i]
         end
+        G₃_k = G₃_avg / norm(G₃_avg)
+        ref = abs(G₃_k[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
+        t₁ = ref - (ref ⋅ G₃_k) * G₃_k; T₁_k = t₁ / norm(t₁); T₂_k = G₃_k × T₁_k
         mitc.A₁_tie_2[k] = A₁; mitc.A₂_tie_2[k] = A₂
-        mitc.G₃_tie_2[k] = G₃_c; mitc.T₁_tie_2[k] = T₁_c; mitc.T₂_tie_2[k] = T₂_c
+        mitc.G₃_tie_2[k] = G₃_k; mitc.T₁_tie_2[k] = T₁_k; mitc.T₂_tie_2[k] = T₂_k
     end
 end
 
@@ -102,26 +119,26 @@ Call once before the quadrature-point loop and pass to `shear_strains`.
 """
 function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
     γ₁_k = ntuple(Val(M)) do k
-        G₃_k = mitc.G₃_tie_1[k]; T₁_k = mitc.T₁_tie_1[k]; T₂_k = mitc.T₂_tie_1[k]
         Δa₁ = zero(Vec{3,T}); d_k = zero(Vec{3,T})
         for I in 1:N
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * mitc.dNdξ_tie_1[I,k][1]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            d_k += mitc.N_tie_1[I,k] * (cosθ*G₃_k + sincθ*(φ₁*T₁_k + φ₂*T₂_k))
+            G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
+            d_k += mitc.N_tie_1[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
         dot(mitc.A₁_tie_1[k] + Δa₁, d_k) - dot(mitc.A₁_tie_1[k], mitc.G₃_tie_1[k])
     end
     γ₂_k = ntuple(Val(M)) do k
-        G₃_k = mitc.G₃_tie_2[k]; T₁_k = mitc.T₁_tie_2[k]; T₂_k = mitc.T₂_tie_2[k]
         Δa₂ = zero(Vec{3,T}); d_k = zero(Vec{3,T})
         for I in 1:N
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₂ += u_I * mitc.dNdξ_tie_2[I,k][2]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            d_k += mitc.N_tie_2[I,k] * (cosθ*G₃_k + sincθ*(φ₁*T₁_k + φ₂*T₂_k))
+            G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
+            d_k += mitc.N_tie_2[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
         dot(mitc.A₂_tie_2[k] + Δa₂, d_k) - dot(mitc.A₂_tie_2[k], mitc.G₃_tie_2[k])
     end
