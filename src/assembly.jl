@@ -184,10 +184,22 @@ function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     return W
 end
 
+"""
+    bending_residuals_KL!(re, scv, u_e, mat)
+
+Kirchhoff–Love bending residual via `ForwardDiff.gradient` of [`bending_energy_KL`](@ref).
+`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+"""
 function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
 end
 
+"""
+    bending_tangent_KL!(ke, scv, u_e, mat)
+
+Kirchhoff–Love bending tangent via `ForwardDiff.hessian` of [`bending_energy_KL`](@ref).
+`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+"""
 function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> bending_energy_KL(u, scv, mat), u_e)
 end
@@ -299,8 +311,8 @@ end # 19.969 μs (0 allocations: 0 bytes) on a 45x45 matrix (50x speedup)
 Reissner–Mindlin bending + transverse shear strain energy.
 DOF layout: 5 DOFs per node — [``u_1``,``u_2``,``u_3``, ``\\varphi_1``, ``\\varphi_2``, ``\\cdots``] (flat vector of length 5·`n_nodes`).
 
-Director: ``d_I = G_3 + \\varphi_{1,I} T_1 + \\varphi_{2,I} T_2`` where ``G_3`` is the reference unit normal
-and ``T_1``, ``T_2`` are reference tangents from `scv`.
+Director (Rodrigues parametrization): ``d_I = \\cos\\|\\boldsymbol{\\varphi}_I\\|\\,G_{3,I} + \\mathrm{sinc}\\|\\boldsymbol{\\varphi}_I\\|(\\varphi_{1,I} T_{1,I} + \\varphi_{2,I} T_{2,I})``,
+where ``G_{3,I}``, ``T_{1,I}``, ``T_{2,I}`` are the per-node reference frame vectors stored in `scv`.
 
 Bending strain: ``\\kappa_{\\alpha\\beta} = \\frac{1}{2}(a_\\alpha \\cdot d_{,\\beta} + a_\\beta \\cdot d_{,\\alpha}) - B_{\\alpha\\beta}``
 

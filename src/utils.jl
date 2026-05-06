@@ -318,13 +318,22 @@ stress tensors to VTK (ParaView expects 6-component symmetric tensors).
 
 """
     NodeFrames
+    NodeFrames(grid, ip_geo)
 
 Per-node area-weighted averaged director frames for a shell mesh. Eliminates the
 O(h/R) inter-element frame inconsistency that occurs when adjacent curved-shell
-elements each derive their own centroid frame.
+elements each derive their own centroid frame: each element computes a slightly
+different normal at a shared node, making the rotation DOF interpretation inconsistent.
 
-Construct via `NodeFrames(grid, ip_geo)`. Pass to `reinit!(scv, x, nf, node_ids)`
-instead of the plain `reinit!(scv, x)` to activate per-node frames.
+`NodeFrames(grid, ip_geo)` constructs the frames by accumulating area-weighted element
+normals at each node and then orthonormalising via Gram-Schmidt.
+
+Usage: pass to [`reinit!`](@ref) instead of the plain `reinit!(scv, cell)`:
+```julia
+nf = NodeFrames(grid, ip)
+# inside cell loop:
+reinit!(scv, getcoordinates(cell), nf, collect(getnodes(cell)))
+```
 
 For flat shells the result is identical to the centroid-frame approach.
 """

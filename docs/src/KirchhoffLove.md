@@ -6,7 +6,7 @@
 <img src="./images/shell_kinematic.png" style="background-color:white;" />
 ```
 
-The Kirchhoff-Love kinematic assumption prevents transverse shear strain by constraining the cross-section to remain normal the the shell's midsurface during deformation.
+The Kirchhoff-Love kinematic assumption prevents transverse shear strain by constraining the cross-section to remain normal to the shell's midsurface during deformation.
 ```math
 \Phi(\xi^1,\xi^2,\xi^3) = \phi(\xi^1,\xi^2) + \xi^3\hat{\mathbf{a}}_3(\xi^1,\xi^2)
 ```
@@ -91,41 +91,32 @@ This can be used to transform the variation of the normal vector into a variatio
 Where the contravariant basis can be obtained as ``\mathbf{a}^\gamma = a^{\gamma\delta}\mathbf{a}_\delta=[a_{\gamma\delta}]^{-1}\mathbf{a}_\delta``. Combining these term together, we arrive at the variational problem for the Kirchhoff-Love shell
 ```math
 \begin{split}
-\delta\mathcal{W}_\text{int} =& \int_\omega \mathbb{N}^{\alpha\beta} \frac{1}{2}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta + \mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right) + \\
-& \mathbb{M}^{\alpha\beta}\left[\left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right] \, \sqrt{a}\,\mathrm{d}y
+\delta\mathcal{W}_\text{int} =& \int_\omega N^{\alpha\beta} \frac{1}{2}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta + \mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right) + \\
+& M^{\alpha\beta}\left[\left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right] \, \sqrt{a}\,\mathrm{d}y
 \end{split}
 ```
-where we have substituted ``\mathbb{N}^{\alpha\beta} = \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta}`` and ``\mathbb{M}^{\alpha\beta}=\frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta}``, the membrane and bending stress resultant, respectively. Since this is a symmetric tensor, we ``\mathbb{N}^{\alpha\beta}=\mathbb{N}^{\beta\alpha}`` which simplifies our expression to
+where we have substituted ``N^{\alpha\beta} = \mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta}`` and ``M^{\alpha\beta}=\frac{t^3}{12} \mathbb{C}^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta}``, the membrane force and bending moment resultants, respectively. Since ``N^{\alpha\beta}=N^{\beta\alpha}`` (by the symmetry of ``\mathbb{C}``), this simplifies to
 ```math
-\delta\mathcal{W}_\text{int} = \int_\omega \mathbb{N}^{\alpha\beta}(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta) + \mathbb{M}^{\alpha\beta}\left[\left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right] \sqrt{a}\,\mathrm{d}y.
+\delta\mathcal{W}_\text{int} = \int_\omega N^{\alpha\beta}(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta) + M^{\alpha\beta}\left[\left(\hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\gamma}\right)\mathbf{a}^\gamma\cdot\mathbf{a}_{\alpha,\beta} - \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right] \sqrt{a}\,\mathrm{d}y.
 ```
 
 ### 2.2 Consistent tangent and second variation
 
 The consistent tangent is obtained by taking the second variation of the internal energy, which gives us
 ```math
-\delta\delta\mathcal{W}_\text{int} = \int_\omega \delta\left[\mathbb{N}^{\alpha\beta}(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta)\right] + \delta\left[\mathbb{M}^{\alpha\beta}\left(\delta\hat{\mathbf{a}}_3\cdot\mathbf{a}_{\alpha,\beta}+ \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right)\right] \sqrt{a}\,\mathrm{d}y
+\delta\delta\mathcal{W}_\text{int} = \int_\omega \delta\left[N^{\alpha\beta}(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta)\right] + \delta\left[M^{\alpha\beta}\left(\delta\hat{\mathbf{a}}_3\cdot\mathbf{a}_{\alpha,\beta}+ \hat{\mathbf{a}}_3\cdot\delta\mathbf{a}_{\alpha,\beta}\right)\right] \sqrt{a}\,\mathrm{d}y
 ```
-The second variation of the first term can de decomposed as
+The second variation of the membrane term decomposes as
 ```math
-\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right) + \mathbb{N}^{\alpha\beta}\left(\delta\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta + \delta\mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right)
+\delta\left[N^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta N^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right) + N^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\delta\mathbf{a}_\beta \right)
 ```
-since the variation of the variation is zero, we get
+where ``\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta`` is first-order in ``\delta\mathbf{u}``, so ``\delta\delta\mathbf{a}_\alpha = 0`` at fixed ``\mathbf{a}_\alpha`` (the linearisation point). Substituting ``N^{\alpha\beta}=\mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta}`` and the expression for ``\delta\gamma_{\gamma\delta}`` from Section 2.1, and using the minor symmetry ``\mathbb{C}^{\alpha\beta\gamma\delta}=\mathbb{C}^{\alpha\beta\delta\gamma}``, the membrane tangent becomes
 ```math
-\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\delta\mathbb{N}^{\alpha\beta}\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right)
+\delta\left[N^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\delta\mathbf{a}_\gamma\cdot\mathbf{a}_\delta)\mathbf{a}_\beta + N^{\alpha\beta}\delta\mathbf{a}_\beta \right).
 ```
-The first term (**material stiffness**) can be obtain by substituting ``\mathbb{N}^{\alpha\beta}=\mathbb{C}^{\alpha\beta\gamma\delta}\gamma_{\gamma\delta}``
-```math
-\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}\delta\gamma_{\gamma\delta}\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right)
-```
-the variation of ``\delta\gamma_{\gamma\delta}`` is available from the first variation (see above), and using the minor symmetries of ``\mathbb{C}^{\alpha\beta\gamma\delta}=\mathbb{C}^{\alpha\beta\delta\gamma}``, we can combine the two terms in the parenthesis
-```math
-\delta\left[\mathbb{N}^{\alpha\beta}\left(\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\right)\right] = \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\delta\mathbf{a}_\gamma\cdot\mathbf{a}_\delta)\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right).
-```
+The first inner term is the **material stiffness** (depends on ``\mathbb{C}``); the second is the **geometric stiffness** (depends on the current stress resultant ``N^{\alpha\beta}``).
 
-The bending term is more involved.
+The bending contribution follows analogously but is considerably more involved because the second variation of ``\hat{\mathbf{a}}_3`` introduces third-order terms in ``\mathbf{a}_\alpha``. In practice the bending residual and tangent are computed via automatic differentiation of [`bending_energy_KL`](@ref) using ForwardDiff.jl, which avoids the need for the explicit second variation.
 
-Subtituting these two final terms back into the second variation, we get
-```math
-\delta\delta\mathcal{W}_\text{int} = \int_\omega \delta\mathbf{a}_\alpha\left(\mathbb{C}^{\alpha\beta\gamma\delta}(\delta\mathbf{a}_\gamma\cdot\mathbf{a}_\delta)\mathbf{a}_\beta + \mathbb{N}^{\alpha\beta}\delta\mathbf{a}_\beta \right) + \delta\left[...\right] \sqrt{a}\,\mathrm{d}y.
-```
+!!! note
+    Because the Kirchhoff-Love formulation requires C¹ continuity between elements (the bending energy depends on second derivatives of the displacement field), standard C⁰ Lagrange elements are not strictly conforming. In FerriteShells the `_KL` functions use C⁰ quadratic elements (Q9), which are conforming for membrane but only approximately so for bending. In practice this works well for flat or mildly curved shells, but KL on strongly curved geometries requires C¹ or subdivision elements.

@@ -38,7 +38,7 @@ which allows to transform covariant quantities into their contravariant form
 
 The Green-Lagrange strain tensor is given by half the increment in the metric tensor [chapelle2011](@citet)
 ```math
-e_{ij} = \frac{1}{2}\left(g_{ij} - G_{ji}\right).
+e_{ij} = \frac{1}{2}\left(g_{ij} - G_{ij}\right).
 ```
 where ``g_{i,j}`` and ``G_{ij}`` are the metric tensor in the current and in the reference configuration, respectively.
 Another form can be obtained by subsituting the definition of ``g_{ij}`` and ``G_{i,j}`` to get
@@ -55,7 +55,7 @@ where we can substitute the displacement field for the mapping in the current co
 ```
 dropping the ``(\xi^1,\xi^2,\xi^3)`` terms for brevity, we get
 ```math
-e_{ij} = \frac{1}{2}\left(\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right)\cdot\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right) - \frac{\partial\Phi^0}{\partial\xi^i}\cdot\frac{\partial\Phi^0}{\partial\xi^j}\right)
+e_{ij} = \frac{1}{2}\left(\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right)\cdot\left(\frac{\partial\Phi^0}{\partial\xi^j}+\frac{\partial\mathbf{u}}{\partial\xi^j}\right) - \frac{\partial\Phi^0}{\partial\xi^i}\cdot\frac{\partial\Phi^0}{\partial\xi^j}\right)
 ```
 expanding the first term and cancelling the last contribution with the first expansion, we get
 ```math

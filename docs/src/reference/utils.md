@@ -3,7 +3,7 @@ CurrentModule = FerriteShells
 DocTestSetup = :(using FerriteShells)
 ```
 
-Utility function
+Utility functions
 
 ```@docs
 shell_grid
@@ -13,4 +13,5 @@ volume_gradient!
 director_field
 shell_strains
 embed23
+NodeFrames
 ```
