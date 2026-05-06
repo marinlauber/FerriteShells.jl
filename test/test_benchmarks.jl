@@ -113,9 +113,9 @@ function pinched_cylinder_rm_solve_test(ns, na)
     add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_axial"),   x -> 0.0,      [1]))
     add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta0"),  x -> 0.0,      [2]))
     add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta90"), x -> 0.0,      [3]))
-    add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta0"),  x -> 0.0, [1]))
-    add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta90"), x -> 0.0, [1]))
-    add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_axial"),   x -> 0.0, [2]))
+    add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta0"),  x -> 0.0, [2]))
+    add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta90"), x -> 0.0, [2]))
+    add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_axial"),   x -> 0.0, [1]))
     close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
     u_sol = K \ f
 

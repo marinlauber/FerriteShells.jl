@@ -267,3 +267,51 @@ function director_field(dh::DofHandler, scv::ShellCellValues, u)
     end
     return d_sum, G3_sum
 end
+
+"""
+    shell_strains(scv, qp, u_e) -> (E, κ, γ)
+
+Compute all three RM shell strain measures at quadrature point `qp` from a flat
+5-DOF/node element vector `u_e = [u₁,u₂,u₃,φ₁,φ₂, …]`.
+
+Returns:
+- `E :: SymmetricTensor{2,2}` — membrane strain, Green–Lagrange: Eαβ = ½(aα·aβ − Aα·Aβ)
+- `κ :: SymmetricTensor{2,2}` — bending curvature change: καβ = ½(aα·d,β + aβ·d,α) − Bαβ
+- `γ :: Vec{2}` — transverse shear strain: γα = aα·d − Aα·G₃ (MITC-corrected if applicable)
+"""
+function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
+
+    Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+    for I in 1:n_nodes
+        u_I  = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+        Δa₁ += u_I * scv.dNdξ[I, qp][1]
+        Δa₂ += u_I * scv.dNdξ[I, qp][2]
+    end
+    a₁ = scv.A₁[qp] + Δa₁
+    a₂ = scv.A₂[qp] + Δa₂
+
+    E = membrane_strain(a₁, a₂, scv.A_metric[qp])
+
+    d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes, G₃, T₁, T₂)
+
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
+    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+    γ₁ -= dot(scv.A₁[qp], G₃)
+    γ₂ -= dot(scv.A₂[qp], G₃)
+
+    return E, κ, Vec{2,T}((γ₁, γ₂))
+end
+
+"""
+    embed23(S) -> SymmetricTensor{2,3}
+
+Embed a surface `SymmetricTensor{2,2}` into a 3D symmetric tensor by padding
+the out-of-plane rows/columns with zeros. Useful for writing shell strain or
+stress tensors to VTK (ParaView expects 6-component symmetric tensors).
+"""
+@inline embed23(S::SymmetricTensor{2,2,T}) where T =
+    SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
