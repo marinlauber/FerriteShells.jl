@@ -33,7 +33,7 @@ We refer the reader to the documentation for the specific weak form, numerical i
 
 ### `ShellCellValues`
 
-Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinate system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor $\mathbf{E}$ of the elasticity tensor $\mathbb{C}$, change.
+Shells specialize the classical weak form obtained in continuum mechanics to a curvilinear coordinate system located on the shell's midsurface. As a result, classical continuum mechanics quantities, such as the Green–Lagrange strain tensor and the elasticity tensor, change their form.
 
 To help assemble these specific surface metrics, this package uses a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but additionally holds covariant basis vectors, metric tensors, and surface Jacobian at the integration points, which are used in the assembly of the different terms of the different formulations.
 
@@ -56,9 +56,9 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
 end
 ```
 
-Calling `reinit!(scv::ShellCellValues)` computes the fixed covariant basis vectors $\mathbf{A}_1$ and $\mathbf{A}_2$ from the geometry of the shell's midsurface, while the current covariant basis vectors $\mathbf{a}_1$ and $\mathbf{a}_2$ are computed from the current configuration of the shell. The metric tensors $\mathbf{A}_{\alpha\beta}$ and $\mathbf{a}_{\alpha\beta}$ are then obtained as the inner product of the corresponding covariant basis vectors.
+Calling `reinit!(scv::ShellCellValues)` computes the reference covariant basis vectors **A**₁ and **A**₂ from the geometry of the shell's midsurface, while the current covariant basis vectors **a**₁ and **a**₂ are computed from the current configuration of the shell. The reference and current metric tensors are then obtained as the inner products of the corresponding covariant basis vectors.
 
-From these surface measures and the contravariant elasticity tensor $\mathbb{C}^{\alpha\beta\gamma\delta}$, the membrane, bending and shear strains can be computed, which are used in the assembly of the different terms in the different formulations.
+From these surface measures and the contravariant elasticity tensor, the membrane, bending and shear strains can be computed, which are used in the assembly of the different terms in the different formulations.
 
 ### Global assembly
 
