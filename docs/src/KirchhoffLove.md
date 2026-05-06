@@ -2,9 +2,7 @@
 
 ## 1. Kinematics
 
-```@raw html
-<img src="./images/shell_kinematic.png" style="background-color:white;" />
-```
+![Shell kinematics](images/shell_kinematic.png)
 
 The Kirchhoff-Love kinematic assumption prevents transverse shear strain by constraining the cross-section to remain normal to the shell's midsurface during deformation.
 ```math
@@ -116,7 +114,7 @@ where ``\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta`` is first-order in ``\delt
 ```
 The first inner term is the **material stiffness** (depends on ``\mathbb{C}``); the second is the **geometric stiffness** (depends on the current stress resultant ``N^{\alpha\beta}``).
 
-The bending contribution follows analogously but is considerably more involved because the second variation of ``\hat{\mathbf{a}}_3`` introduces third-order terms in ``\mathbf{a}_\alpha``. In practice the bending residual and tangent are computed via automatic differentiation of [`bending_energy_KL`](@ref) using ForwardDiff.jl, which avoids the need for the explicit second variation.
+The bending contribution follows analogously but is considerably more involved because the second variation of ``\hat{\mathbf{a}}_3`` introduces third-order terms in ``\mathbf{a}_\alpha``. In practice the bending residual and tangent are computed via automatic differentiation of [`FerriteShells.bending_energy_KL`](@ref) using ForwardDiff.jl, which avoids the need for the explicit second variation.
 
 !!! note
     Because the Kirchhoff-Love formulation requires C¹ continuity between elements (the bending energy depends on second derivatives of the displacement field), standard C⁰ Lagrange elements are not strictly conforming. In FerriteShells the `_KL` functions use C⁰ quadratic elements (Q9), which are conforming for membrane but only approximately so for bending. In practice this works well for flat or mildly curved shells, but KL on strongly curved geometries requires C¹ or subdivision elements.

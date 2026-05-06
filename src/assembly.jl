@@ -742,7 +742,6 @@ Follower pressure residual for embedded shell elements.
 ``\\mathrm{detJdV}[q] = \\|A_1 \\times A_2\\| \\cdot w`` (reference area times quadrature weight).
 ``\\mathrm{cross}(a_1, a_2)`` has magnitude ``\\|a_1 \\times a_2\\|`` (current area per parametric area).
 """
-# Follower pressure residual
 function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)

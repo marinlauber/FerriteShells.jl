@@ -2,9 +2,7 @@
 
 ## 1. Kinematics
 
-```@raw html
-<img src="./images/shell_kinematic.png" style="background-color:white;" />
-```
+![Shell kinematics](images/shell_kinematic.png)
 
 The Reissner-Mindlin kinematic relaxes the kirchhoff-Love zero shear strain assumption through orthogonality of material lines. The shear strain measures the rotation of these material lines around the normal vector of the shell's midsurface ``\hat{\mathbf{a}}_3``
 ```math
@@ -30,20 +28,28 @@ g_{\alpha 3} &= g_{3\alpha} = (\mathbf{a}_\alpha+\xi^3\mathbf{d}_{,\alpha})\cdot
 g_{33} &= 1.
 \end{split}
 ```
-where the plane stress assumption results in ``g_{33}=1`` and the shear contributions are non-zero ``g_{3\alpha}\neq0``. As a result, the strain tensor is now
+where the plane stress assumption gives ``g_{33}=\mathbf{d}\cdot\mathbf{d}=1`` (unit director), and the shear components are non-zero. Dropping the ``O(t^2)`` term (Love-Kirchhoff strain assumption, valid for ``R_\text{min}>t/2``), the metric simplifies to
 ```math
 \begin{split}
-e_{\alpha\beta} &= \frac{1}{2}(g_{\alpha\beta} - G_{\alpha\beta})\\
-e_{\alpha3} &= \\
+g_{\alpha\beta} &\approx a_{\alpha\beta} + \xi^3(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha})\\
+g_{\alpha 3} &= g_{3\alpha} \approx \mathbf{a}_\alpha\cdot\mathbf{d}\\
+g_{33} &= 1.
+\end{split}
+```
+
+The Green-Lagrange strain components follow from ``e_{ij}=\tfrac{1}{2}(g_{ij}-G_{ij})``:
+```math
+\begin{split}
+e_{\alpha\beta} &= \underbrace{\frac{1}{2}(a_{\alpha\beta} - A_{\alpha\beta})}_{\gamma_{\alpha\beta}} + \xi^3\underbrace{\frac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) - B_{\alpha\beta}}_{\kappa_{\alpha\beta}}\\
+e_{\alpha3} &= e_{3\alpha} = \frac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d} - \mathbf{A}_\alpha\cdot\mathbf{G}_3) = \frac{1}{2}\gamma_\alpha\\
 e_{33} &= 0.
 \end{split}
 ```
 
+where ``\gamma_{\alpha\beta}`` is the membrane (in-plane) strain, ``\kappa_{\alpha\beta}`` the bending curvature change, and ``\gamma_\alpha = \mathbf{a}_\alpha\cdot\mathbf{d} - \mathbf{A}_\alpha\cdot\mathbf{G}_3`` the transverse shear strain. In the reference configuration (``\mathbf{d}=\mathbf{G}_3``, ``\mathbf{a}_\alpha=\mathbf{A}_\alpha``), all strains vanish identically.
+
 !!! note
-    Interestingly, the plane stress assumption now results in non-zero transverse strains ``e_{3\alpha}\neq0``. This is expected since shear also results in ... This component scales with the thickness squared and is usually very small. We can recover it as a post-processing step from the in-plane strain via
-    ```math
-    e_{3\alpha} = ...
-    ```
+    Unlike the Kirchhoff-Love case, the transverse shear strains ``e_{3\alpha}`` are non-zero because the director ``\mathbf{d}`` is free to rotate independently of the midsurface normal. The Kirchhoff constraint ``e_{3\alpha}=0`` can be recovered in the limit ``\mathbf{d}\to\hat{\mathbf{a}}_3``.
 
 ### 1.1 Director parametrization
 

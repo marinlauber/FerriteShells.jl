@@ -4,9 +4,7 @@ Most shells theories rely on the definition of a smooth injective immersion ``\P
 \mathbf{g}_i=\frac{\partial \Phi(\xi^1,\xi^2,\xi^3)}{\partial \xi^i}, \quad i\in 1,2,3.
 ```
 For an immersed 2D shell, where the curvilinear coordinates are obtained from an open set ``\omega\in\mathbb{R}^2``, see Figure 1. The immersion is fully characterized by two sets of equations, the **surface** metric tensor and the **curvature** tensor, both of which play an important role in shell theories.
-```@raw html
-<img src="./images/shell_kinematic_init.png" style="background-color:white" figcaption="**Figure 1**:" />
-```
+![Shell reference kinematics](images/shell_kinematic_init.png)
 The surface metric tensor ``a_{\alpha\beta}=\mathbf{a}_\alpha\cdot\mathbf{a}_\beta`` and the curvature tensor ``b_{\alpha\beta}=\hat{\mathbf{a}}_3\cdot\partial_\alpha\mathbf{a}_\beta`` are derive from the **surface** basis vectors
 ```math
 \mathbf{a}_\alpha=\frac{\partial \phi(\xi^1,\xi^2)}{\partial \xi^\alpha}, \quad \alpha\in 1,2,
