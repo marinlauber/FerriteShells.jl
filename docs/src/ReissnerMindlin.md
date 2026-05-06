@@ -28,7 +28,13 @@ g_{\alpha 3} &= g_{3\alpha} = (\mathbf{a}_\alpha+\xi^3\mathbf{d}_{,\alpha})\cdot
 g_{33} &= 1.
 \end{split}
 ```
-where the plane stress assumption gives ``g_{33}=\mathbf{d}\cdot\mathbf{d}=1`` (unit director), and the shear components are non-zero. Dropping the ``O(t^2)`` term (Love-Kirchhoff strain assumption, valid for ``R_\text{min}>t/2``), the metric simplifies to
+where the plane stress assumption gives ``g_{33}=\mathbf{d}\cdot\mathbf{d}=1`` (unit director), and the shear components are non-zero. Two simplifications are applied:
+
+**In-plane metric** ``g_{\alpha\beta}``: the ``(\xi^3)^2`` term is dropped (Love-Kirchhoff strain assumption, valid for ``R_\text{min}>t/2``).
+
+**Shear metric** ``g_{\alpha3}``: the full expression is ``\mathbf{a}_\alpha\cdot\mathbf{d} + \xi^3\mathbf{d}_{,\alpha}\cdot\mathbf{d}``. The second term vanishes for two consistent reasons. First, if ``\Vert\mathbf{d}\Vert=1`` everywhere then differentiating ``\mathbf{d}\cdot\mathbf{d}=1`` gives ``\mathbf{d}_{,\alpha}\cdot\mathbf{d}=0`` exactly (the Rodrigues director satisfies this at nodes; the interpolated director deviates by ``O(h^2)``). Second, even without a unit director, ``\xi^3\in[-t/2,t/2]`` and ``\mathbf{d}_{,\alpha}=O(1/R)``, so the term is ``O(t/R)`` — the same order as the already-dropped ``(\xi^3)^2`` correction, so consistency requires dropping it too.
+
+The simplified metric is therefore
 ```math
 \begin{split}
 g_{\alpha\beta} &\approx a_{\alpha\beta} + \xi^3(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha})\\
@@ -49,7 +55,7 @@ e_{33} &= 0.
 where ``\gamma_{\alpha\beta}`` is the membrane (in-plane) strain, ``\kappa_{\alpha\beta}`` the bending curvature change, and ``\gamma_\alpha = \mathbf{a}_\alpha\cdot\mathbf{d} - \mathbf{A}_\alpha\cdot\mathbf{G}_3`` the transverse shear strain. In the reference configuration (``\mathbf{d}=\mathbf{G}_3``, ``\mathbf{a}_\alpha=\mathbf{A}_\alpha``), all strains vanish identically.
 
 !!! note
-    Unlike the Kirchhoff-Love case, the transverse shear strains ``e_{3\alpha}`` are non-zero because the director ``\mathbf{d}`` is free to rotate independently of the midsurface normal. The Kirchhoff constraint ``e_{3\alpha}=0`` can be recovered in the limit ``\mathbf{d}\to\hat{\mathbf{a}}_3``.
+    Because ``g_{\alpha3}`` is independent of ``\xi^3``, the shear strain ``e_{3\alpha}`` is **constant through the thickness**. This is the Reissner-Mindlin assumption: the director rotates rigidly, so shear does not vary. In 3D elasticity the shear stress is parabolic; the shear correction factor ``\kappa_s=5/6`` compensates by matching the constant-strain energy to the parabolic-distribution energy of a rectangular cross-section. The Kirchhoff constraint ``e_{3\alpha}=0`` is recovered in the limit ``\mathbf{d}\to\hat{\mathbf{a}}_3``.
 
 ### 1.1 Director parametrization
 
