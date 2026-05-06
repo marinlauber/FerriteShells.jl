@@ -35,4 +35,7 @@ include("utils.jl")
 export shell_grid, shelldofs, get_ferrite_grid, compute_volume, volume_residual, volume_gradient!, director_field
 export shell_strains, embed23
 
+include("fesolvers.jl")
+export ShellProblem, ReissnerMindlinShellProblem, KirchhoffLoveShellProblem
+
 end # module FerriteShells
