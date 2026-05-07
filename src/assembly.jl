@@ -145,6 +145,31 @@ Computes the Kirchhoff–Love bending energy through the curvature change ``\\ka
 **Note:**
 To capture the full curvature change ``\\kappa``, quadratic elements are required (linear element only captures twist ``\\kappa_{12}``).
 """
+# Per-QP bending energy for KL, dispatched on material type.
+# For LinearElastic: ½ κ:D:κ  (D evaluated at reference metric — safe, A_metric is plain Float64).
+# For HyperelasticShell: 3-point through-thickness Gauss quadrature of W_membrane(c_ms + 2ξ₃κ),
+#   avoiding nested ForwardDiff that contravariant_bending_stiffness would trigger inside gradient.
+@inline bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric) =
+    0.5 * (κ ⊡ contravariant_bending_stiffness(mat, A_metric) ⊡ κ)
+
+@inline function bending_kl_qp_energy(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T},
+                                      κ, A_metric) where T
+    ξ3s, w3s = _gauss3_thickness(mat.thickness)
+    W = zero(T)
+    for (ξ3, w3) in zip(ξ3s, w3s)
+        W += W_membrane(mat, c_ms + 2*ξ3*κ) * w3
+    end
+    return W - mat.thickness * W_membrane(mat, c_ms)
+end
+
+"""
+    bending_energy_KL(u_flat, scv::ShellCellValues, mat)
+
+Kirchhoff–Love bending energy via the curvature change κ = b − B.
+Material dispatch happens at the per-QP level via `bending_kl_qp_energy`.
+
+**Note:** Quadratic elements are required to capture the full κ tensor.
+"""
 function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
@@ -154,51 +179,19 @@ function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
         a₁  = Vec{3,T}(Tuple(scv.A₁[qp]));  a₂  = Vec{3,T}(Tuple(scv.A₂[qp]))
         a₁₁ = Vec{3,T}(Tuple(scv.A₁₁[qp])); a₁₂ = Vec{3,T}(Tuple(scv.A₁₂[qp])); a₂₂ = Vec{3,T}(Tuple(scv.A₂₂[qp]))
         for I in 1:n_nodes
-            UI  = u_e[I]
-            dN  = scv.dNdξ[I, qp]
-            d2N = scv.d2Ndξ2[I, qp]
+            UI  = u_e[I]; dN  = scv.dNdξ[I, qp]; d2N = scv.d2Ndξ2[I, qp]
             a₁  += UI * dN[1];     a₂  += UI * dN[2]
             a₁₁ += UI * d2N[1,1]; a₁₂ += UI * d2N[1,2]; a₂₂ += UI * d2N[2,2]
         end
-        n_n = (a₁ × a₂) / norm(a₁ × a₂)
-        b   = SymmetricTensor{2,2,T}((dot(a₁₁,n_n), dot(a₁₂,n_n), dot(a₂₂,n_n)))
-        κ   = b - scv.B[qp]
-        D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
-        W  += 0.5 * (κ ⊡ D ⊡ κ) * scv.detJdV[qp]
+        n_n  = (a₁ × a₂) / norm(a₁ × a₂)
+        b    = SymmetricTensor{2,2,T}((dot(a₁₁,n_n), dot(a₁₂,n_n), dot(a₂₂,n_n)))
+        κ    = b - scv.B[qp]
+        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        W   += bending_kl_qp_energy(mat, c_ms, κ, scv.A_metric[qp]) * scv.detJdV[qp]
     end
     return W
 end
 
-# HyperelasticShell dispatch: through-thickness Gauss quadrature on W_membrane(c_ms + 2ξ₃κ).
-# Avoids the nested ForwardDiff that would arise if contravariant_bending_stiffness (which
-# calls Tensors.hessian internally) were invoked inside an outer ForwardDiff.gradient pass.
-# The bending energy is ∫W dξ₃ − t·W_mem(c_ms); shear is absent in KL.
-function bending_energy_KL(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    u_e     = [Vec{3,T}((u_flat[3i-2], u_flat[3i-1], u_flat[3i])) for i in 1:n_nodes]
-    W       = zero(T)
-    ξ3s, w3s = _gauss3_thickness(mat.thickness)
-    for qp in 1:getnquadpoints(scv)
-        a₁  = Vec{3,T}(Tuple(scv.A₁[qp]));  a₂  = Vec{3,T}(Tuple(scv.A₂[qp]))
-        a₁₁ = Vec{3,T}(Tuple(scv.A₁₁[qp])); a₁₂ = Vec{3,T}(Tuple(scv.A₁₂[qp])); a₂₂ = Vec{3,T}(Tuple(scv.A₂₂[qp]))
-        for I in 1:n_nodes
-            UI = u_e[I]; dN = scv.dNdξ[I, qp]; d2N = scv.d2Ndξ2[I, qp]
-            a₁ += UI * dN[1];     a₂ += UI * dN[2]
-            a₁₁ += UI * d2N[1,1]; a₁₂ += UI * d2N[1,2]; a₂₂ += UI * d2N[2,2]
-        end
-        n_n = (a₁ × a₂) / norm(a₁ × a₂)
-        b   = SymmetricTensor{2,2,T}((dot(a₁₁,n_n), dot(a₁₂,n_n), dot(a₂₂,n_n)))
-        κ   = b - scv.B[qp]
-        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        W_quad = zero(T)
-        for (ξ3, w3) in zip(ξ3s, w3s)
-            W_quad += _W_membrane(mat, c_ms + 2*ξ3*κ) * w3
-        end
-        W += (W_quad - mat.thickness * _W_membrane(mat, c_ms)) * scv.detJdV[qp]
-    end
-    return W
-end
 
 function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
@@ -231,48 +224,45 @@ function membrane_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}
 end
 
 
+# Per-QP strain energy density for the RM element, dispatched on material type.
+# LinearElastic: closed-form quadratic forms with κ_s = 5/6 shear correction.
+# HyperelasticShell: 3-point through-thickness Gauss quadrature of W(C(ξ₃)).
+@inline function rm_qp_energy(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
+                              κ, γ₁, γ₂, A_metric) where T
+    E   = (c_ms - A_metric) / 2
+    C   = contravariant_elasticity(mat, A_metric)
+    D   = contravariant_bending_stiffness(mat, A_metric)
+    Aup = inv(A_metric)
+    cs  = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    return 0.5*(E ⊡ C ⊡ E) + 0.5*(κ ⊡ D ⊡ κ) +
+           0.5*cs*(Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
+end
+
+@inline function rm_qp_energy(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T},
+                              κ, γ₁, γ₂, A_metric) where T
+    ξ3s, w3s = _gauss3_thickness(mat.thickness)
+    W = zero(T)
+    for (ξ3, w3) in zip(ξ3s, w3s)
+        c_ξ = c_ms + 2*ξ3*κ
+        C33 = get_C33(c_ξ, γ₁, γ₂)
+        W  += mat.W(build_C3D(c_ξ, γ₁, γ₂, C33)) * w3
+    end
+    return W
+end
+
 """
     rm_energy(u_flat, scv::ShellCellValues, mat)
 
 Total Reissner–Mindlin strain energy (membrane + bending + transverse shear) per element.
 DOF layout: 5 DOFs per node — [u₁,u₂,u₃,φ₁,φ₂,…].
-Shear correction factor κ_s = 5/6 is applied.
+Material dispatch happens at the per-QP level via `rm_qp_energy`.
 """
 function rm_energy(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
-    G_sh = mat.E / (2*(1 + mat.ν))
     G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
-    for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
-        d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
-        E   = membrane_strain(a₁, a₂, scv.A_metric[qp])
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
-        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
-        C   = contravariant_elasticity(mat, scv.A_metric[qp])
-        D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
-        Aup = inv(scv.A_metric[qp])
-        W_mem   = 0.5 * (E ⊡ C ⊡ E)
-        W_bend  = 0.5 * (κ ⊡ D ⊡ κ)
-        W_shear = 0.5 * (5.0/6.0) * G_sh * mat.thickness *
-                  (Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
-        W += (W_mem + W_bend + W_shear) * scv.detJdV[qp]
-    end
-    return W
-end
-
-# HyperelasticShell: pure through-thickness Gauss quadrature — membrane, bending and shear
-# all come from the same W(C(ξ₃)) integrand.  No awkward split/subtraction needed.
-function rm_energy(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    W = zero(T)
-    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
-    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
-    ξ3s, w3s = _gauss3_thickness(mat.thickness)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
@@ -280,11 +270,7 @@ function rm_energy(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        for (ξ3, w3) in zip(ξ3s, w3s)
-            c_ξ = c_ms + 2*ξ3*κ
-            C33 = get_C33(c_ξ, γ₁, γ₂)
-            W  += mat.W(build_C3D(c_ξ, γ₁, γ₂, C33)) * w3 * scv.detJdV[qp]
-        end
+        W += rm_qp_energy(mat, c_ms, κ, γ₁, γ₂, scv.A_metric[qp]) * scv.detJdV[qp]
     end
     return W
 end
