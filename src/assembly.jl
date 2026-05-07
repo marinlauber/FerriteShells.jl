@@ -131,6 +131,22 @@ function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     end
 end
 
+
+# Per-QP bending energy for KL, dispatched on material type.
+# For LinearElastic: ½ κ:D:κ  (D evaluated at reference metric — safe, A_metric is plain Float64).
+@inline bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric) = 0.5 * (κ ⊡ contravariant_bending_stiffness(mat, A_metric) ⊡ κ)
+
+# For HyperelasticShell: 3-point through-thickness Gauss quadrature of W_membrane(c_ms + 2ξ₃κ),
+#   avoiding nested ForwardDiff that contravariant_bending_stiffness would trigger inside gradient.
+@inline function bending_kl_qp_energy(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T}, κ, A_metric) where T
+    ξ3s, w3s = _gauss3_thickness(mat.thickness)
+    W = zero(T)
+    for (ξ3, w3) in zip(ξ3s, w3s)
+        W += W_membrane(mat, c_ms + 2*ξ3*κ) * w3
+    end
+    return W - mat.thickness * W_membrane(mat, c_ms)
+end
+
 """
     bending_energy_KL(u_flat, scv::ShellCellValues, mat)
 
@@ -144,31 +160,6 @@ Computes the Kirchhoff–Love bending energy through the curvature change ``\\ka
 
 **Note:**
 To capture the full curvature change ``\\kappa``, quadratic elements are required (linear element only captures twist ``\\kappa_{12}``).
-"""
-# Per-QP bending energy for KL, dispatched on material type.
-# For LinearElastic: ½ κ:D:κ  (D evaluated at reference metric — safe, A_metric is plain Float64).
-# For HyperelasticShell: 3-point through-thickness Gauss quadrature of W_membrane(c_ms + 2ξ₃κ),
-#   avoiding nested ForwardDiff that contravariant_bending_stiffness would trigger inside gradient.
-@inline bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric) =
-    0.5 * (κ ⊡ contravariant_bending_stiffness(mat, A_metric) ⊡ κ)
-
-@inline function bending_kl_qp_energy(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T},
-                                      κ, A_metric) where T
-    ξ3s, w3s = _gauss3_thickness(mat.thickness)
-    W = zero(T)
-    for (ξ3, w3) in zip(ξ3s, w3s)
-        W += W_membrane(mat, c_ms + 2*ξ3*κ) * w3
-    end
-    return W - mat.thickness * W_membrane(mat, c_ms)
-end
-
-"""
-    bending_energy_KL(u_flat, scv::ShellCellValues, mat)
-
-Kirchhoff–Love bending energy via the curvature change κ = b − B.
-Material dispatch happens at the per-QP level via `bending_kl_qp_energy`.
-
-**Note:** Quadratic elements are required to capture the full κ tensor.
 """
 function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
@@ -191,7 +182,6 @@ function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     end
     return W
 end
-
 
 function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
