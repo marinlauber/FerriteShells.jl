@@ -83,14 +83,12 @@ end
 # RM helpers
 function rm_residual(scv, u, mat)
     re = zeros(length(u))
-    membrane_residuals_RM!(re, scv, u, mat)
-    bending_residuals_RM_FD!(re, scv, u, mat)
+    rm_residuals_RM_FD!(re, scv, u, mat)
     re
 end
 function rm_tangent(scv, u, mat)
     ke = zeros(length(u), length(u))
-    membrane_tangent_RM!(ke, scv, u, mat)
-    bending_tangent_RM_FD!(ke, scv, u, mat)
+    rm_tangent_RM_FD!(ke, scv, u, mat)
     ke
 end
 function rm_fd_tangent(scv, u, mat; ε=1e-5)

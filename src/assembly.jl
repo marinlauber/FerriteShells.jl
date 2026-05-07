@@ -209,49 +209,6 @@ function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
 end
 
 """
-    membrane_energy_RM(u_flat, scv::ShellCellValues, mat)
-
-Reissner–Mindlin membrane strain energy.
-DOF layout: 5 DOFs per node — [``u_1``,``u_2``,``u_3``, ``\\varphi_1``, ``\\varphi_2``, ``\\cdots``] (flat vector of length 5·`n_nodes`).
-Only the displacement DOFs (indices `5I-4:5I-2``) contribute to membrane energy.
-"""
-function membrane_energy_RM(u_flat, scv::ShellCellValues, mat)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    W = zero(T)
-    for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
-        E = membrane_strain(a₁, a₂, scv.A_metric[qp])
-        C = contravariant_elasticity(mat, scv.A_metric[qp])
-        W += 0.5 * (E ⊡ C ⊡ E) * scv.detJdV[qp]
-    end
-    return W
-end
-
-# HyperelasticShell: membrane energy = t · W_mem(a_αβ), where W_mem has C₃₃ from
-# incompressibility.  No nested ForwardDiff: W_membrane is a plain scalar call.
-function membrane_energy_RM(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    W = zero(T)
-    for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
-        c = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        W += mat.thickness * W_membrane(mat, c) * scv.detJdV[qp]
-    end
-    return W
-end
-
-"""
-    membrane_residuals_RM_FD!(re, scv, u_e, mat)
-
-Reissner–Mindlin membrane residual. `u_e` is a flat vector of length 5·`n_nodes`.
-"""
-function membrane_residuals_RM_FD!(re, scv, u_e, mat)
-    re .+= ForwardDiff.gradient(u -> membrane_energy_RM(u, scv, mat), u_e)
-end
-
-"""
     membrane_residuals_RM!(re, scv, u_e, mat)
 
 RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta \\, d\\Omega``.
@@ -275,13 +232,82 @@ end
 
 
 """
-    membrane_tangent_RM_FD!(ke, scv, u_e, mat)
+    rm_energy(u_flat, scv::ShellCellValues, mat)
 
-Reissner–Mindlin membrane tangent. `u_e` is a flat vector of length 5·`n_nodes`.
+Total Reissner–Mindlin strain energy (membrane + bending + transverse shear) per element.
+DOF layout: 5 DOFs per node — [u₁,u₂,u₃,φ₁,φ₂,…].
+Shear correction factor κ_s = 5/6 is applied.
 """
-function membrane_tangent_RM_FD!(ke, scv, u_e, mat)
-    ke .+= ForwardDiff.hessian(u -> membrane_energy_RM(u, scv, mat), u_e)
-end # 1050 μs (26 allocations: 115.21 KiB) on a 45x45 matrix
+function rm_energy(u_flat, scv::ShellCellValues, mat)
+    T       = eltype(u_flat)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    W = zero(T)
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
+    G_sh = mat.E / (2*(1 + mat.ν))
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
+    for qp in 1:getnquadpoints(scv)
+        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
+        d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
+        E   = membrane_strain(a₁, a₂, scv.A_metric[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
+        C   = contravariant_elasticity(mat, scv.A_metric[qp])
+        D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
+        Aup = inv(scv.A_metric[qp])
+        W_mem   = 0.5 * (E ⊡ C ⊡ E)
+        W_bend  = 0.5 * (κ ⊡ D ⊡ κ)
+        W_shear = 0.5 * (5.0/6.0) * G_sh * mat.thickness *
+                  (Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
+        W += (W_mem + W_bend + W_shear) * scv.detJdV[qp]
+    end
+    return W
+end
+
+# HyperelasticShell: pure through-thickness Gauss quadrature — membrane, bending and shear
+# all come from the same W(C(ξ₃)) integrand.  No awkward split/subtraction needed.
+function rm_energy(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
+    T       = eltype(u_flat)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    W = zero(T)
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
+    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
+    ξ3s, w3s = _gauss3_thickness(mat.thickness)
+    for qp in 1:getnquadpoints(scv)
+        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
+        d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
+        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        for (ξ3, w3) in zip(ξ3s, w3s)
+            c_ξ = c_ms + 2*ξ3*κ
+            C33 = get_C33(c_ξ, γ₁, γ₂)
+            W  += mat.W(build_C3D(c_ξ, γ₁, γ₂, C33)) * w3 * scv.detJdV[qp]
+        end
+    end
+    return W
+end
+
+"""
+    rm_residuals_RM_FD!(re, scv, u_e, mat)
+
+Reissner–Mindlin total residual (membrane + bending + shear) via ForwardDiff.gradient of `rm_energy`.
+`u_e` is a flat vector of length 5·`n_nodes`.
+"""
+function rm_residuals_RM_FD!(re, scv, u_e, mat)
+    re .+= ForwardDiff.gradient(u -> rm_energy(u, scv, mat), u_e)
+end
+
+"""
+    rm_tangent_RM_FD!(ke, scv, u_e, mat)
+
+Reissner–Mindlin total tangent (membrane + bending + shear) via ForwardDiff.hessian of `rm_energy`.
+`u_e` is a flat vector of length 5·`n_nodes`.
+"""
+function rm_tangent_RM_FD!(ke, scv, u_e, mat)
+    ke .+= ForwardDiff.hessian(u -> rm_energy(u, scv, mat), u_e)
+end
 
 # Precompute per-QP "frame stiffness" tensors M_{\\alphaδ} = C^{\\alpha\\betaγδ} a_\\beta⊗a_γ.
 # The material tangent is then K^mat_IJ = ∂N_I^\\alpha ∂N_J^δ M_{\\alphaδ} (summed over \\alpha,δ ∈ {1,2}).
@@ -322,91 +348,12 @@ function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
     end
 end # 19.969 μs (0 allocations: 0 bytes) on a 45x45 matrix (50x speedup)
 
-"""
-    bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
-
-Reissner–Mindlin bending + transverse shear strain energy.
-DOF layout: 5 DOFs per node — [``u_1``,``u_2``,``u_3``, ``\\varphi_1``, ``\\varphi_2``, ``\\cdots``] (flat vector of length 5·`n_nodes`).
-
-Director: ``d_I = G_3 + \\varphi_{1,I} T_1 + \\varphi_{2,I} T_2`` where ``G_3`` is the reference unit normal
-and ``T_1``, ``T_2`` are reference tangents from `scv`.
-
-Bending strain: ``\\kappa_{\\alpha\\beta} = \\frac{1}{2}(a_\\alpha \\cdot d_{,\\beta} + a_\\beta \\cdot d_{,\\alpha}) - B_{\\alpha\\beta}``
-
-Transverse shear: ``\\gamma_\\alpha = a_\\alpha \\cdot d``
-
-Shear correction factor ``\\kappa_s = 5/6`` is applied.
-"""
-function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    W = zero(T)
-    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
-    G_sh = mat.E / (2*(1 + mat.ν))
-    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
-    for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
-        d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
-        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
-        D    = contravariant_bending_stiffness(mat, scv.A_metric[qp])
-        Aup  = inv(scv.A_metric[qp])
-        W_bend  = 0.5 * (κ ⊡ D ⊡ κ)
-        W_shear = 0.5 * (5.0/6.0) * G_sh * mat.thickness *
-                  (Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
-        W += (W_bend + W_shear) * scv.detJdV[qp]
-    end
-    return W
-end
-
 # 3-point Gauss-Legendre on [-t/2, t/2]: exact for polynomials up to degree 5 in ξ₃.
 @inline function _gauss3_thickness(t)
     h = t / 2; r = sqrt(3.0/5.0)
     return (-h*r, 0.0, h*r), (5.0/9.0*h, 8.0/9.0*h, 5.0/9.0*h)
 end
 
-# HyperelasticShell: bending + shear via through-thickness Gauss quadrature.
-#
-# Total energy = ∫ W(C(ξ₃)) dξ₃ with C_αβ(ξ₃) = a_αβ + 2ξ₃κ_αβ, C_α3 = γ_α, C₃₃ from det=1.
-# Splitting: W_total = W_membrane (handled separately with γ=0) + W_bend_shear (here).
-# Subtracting the no-shear midsurface term gives bending + shear without double-counting:
-#   W_bend_shear = Σ_k w_k W(C(ξ_k)) − t · W_membrane(c_ms)
-# For κ=0: recovers shear from W. For γ=0: recovers t³/6·κ:∂²W_mem/∂c²:κ + O(t⁵).
-# No nested ForwardDiff: W is a plain scalar call at each quadrature point.
-function bending_shear_energy_RM(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    W_total = zero(T)
-    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
-    G₃ = scv.G₃_elem[1]; T₁ = scv.T₁_elem[1]; T₂ = scv.T₂_elem[1]
-    ξ3s, w3s = _gauss3_thickness(mat.thickness)
-    for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
-        d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes, G₃, T₁, T₂)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
-        γ₁ -= dot(scv.A₁[qp], G₃); γ₂ -= dot(scv.A₂[qp], G₃)
-        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        W_quad = zero(T)
-        for (ξ3, w3) in zip(ξ3s, w3s)
-            c_ξ = c_ms + 2*ξ3*κ
-            C33 = get_C33(c_ξ, γ₁, γ₂)
-            W_quad += mat.W(build_C3D(c_ξ, γ₁, γ₂, C33)) * w3
-        end
-        W_total += (W_quad - mat.thickness * W_membrane(mat, c_ms)) * scv.detJdV[qp]
-    end
-    return W_total
-end
-
-"""
-    bending_residuals_RM_FD!(re, scv, u_e, mat)
-
-Reissner–Mindlin bending + transverse shear residual. `u_e` is a flat vector of length 5·n_nodes.
-"""
-function bending_residuals_RM_FD!(re, scv, u_e, mat)
-    re .+= ForwardDiff.gradient(u -> bending_shear_energy_RM(u, scv, mat), u_e)
-end
 """
     bending_residuals_RM!(re, scv, u_e, mat)
 
@@ -451,15 +398,6 @@ function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T},
             re[5I  ] += dot(F_I, dd_dφ₂) * dΩ
         end
     end
-end
-
-"""
-    bending_tangent_RM_FD!(ke, scv, u_e, mat)
-
-Reissner–Mindlin bending + transverse shear tangent. `u_e` is a flat vector of length 5·n_nodes.
-"""
-function bending_tangent_RM_FD!(ke, scv, u, mat)
-    ke .+= ForwardDiff.hessian(u -> bending_shear_energy_RM(u, scv, mat), u)
 end
 
 """

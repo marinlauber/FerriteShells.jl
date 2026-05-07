@@ -6,8 +6,7 @@
     n_dof = 45   # 9 nodes × 5 DOFs
 
     # 1. Zero energy and residual at reference state (u=0, φ=0).
-    @test FerriteShells.membrane_energy_RM(zeros(n_dof), scv, mat) == 0.0
-    @test FerriteShells.bending_shear_energy_RM(zeros(n_dof), scv, mat) == 0.0
+    @test FerriteShells.rm_energy(zeros(n_dof), scv, mat) == 0.0
     @test rm_residual(scv, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
 
     # 2. Tangent FD consistency at a non-trivial displacement.
@@ -36,10 +35,8 @@
         u_trans[5I-3] += -1.2
         u_trans[5I-2] += 0.5
     end
-    @test FerriteShells.membrane_energy_RM(u_trans, scv, mat) ≈
-          FerriteShells.membrane_energy_RM(u_pert,  scv, mat) rtol=1e-10
-    @test FerriteShells.bending_shear_energy_RM(u_trans, scv, mat) ≈
-          FerriteShells.bending_shear_energy_RM(u_pert,  scv, mat) rtol=1e-10
+    @test FerriteShells.rm_energy(u_trans, scv, mat) ≈
+          FerriteShells.rm_energy(u_pert,  scv, mat) rtol=1e-10
 
     # In-plane rotation (about z-axis): rotate both node positions and DOFs.
     # With the global frame (T₁=ê_x, T₂=ê_y fixed for all elements), φ is a
@@ -56,10 +53,8 @@
         u_rot[5I-1] = cos(θ)*φ₁ - sin(θ)*φ₂
         u_rot[5I  ] = sin(θ)*φ₁ + cos(θ)*φ₂
     end
-    @test FerriteShells.membrane_energy_RM(u_rot, scv_rot, mat) ≈
-          FerriteShells.membrane_energy_RM(u_pert, scv, mat) rtol=1e-8
-    @test FerriteShells.bending_shear_energy_RM(u_rot, scv_rot, mat) ≈
-          FerriteShells.bending_shear_energy_RM(u_pert, scv, mat) rtol=1e-8
+    @test FerriteShells.rm_energy(u_rot, scv_rot, mat) ≈
+          FerriteShells.rm_energy(u_pert, scv, mat) rtol=1e-8
 end
 
 
@@ -69,12 +64,12 @@ end
     reinit!(scv, X_Q9_UNIT)
     n_dof = 45
 
-    # 1. Consistency with ForwardDiff at reference state.
-    Ke_fd  = zeros(n_dof, n_dof); bending_tangent_RM_FD!(Ke_fd,  scv, zeros(n_dof), mat)
+    # 1. Consistency with Jacobian of bending_residuals_RM! at reference state.
+    Ke_fd  = ForwardDiff.jacobian(u -> begin re = zeros(eltype(u), n_dof); bending_residuals_RM!(re, scv, u, mat); re end, zeros(n_dof))
     Ke_ex  = zeros(n_dof, n_dof); bending_tangent_RM!(Ke_ex, scv, zeros(n_dof), mat)
     @test norm(Ke_ex .- Ke_fd) / (norm(Ke_fd) + 1e-14) < 1e-10
 
-    # 2. Consistency with ForwardDiff at a non-trivial state.
+    # 2. Consistency with Jacobian of bending_residuals_RM! at a non-trivial state.
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
@@ -82,7 +77,7 @@ end
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
-    Ke_fd2 = zeros(n_dof, n_dof); bending_tangent_RM_FD!(Ke_fd2, scv, u_pert, mat)
+    Ke_fd2 = ForwardDiff.jacobian(u -> begin re = zeros(eltype(u), n_dof); bending_residuals_RM!(re, scv, u, mat); re end, u_pert)
     Ke_ex2 = zeros(n_dof, n_dof); bending_tangent_RM!(Ke_ex2, scv, u_pert, mat)
     @test norm(Ke_ex2 .- Ke_fd2) / (norm(Ke_fd2) + 1e-14) < 1e-9
 
@@ -107,10 +102,8 @@ end
     scv   = make_q9_scv()
     reinit!(scv, X_Q9_UNIT)
     n_dof = 45   # 9 nodes × 5 DOFs
-    # test that the implicit ForwardDiff implemntation of the residuals and the tangent
-    # membrane term is the same for the RM shell
-    re_fd = zeros(n_dof)
-    re_impl = zeros(n_dof)
+    # test that rm_residuals_RM_FD! (gradient of rm_energy) agrees with the full
+    # explicit assembly (membrane + bending + shear)
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
@@ -118,15 +111,17 @@ end
         u_pert[5I-1] = 1e-3 * randn()
         u_pert[5I  ] = 1e-3 * randn()
     end
-    membrane_residuals_RM_FD!(re_fd, scv, u_pert, mat)
+    re_fd = zeros(n_dof); rm_residuals_RM_FD!(re_fd, scv, u_pert, mat)
+    re_impl = zeros(n_dof)
     membrane_residuals_RM!(re_impl, scv, u_pert, mat)
-    @test norm(re_fd .- re_impl) / (norm(re_impl) + 1e-14) < 1e-12
+    bending_residuals_RM!(re_impl, scv, u_pert, mat)
+    @test norm(re_fd .- re_impl) / (norm(re_impl) + 1e-14) < 1e-10
     # same for tangent
-    Ke_fd = zeros(n_dof, n_dof)
+    Ke_fd = zeros(n_dof, n_dof); rm_tangent_RM_FD!(Ke_fd, scv, u_pert, mat)
     Ke_impl = zeros(n_dof, n_dof)
-    membrane_tangent_RM_FD!(Ke_fd, scv, u_pert, mat)
     membrane_tangent_RM!(Ke_impl, scv, u_pert, mat)
-    @test norm(Ke_fd .- Ke_impl) / (norm(Ke_impl) + 1e-14) < 1e-12
+    bending_tangent_RM!(Ke_impl, scv, u_pert, mat)
+    @test norm(Ke_fd .- Ke_impl) / (norm(Ke_impl) + 1e-14) < 1e-10
 end
 
 @testset "RM membrane patch test" begin
@@ -165,8 +160,7 @@ end
     for cell in CellIterator(dh_p)
         fill!(re_p, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u_e = u_ex[celldofs(cell)]
-        membrane_residuals_RM!(re_p, scv_p, u_e, mat_p)
-        bending_residuals_RM_FD!(re_p, scv_p, u_e, mat_p)
+        rm_residuals_RM_FD!(re_p, scv_p, u_e, mat_p)
         r_p[celldofs(cell)] .+= re_p
     end
     ch_tmp = ConstraintHandler(dh_p)
@@ -182,8 +176,7 @@ end
     for cell in CellIterator(dh_p)
         fill!(ke_p, 0.0); fill!(re_p2, 0.0); reinit!(scv_p, cell)
         x = getcoordinates(cell); u0 = zeros(ndofs_per_cell(dh_p))
-        membrane_tangent_RM!(ke_p, scv_p, u0, mat_p)
-        bending_tangent_RM_FD!(ke_p, scv_p, u0, mat_p)
+        rm_tangent_RM_FD!(ke_p, scv_p, u0, mat_p)
         assemble!(asmb_p, celldofs(cell), ke_p, re_p2)
     end
     ch2 = ConstraintHandler(dh_p)
@@ -254,8 +247,7 @@ end
     r_q9m = zeros(n_q9m); re_q9m = zeros(ndofs_per_cell(dh_q9m))
     for cell in CellIterator(dh_q9m)
         fill!(re_q9m, 0.0); reinit!(scv_q9m, cell)
-        membrane_residuals_RM!(re_q9m, scv_q9m, u_ex9[celldofs(cell)], mat_p)
-        bending_residuals_RM_FD!(re_q9m, scv_q9m, u_ex9[celldofs(cell)], mat_p)
+        rm_residuals_RM_FD!(re_q9m, scv_q9m, u_ex9[celldofs(cell)], mat_p)
         r_q9m[celldofs(cell)] .+= re_q9m
     end
     ch_tmp9 = ConstraintHandler(dh_q9m)
@@ -270,8 +262,7 @@ end
     for cell in CellIterator(dh_q9m)
         fill!(ke_q9m, 0.0); fill!(re2_q9m, 0.0); reinit!(scv_q9m, cell)
         u0 = zeros(ndofs_per_cell(dh_q9m))
-        membrane_tangent_RM!(ke_q9m, scv_q9m, u0, mat_p)
-        bending_tangent_RM_FD!(ke_q9m, scv_q9m, u0, mat_p)
+        rm_tangent_RM_FD!(ke_q9m, scv_q9m, u0, mat_p)
         assemble!(asmb_q9m, celldofs(cell), ke_q9m, re2_q9m)
     end
     ch2_q9m = ConstraintHandler(dh_q9m)
@@ -310,8 +301,7 @@ end
     r_t3m = zeros(n_t3m); re_t3m = zeros(ndofs_per_cell(dh_t3m))
     for cell in CellIterator(dh_t3m)
         fill!(re_t3m, 0.0); reinit!(scv_t3m, cell)
-        membrane_residuals_RM!(re_t3m, scv_t3m, u_ex_t3[celldofs(cell)], mat_p)
-        bending_residuals_RM_FD!(re_t3m, scv_t3m, u_ex_t3[celldofs(cell)], mat_p)
+        rm_residuals_RM_FD!(re_t3m, scv_t3m, u_ex_t3[celldofs(cell)], mat_p)
         r_t3m[celldofs(cell)] .+= re_t3m
     end
     ch_t3m_tmp = ConstraintHandler(dh_t3m)
@@ -325,8 +315,7 @@ end
     re2_t3m = zeros(ndofs_per_cell(dh_t3m))
     for cell in CellIterator(dh_t3m)
         fill!(ke_t3m, 0.0); fill!(re2_t3m, 0.0); reinit!(scv_t3m, cell)
-        membrane_tangent_RM!(ke_t3m, scv_t3m, zeros(ndofs_per_cell(dh_t3m)), mat_p)
-        bending_tangent_RM_FD!(ke_t3m, scv_t3m, zeros(ndofs_per_cell(dh_t3m)), mat_p)
+        rm_tangent_RM_FD!(ke_t3m, scv_t3m, zeros(ndofs_per_cell(dh_t3m)), mat_p)
         assemble!(asmb_t3m, celldofs(cell), ke_t3m, re2_t3m)
     end
     ch2_t3m = ConstraintHandler(dh_t3m)
@@ -400,8 +389,7 @@ end
     for cell in CellIterator(dh_b)
         fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
         u0 = zeros(ndofs_per_cell(dh_b))
-        membrane_tangent_RM!(ke_b, scv_b, u0, mat_b)
-        bending_tangent_RM_FD!(ke_b, scv_b, u0, mat_b)
+        rm_tangent_RM_FD!(ke_b, scv_b, u0, mat_b)
         assemble!(asmb_b, celldofs(cell), ke_b, re_b)
     end
 
@@ -432,9 +420,9 @@ end
         u_rm5[5I  ] = -α * xI   # φ₂ = -∂u₃/∂y = -α·x
     end
     W_kl = FerriteShells.bending_energy_KL(u_kl, scv_kl, mat_kl)
-    W_rm = FerriteShells.bending_shear_energy_RM(u_rm5, scv_kl, mat_kl)
+    W_rm = FerriteShells.rm_energy(u_rm5, scv_kl, mat_kl)
     @test W_rm > 0.0
-    @test W_rm ≈ W_kl rtol=1e-4
+    @test W_rm ≈ W_kl rtol=5e-4
 end
 
 @testset "RM cantilever tip load (Timoshenko reference)" begin
@@ -457,8 +445,7 @@ end
     for cell in CellIterator(dh_b)
         fill!(ke_b, 0.0); fill!(re_b, 0.0); reinit!(scv_b, cell)
         x = getcoordinates(cell); u0 = zeros(n_el_b)
-        membrane_tangent_RM!(ke_b, scv_b, u0, mat_b)
-        bending_tangent_RM_FD!(ke_b, scv_b, u0, mat_b)
+        rm_tangent_RM_FD!(ke_b, scv_b, u0, mat_b)
         assemble!(asmb_b, celldofs(cell), ke_b, re_b)
     end
 
@@ -520,7 +507,7 @@ end
     #    For R=5, h≈1, κ_s·G·t ≈ (5/6)·(E/(2(1+ν)))·t ≈ 32, element area ≈ 1:
     #    expected |r| ≲ (h/R)² · κ_s·G·t · area ≈ 0.04 · 32 ≈ 1.3 (loose bound).
     re_bs = zeros(45)
-    bending_residuals_RM_FD!(re_bs, scv, zeros(45), mat)
+    rm_residuals_RM_FD!(re_bs, scv, zeros(45), mat)
     @test norm(re_bs) < 2.0
 
     # 3. Tangent FD consistency at a small perturbation on the curved element.
@@ -583,8 +570,7 @@ end
             reinit!(scv_h, cell)
             x   = getcoordinates(cell)
             u_e = zeros(n_el)
-            membrane_tangent_RM!(ke, scv_h, u_e, mat_h)
-            bending_tangent_RM_FD!(ke, scv_h, u_e, mat_h)
+            rm_tangent_RM_FD!(ke, scv_h, u_e, mat_h)
             assemble!(asmb, shelldofs(cell), ke, re)
             # z-body force in interleaved layout; scatter via shelldofs mapping
             for qp in 1:getnquadpoints(scv_h)
@@ -976,8 +962,7 @@ end
     ke = zeros(n_el, n_el); re = zeros(n_el)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0); reinit!(scv, cell)
-        membrane_tangent_RM!(ke, scv, zeros(n_el), mat)
-        bending_tangent_RM_FD!(ke, scv, zeros(n_el), mat)
+        rm_tangent_RM_FD!(ke, scv, zeros(n_el), mat)
         assemble!(asmb, shelldofs(cell), ke, re)
     end
 

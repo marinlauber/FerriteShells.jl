@@ -2,7 +2,6 @@ using Tensors
 
 abstract type AbstractMaterial end
 
-# ── LinearElastic ────────────────────────────────────────────────────────────
 
 struct LinearElastic{T} <: AbstractMaterial
     E::T
@@ -142,6 +141,6 @@ function bending_and_shear_stiffness(mat::HyperelasticShell, c_ms::SymmetricTens
     return D, Cs
 end
 
-# contravariant_elasticity / contravariant_bending_stiffness kept for KL assembly
+# contravariant_elasticity / contravariant_bending_stiffness
 @inline contravariant_elasticity(mat::HyperelasticShell, c::SymmetricTensor{2,2}) = 4 * mat.thickness * hessian(x -> W_membrane(mat, x), c)
 @inline contravariant_bending_stiffness(mat::HyperelasticShell, c::SymmetricTensor{2,2}) = (mat.thickness^2 / 12) * contravariant_elasticity(mat, c)
