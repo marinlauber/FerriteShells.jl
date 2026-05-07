@@ -190,6 +190,7 @@ function assemble_kl_tangent!(K, r, dh, scv, u, mat)
     end
 end
 
+include("test_hyperelastic.jl")
 include("test_kl.jl")
 include("test_rm.jl")
 include("test_mitc.jl")
