@@ -86,9 +86,8 @@ Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·`n_nodes
 function membrane_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, _ = kinematics(scv, qp, u_e)
-        E = membrane_strain(a₁, a₂, A_metric)
-        N = contravariant_elasticity(mat, A_metric) ⊡ E
+        a₁, a₂, A_metric, c_ms = kinematics(scv, qp, u_e)
+        N, _ = membrane_stress_and_tangent(mat, c_ms, A_metric)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
@@ -107,10 +106,8 @@ Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·`n_nodes`
 function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, _ = kinematics(scv, qp, u_e)
-        E = membrane_strain(a₁, a₂, A_metric)
-        C = contravariant_elasticity(mat, A_metric)
-        N = C ⊡ E
+        a₁, a₂, A_metric, c_ms = kinematics(scv, qp, u_e)
+        N, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
@@ -168,6 +165,37 @@ function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
         κ   = b - scv.B[qp]
         D   = contravariant_bending_stiffness(mat, scv.A_metric[qp])
         W  += 0.5 * (κ ⊡ D ⊡ κ) * scv.detJdV[qp]
+    end
+    return W
+end
+
+# HyperelasticShell dispatch: through-thickness Gauss quadrature on W_membrane(c_ms + 2ξ₃κ).
+# Avoids the nested ForwardDiff that would arise if contravariant_bending_stiffness (which
+# calls Tensors.hessian internally) were invoked inside an outer ForwardDiff.gradient pass.
+# The bending energy is ∫W dξ₃ − t·W_mem(c_ms); shear is absent in KL.
+function bending_energy_KL(u_flat, scv::ShellCellValues, mat::HyperelasticShell)
+    T       = eltype(u_flat)
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    u_e     = [Vec{3,T}((u_flat[3i-2], u_flat[3i-1], u_flat[3i])) for i in 1:n_nodes]
+    W       = zero(T)
+    ξ3s, w3s = _gauss3_thickness(mat.thickness)
+    for qp in 1:getnquadpoints(scv)
+        a₁  = Vec{3,T}(Tuple(scv.A₁[qp]));  a₂  = Vec{3,T}(Tuple(scv.A₂[qp]))
+        a₁₁ = Vec{3,T}(Tuple(scv.A₁₁[qp])); a₁₂ = Vec{3,T}(Tuple(scv.A₁₂[qp])); a₂₂ = Vec{3,T}(Tuple(scv.A₂₂[qp]))
+        for I in 1:n_nodes
+            UI = u_e[I]; dN = scv.dNdξ[I, qp]; d2N = scv.d2Ndξ2[I, qp]
+            a₁ += UI * dN[1];     a₂ += UI * dN[2]
+            a₁₁ += UI * d2N[1,1]; a₁₂ += UI * d2N[1,2]; a₂₂ += UI * d2N[2,2]
+        end
+        n_n = (a₁ × a₂) / norm(a₁ × a₂)
+        b   = SymmetricTensor{2,2,T}((dot(a₁₁,n_n), dot(a₁₂,n_n), dot(a₂₂,n_n)))
+        κ   = b - scv.B[qp]
+        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        W_quad = zero(T)
+        for (ξ3, w3) in zip(ξ3s, w3s)
+            W_quad += _W_membrane(mat, c_ms + 2*ξ3*κ) * w3
+        end
+        W += (W_quad - mat.thickness * _W_membrane(mat, c_ms)) * scv.detJdV[qp]
     end
     return W
 end
