@@ -209,6 +209,81 @@ end
           2 * FerriteShells.bending_energy_KL(u_b, scv9, mat_NH) rtol=1e-8
 end
 
+function _cook_assemble_rm!(K, f, dh, scv, mat)
+    n_el = ndofs_per_cell(dh)
+    fill!(K.nzval, 0); fill!(f, 0)
+    ke = zeros(n_el, n_el); re = zeros(n_el)
+    asm = start_assemble(K, f)
+    for cell in CellIterator(dh)
+        fill!(ke, 0); fill!(re, 0)
+        reinit!(scv, cell)
+        sd  = shelldofs(cell)
+        u_e = zeros(n_el)
+        membrane_residuals_RM!(re, scv, u_e, mat)
+        bending_residuals_RM!(re, scv, u_e, mat)
+        membrane_tangent_RM!(ke, scv, u_e, mat)
+        bending_tangent_RM!(ke, scv, u_e, mat)
+        assemble!(asm, sd, ke, re)
+    end
+end
+
+function _cook_tip_y(grid, dh, u_sol)
+    tip_id = 0; dist = Inf
+    for (id, node) in enumerate(grid.nodes)
+        d = norm(node.x - Vec{3}((48.0, 60.0, 0.0)))
+        if d < dist; dist = d; tip_id = id; end
+    end
+    for cell in CellIterator(dh)
+        for (I, gid) in enumerate(getnodes(cell))
+            gid == tip_id && return u_sol[celldofs(cell)[3I-1]]
+        end
+    end
+    error("tip node not found")
+end
+
+function _cook_rm_solve(mat, n_mesh)
+    corners = [Vec{2}((0.,0.)), Vec{2}((48.,44.)), Vec{2}((48.,60.)), Vec{2}((0.,44.))]
+    grid    = generate_grid(Quadrilateral, (n_mesh, n_mesh), corners) |> shell_grid
+    addfacetset!(grid, "clamped",  x -> norm(x[1]) ≈ 0.0)
+    addfacetset!(grid, "traction", x -> norm(x[1]) ≈ 48.0)
+    ip  = Lagrange{RefQuadrilateral,1}()
+    qr  = QuadratureRule{RefQuadrilateral}(2)
+    fqr = FacetQuadratureRule{RefQuadrilateral}(2)
+    scv = ShellCellValues(qr, ip, ip)
+    dh  = DofHandler(grid)
+    add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    K = allocate_matrix(dh); f = zeros(ndofs(dh))
+    _cook_assemble_rm!(K, f, dh, scv, mat)
+    assemble_traction!(f, dh, getfacetset(grid,"traction"), ip, fqr, Vec{3}((0., 1/16, 0.)))
+    dbc = ConstraintHandler(dh)
+    add!(dbc, Dirichlet(:u, getfacetset(grid,"clamped"), x -> zeros(3), [1,2,3]))
+    add!(dbc, Dirichlet(:θ, getfacetset(grid,"clamped"), x -> zeros(2), [1,2]))
+    close!(dbc); apply!(K, f, dbc)
+    _cook_tip_y(grid, dh, K \ f)
+end
+
+@testset "HyperelasticShell — Cook's membrane (NH vs LE)" begin
+    # Near-incompressible LE: E=3μ, ν=0.499.  Incompressible NH: same linearised G.
+    μ = 1.0; t = 1.0
+    mat_LE = LinearElastic(3μ, 0.499, t)
+    mat_NH = HyperelasticShell(C -> μ/2 * (tr(C) - 3), t)
+    n_mesh = 16
+
+    tip_LE = _cook_rm_solve(mat_LE, n_mesh)
+    tip_NH = _cook_rm_solve(mat_NH, n_mesh)
+
+    @test tip_LE > 0
+    @test tip_NH > 0
+    @test isapprox(tip_NH, tip_LE, rtol=0.01)
+    # KL reference (32×32, E=1, ν=1/3) ≈ 24.84; E=3μ=3 scales deflection by 1/3.
+    @test isapprox(tip_LE, 24.84 / (3μ), rtol=0.10)
+
+    tip_LE_fine = _cook_rm_solve(mat_LE, 24)
+    tip_NH_fine = _cook_rm_solve(mat_NH, 24)
+    @test isapprox(tip_NH_fine, tip_LE_fine, rtol=0.005)
+    @test tip_LE_fine > tip_LE
+end
+
 @testset "HyperelasticShell — MITC9" begin
     scv_mitc = ShellCellValues(QuadratureRule{RefQuadrilateral}(3),
                                Lagrange{RefQuadrilateral,2}(), Lagrange{RefQuadrilateral,2}();

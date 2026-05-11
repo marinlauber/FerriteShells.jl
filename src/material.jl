@@ -41,20 +41,6 @@ end
 # existing closed-form expressions.  HyperelasticShell overrides them with derivatives
 # of W evaluated at c_ms.
 
-function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T}, A_metric) where T
-    C = contravariant_elasticity(mat, A_metric)
-    E = (c_ms - A_metric) / 2
-    return C ⊡ E, C
-end
-
-function bending_and_shear_stiffness(mat::LinearElastic, c_ms, A_metric::SymmetricTensor{2,2,T}) where T
-    D   = contravariant_bending_stiffness(mat, A_metric)
-    cs  = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    Aup = inv(A_metric)
-    Cs  = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
-    return D, Cs
-end
-
 """
     HyperelasticShell(W, thickness=1.0)
 
