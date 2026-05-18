@@ -138,8 +138,10 @@ end
 
 # Per-QP bending energy for KL, dispatched on material type.
 # For LinearElastic: ½ κ:D:κ  (D evaluated at reference metric — safe, A_metric is plain Float64).
-@inline bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric, A₁, A₂, G₃) =
-    0.5 * (κ ⊡ contravariant_bending_stiffness(mat, A_metric) ⊡ κ)
+@inline function bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric, A₁, A₂, G₃)
+    D, _ = bending_and_shear_stiffness(mat, c_ms, A_metric)
+    0.5 * (κ ⊡ D ⊡ κ)
+end
 
 # Hyperelastic: through-thickness Gauss quadrature in the physical Cartesian frame.
 # Subtracts midsurface term to isolate the bending contribution (KL has no shear).
@@ -232,13 +234,11 @@ end
 # Hyperelastic: 3-point through-thickness Gauss quadrature of W(C(ξ₃)).
 @inline function rm_qp_energy(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
                               κ, γ₁, γ₂, A_metric, A₁, A₂, G₃) where T
-    E   = (c_ms - A_metric) / 2
-    C   = contravariant_elasticity(mat, A_metric)
-    D   = contravariant_bending_stiffness(mat, A_metric)
-    Aup = inv(A_metric)
-    cs  = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    return 0.5*(E ⊡ C ⊡ E) + 0.5*(κ ⊡ D ⊡ κ) +
-           0.5*cs*(Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
+    N, _ = membrane_stress_and_tangent(mat, c_ms, A_metric)
+    D, Cs = bending_and_shear_stiffness(mat, c_ms, A_metric)
+    E = (c_ms - A_metric) / 2
+    return 0.5*(N ⊡ E) + 0.5*(κ ⊡ D ⊡ κ) +
+           0.5*(Cs[1,1]*γ₁^2 + 2*Cs[1,2]*γ₁*γ₂ + Cs[2,2]*γ₂^2)
 end
 
 @inline function rm_qp_energy(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},

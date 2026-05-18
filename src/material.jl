@@ -20,19 +20,6 @@ struct LinearElastic{T} <: AbstractMaterial
     end
 end
 
-# Contravariant elasticity tensor C^{αβγδ} = λ A^{αβ}A^{γδ} + μ(A^{αγ}A^{βδ} + A^{αδ}A^{βγ})
-# where A^{αβ} = inv(A_{αβ}) is the contravariant reference metric.
-function contravariant_elasticity(mat::LinearElastic, A_metric::SymmetricTensor{2,2,T}) where T
-    Aup = inv(A_metric)
-    μ = mat.E * mat.thickness / (2*(1 + mat.ν))
-    λ = mat.ν * mat.thickness * mat.E / (1 - mat.ν^2)
-    SymmetricTensor{4,2,T}((α,β,γ,δ) -> λ*Aup[α,β]*Aup[γ,δ] + μ*(Aup[α,γ]*Aup[β,δ] + Aup[α,δ]*Aup[β,γ]))
-end
-
-# Bending stiffness D^{αβγδ} = (t²/12) C^{αβγδ}
-function contravariant_bending_stiffness(mat::LinearElastic, A_metric::SymmetricTensor{2,2,T}) where T
-    (mat.thickness^2 / 12) * contravariant_elasticity(mat, A_metric)
-end
 
 """
     Hyperelastic(W, thickness=1.0)
@@ -122,9 +109,11 @@ end
 # LinearElastic: frame arguments accepted but ignored.
 function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
                                       A_metric, A₁=nothing, A₂=nothing, G₃=nothing) where T
-    C = contravariant_elasticity(mat, A_metric)
-    E = (c_ms - A_metric) / 2
-    return C ⊡ E, C
+    Aup = inv(A_metric)
+    μ = mat.E * mat.thickness / (2*(1 + mat.ν))
+    λ = mat.ν * mat.thickness * mat.E / (1 - mat.ν^2)
+    C = SymmetricTensor{4,2,T}((α,β,γ,δ) -> λ*Aup[α,β]*Aup[γ,δ] + μ*(Aup[α,γ]*Aup[β,δ] + Aup[α,δ]*Aup[β,γ]))
+    return C ⊡ ((c_ms - A_metric) / 2), C
 end
 
 # Bending and shear stiffness tensors in the physical Cartesian frame.
@@ -144,9 +133,10 @@ end
 function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
                                       A_metric::SymmetricTensor{2,2,T},
                                       A₁=nothing, A₂=nothing, G₃=nothing) where T
-    D   = contravariant_bending_stiffness(mat, A_metric)
-    cs  = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    Aup = inv(A_metric)
-    Cs  = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
+    _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
+    D    = (mat.thickness^2 / 12) * C
+    cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    Aup  = inv(A_metric)
+    Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
     return D, Cs
 end

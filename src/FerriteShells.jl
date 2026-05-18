@@ -24,7 +24,6 @@ export kinematics, kinematics_strains
 
 include("material.jl")
 export LinearElastic, Hyperelastic
-export contravariant_elasticity, contravariant_bending_stiffness
 export membrane_stress_and_tangent, bending_and_shear_stiffness
 
 include("assembly.jl")

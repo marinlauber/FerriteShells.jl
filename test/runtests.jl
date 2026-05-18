@@ -42,7 +42,7 @@ function element_strain_energy(scv, u_vec, mat)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, u_vec)
         E = 0.5 * (a_metric - A_metric)
-        N = FerriteShells.contravariant_elasticity(mat, A_metric) ⊡ E
+        N, _ = membrane_stress_and_tangent(mat, a_metric, A_metric)
         W += 0.5 * (N ⊡ E) * scv.detJdV[qp]
     end
     W
