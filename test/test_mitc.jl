@@ -25,14 +25,14 @@
         u_pert[5I  ] = 1e-3 * randn()
     end
     re_ex_nm = zeros(n_dof); bending_residuals_RM!(re_ex_nm, scv_nomitc, u_pert, mat)
-    re_fd_nm = zeros(n_dof); rm_residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
+    re_fd_nm = zeros(n_dof); residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
     re_mem_nm = zeros(n_dof); membrane_residuals_RM!(re_mem_nm, scv_nomitc, u_pert, mat)
     @test norm(re_ex_nm .- (re_fd_nm .- re_mem_nm)) / norm(re_ex_nm) < 1e-10
 
     # MITC explicit residual agrees with MITC ForwardDiff gradient to within the
     # approximation level (~0.1%); difference is the MITC-δγ consistency error.
     re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
-    re_fd = zeros(n_dof); rm_residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
+    re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
     re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
     @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-2
 
@@ -45,11 +45,11 @@
     α = deg2rad(10.0)
     for I in 1:9; u_large[5I-1] = α*0.3; u_large[5I] = α*0.7; end
     re_ex_lg_nm = zeros(n_dof); bending_residuals_RM!(re_ex_lg_nm, scv_nomitc, u_large, mat)
-    re_fd_lg_nm = zeros(n_dof); rm_residuals_RM_FD!(re_fd_lg_nm, scv_nomitc, u_large, mat)
+    re_fd_lg_nm = zeros(n_dof); residuals_RM_FD!(re_fd_lg_nm, scv_nomitc, u_large, mat)
     re_mem_lg_nm = zeros(n_dof); membrane_residuals_RM!(re_mem_lg_nm, scv_nomitc, u_large, mat)
     @test norm(re_ex_lg_nm .- (re_fd_lg_nm .- re_mem_lg_nm)) / norm(re_ex_lg_nm) < 1e-10
     re_ex_lg = zeros(n_dof); bending_residuals_RM!(re_ex_lg, scv_mitc, u_large, mat)
-    re_fd_lg = zeros(n_dof); rm_residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
+    re_fd_lg = zeros(n_dof); residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
     re_mem_lg = zeros(n_dof); membrane_residuals_RM!(re_mem_lg, scv_mitc, u_large, mat)
     @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-2
 
@@ -96,8 +96,8 @@
         u_kl[5I-1] = -α_kl * yI
         u_kl[5I  ] = -α_kl * xI
     end
-    W_mitc   = FerriteShells.rm_energy(u_kl, scv_mitc,   mat)
-    W_nomitc = FerriteShells.rm_energy(u_kl, scv_nomitc, mat)
+    W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc,   mat)
+    W_nomitc = FerriteShells.energy_RM(u_kl, scv_nomitc, mat)
     @test W_mitc ≈ W_nomitc rtol=1e-6
 end
 
@@ -135,7 +135,7 @@ end
             fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
             reinit!(scv, cell)
             x = getcoordinates(cell); u_e = zeros(n_el)
-            rm_tangent_RM_FD!(ke, scv, u_e, mat_h)
+            tangent_RM_FD!(ke, scv, u_e, mat_h)
             assemble!(asmb, shelldofs(cell), ke, re)
             for qp in 1:getnquadpoints(scv)
                 ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
@@ -198,12 +198,12 @@ end
         u_pert[5I  ] = 1e-3 * randn()
     end
     re_ex_nm = zeros(n_dof); bending_residuals_RM!(re_ex_nm, scv_nomitc, u_pert, mat)
-    re_fd_nm = zeros(n_dof); rm_residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
+    re_fd_nm = zeros(n_dof); residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
     re_mem_nm = zeros(n_dof); membrane_residuals_RM!(re_mem_nm, scv_nomitc, u_pert, mat)
     @test norm(re_ex_nm .- (re_fd_nm .- re_mem_nm)) / norm(re_ex_nm) < 1e-10
 
     re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
-    re_fd = zeros(n_dof); rm_residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
+    re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
     re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
     @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-2
 
@@ -240,8 +240,8 @@ end
         u_kl[5I-1] = -α_kl * yI
         u_kl[5I  ] = -α_kl * xI
     end
-    W_mitc   = FerriteShells.rm_energy(u_kl, scv_mitc,   mat)
-    W_nomitc = FerriteShells.rm_energy(u_kl, scv_nomitc, mat)
+    W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc,   mat)
+    W_nomitc = FerriteShells.energy_RM(u_kl, scv_nomitc, mat)
     @test W_mitc ≈ W_nomitc rtol=1e-6
 end
 
@@ -274,7 +274,7 @@ end
             fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
             reinit!(scv, cell)
             x = getcoordinates(cell); u_e = zeros(n_el)
-            rm_tangent_RM_FD!(ke, scv, u_e, mat_h)
+            tangent_RM_FD!(ke, scv, u_e, mat_h)
             assemble!(asmb, shelldofs(cell), ke, re)
             for qp in 1:getnquadpoints(scv)
                 ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
@@ -341,7 +341,7 @@ end
             fill!(ke, 0.); fill!(re, 0.); fill!(fe, 0.)
             reinit!(scv, cell)
             x   = getcoordinates(cell); u_e = zeros(5n_base)
-            rm_tangent_RM_FD!(ke, scv, u_e, mat)
+            tangent_RM_FD!(ke, scv, u_e, mat)
             assemble!(asmb, shelldofs(cell), ke, re)
             for qp in 1:getnquadpoints(scv)
                 ξ = scv.qr.points[qp]; dΩ = scv.detJdV[qp]

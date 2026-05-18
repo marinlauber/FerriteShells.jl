@@ -12,24 +12,24 @@ const μ_HE = 80.0e3          # shear modulus [Pa]
 const t_HE = 1.0e-3          # shell thickness [m]
 
 # Neo-Hookean incompressible: W = μ/2*(I₁-3)
-const mat_NH = HyperelasticShell(C -> μ_HE/2 * (tr(C) - 3), t_HE)
+const mat_NH = Hyperelastic(C -> μ_HE/2 * (tr(C) - 3), t_HE)
 
 # Mooney-Rivlin: W = c₁*(I₁-3) + c₂*(I₂-3),  I₂ = ½((trC)²-C⊡C)
 const c₁_MR = 50.0e3
 const c₂_MR = 30.0e3
-const mat_MR = HyperelasticShell(
+const mat_MR = Hyperelastic(
     C -> c₁_MR*(tr(C)-3) + c₂_MR*((tr(C)^2 - C⊡C)/2 - 3), t_HE)
 
 # Near-incompressible LinearElastic (E=3μ, ν→0.5)
 const mat_LE_HE = LinearElastic(3*μ_HE, 0.4999, t_HE)
 
-@testset "HyperelasticShell — Neo-Hookean, Q4 RM" begin
+@testset "Hyperelastic — Neo-Hookean, Q4 RM" begin
     scv = make_q4_scv()
     reinit!(scv, X_Q4_SQ)
     n = 20   # 4 nodes × 5 DOFs
 
     # ── 1. Zero energy and residual at reference ──────────────────────────────
-    @test FerriteShells.rm_energy(zeros(n), scv, mat_NH) == 0.0
+    @test FerriteShells.energy_RM(zeros(n), scv, mat_NH) == 0.0
     @test norm(rm_residual(scv, zeros(n), mat_NH)) < 1e-12
 
     # ── 2. Stress-free reference and correct stiffness ratios ────────────────
@@ -51,14 +51,14 @@ const mat_LE_HE = LinearElastic(3*μ_HE, 0.4999, t_HE)
 
     # ── 4. Explicit membrane residual ≈ FD (same energy, should be exact) ─────
     re_ex = zeros(n); membrane_residuals_RM!(re_ex, scv, u_m, mat_NH)
-    re_fd = zeros(n); rm_residuals_RM_FD!(re_fd, scv, u_m, mat_NH)
+    re_fd = zeros(n); residuals_RM_FD!(re_fd, scv, u_m, mat_NH)
     @test maximum(abs, re_ex .- re_fd) / (maximum(abs, re_fd) + 1e-20) < 1e-8
 
     # ── 5. Rigid-body translation: energy unchanged ───────────────────────────
     u_trans = zeros(n)
     for I in 1:4; u_trans[5I-4]=3.14; u_trans[5I-3]=2.72; u_trans[5I-2]=1.41; end
-    @test FerriteShells.rm_energy(u_trans, scv, mat_NH) ≈
-          FerriteShells.rm_energy(zeros(n),  scv, mat_NH) rtol=1e-10
+    @test FerriteShells.energy_RM(u_trans, scv, mat_NH) ≈
+          FerriteShells.energy_RM(zeros(n),  scv, mat_NH) rtol=1e-10
 
     # ── 6. Tangent symmetry ───────────────────────────────────────────────────
     u_pert = zeros(n)
@@ -75,13 +75,13 @@ const mat_LE_HE = LinearElastic(3*μ_HE, 0.4999, t_HE)
     @test norm(ke .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
 end
 
-@testset "HyperelasticShell — Neo-Hookean, Q9 RM" begin
+@testset "Hyperelastic — Neo-Hookean, Q9 RM" begin
     scv = make_q9_scv()
     reinit!(scv, X_Q9_SQ)
     n = 45   # 9 nodes × 5 DOFs
 
     # ── 1. Zero energy and residual at reference ──────────────────────────────
-    @test FerriteShells.rm_energy(zeros(n), scv, mat_NH) ≈ 0.0 atol=1e-12
+    @test FerriteShells.energy_RM(zeros(n), scv, mat_NH) ≈ 0.0 atol=1e-12
     @test norm(rm_residual(scv, zeros(n), mat_NH)) < 1e-10
 
     # ── 2. Tangent symmetry ───────────────────────────────────────────────────
@@ -104,17 +104,17 @@ end
         X_rot = R(θ) ⋅ X - X
         u_rot[5I-4] = X_rot[1]; u_rot[5I-3] = X_rot[2]; u_rot[5I-2] = X_rot[3]
     end
-    @test FerriteShells.rm_energy(u_rot,   scv, mat_NH) ≈
-          FerriteShells.rm_energy(zeros(n), scv, mat_NH) rtol=1e-6
+    @test FerriteShells.energy_RM(u_rot,   scv, mat_NH) ≈
+          FerriteShells.energy_RM(zeros(n), scv, mat_NH) rtol=1e-6
 
     # ── 5. Bending residuals agree with FD at small rotation ──────────────────
     u_b = zeros(n); for I in 1:9; u_b[5I-1] = 1e-6; end
     rb_ex = zeros(n); bending_residuals_RM!(rb_ex, scv, u_b, mat_NH)
-    rb_fd = zeros(n); rm_residuals_RM_FD!(rb_fd, scv, u_b, mat_NH)
+    rb_fd = zeros(n); residuals_RM_FD!(rb_fd, scv, u_b, mat_NH)
     @test maximum(abs, rb_ex .- rb_fd) / (maximum(abs, rb_fd) + 1e-20) < 5e-6
 end
 
-@testset "HyperelasticShell — incompressibility at QP" begin
+@testset "Hyperelastic — incompressibility at QP" begin
     # Verify det(C_cart) = 1 at every QP under a non-trivial deformation.
     scv = make_q4_scv()
     reinit!(scv, X_Q4_SQ)
@@ -138,13 +138,13 @@ end
     end
 end
 
-@testset "HyperelasticShell — Mooney-Rivlin" begin
+@testset "Hyperelastic — Mooney-Rivlin" begin
     scv = make_q4_scv()
     reinit!(scv, X_Q4_SQ)
     n = 20
 
     # ── 1. Zero energy at reference ───────────────────────────────────────────
-    @test FerriteShells.rm_energy(zeros(n), scv, mat_MR) == 0.0
+    @test FerriteShells.energy_RM(zeros(n), scv, mat_MR) == 0.0
 
     # ── 2. Stress-free reference and correct stiffness ratios ────────────────
     A  = scv.A_metric[1]
@@ -173,11 +173,11 @@ end
     for (I, X) in enumerate(X_Q4_SQ); u_stretch[5I-4] = 0.1*(X[1]+1)/2; end
     # Initial shear modulus: NH=μ_HE=80e3, MR=c₁+c₂=80e3 → equal initially
     # but MR has extra c₂*I₂ term that increases energy faster
-    @test FerriteShells.rm_energy(u_stretch, scv, mat_MR) >
-          FerriteShells.rm_energy(u_stretch, scv, mat_NH)
+    @test FerriteShells.energy_RM(u_stretch, scv, mat_MR) >
+          FerriteShells.energy_RM(u_stretch, scv, mat_NH)
 end
 
-@testset "HyperelasticShell — KL bending, Q9" begin
+@testset "Hyperelastic — KL bending, Q9" begin
     scv9 = make_q9_scv()
     reinit!(scv9, X_Q9_SQ)
     n = 27   # 9 nodes × 3 DOFs
@@ -204,7 +204,7 @@ end
     @test norm(kt_ex .- kt_fd) / (norm(kt_fd) + 1e-14) < 1e-5
 
     # ── 5. Bending energy scales linearly with μ ──────────────────────────────
-    mat_2μ = HyperelasticShell(C -> μ_HE*(tr(C) - 3), t_HE)   # 2×μ
+    mat_2μ = Hyperelastic(C -> μ_HE*(tr(C) - 3), t_HE)   # 2×μ
     @test FerriteShells.bending_energy_KL(u_b, scv9, mat_2μ) ≈
           2 * FerriteShells.bending_energy_KL(u_b, scv9, mat_NH) rtol=1e-8
 end
@@ -262,11 +262,11 @@ function _cook_rm_solve(mat, n_mesh)
     _cook_tip_y(grid, dh, K \ f)
 end
 
-@testset "HyperelasticShell — Cook's membrane (NH vs LE)" begin
+@testset "Hyperelastic — Cook's membrane (NH vs LE)" begin
     # Near-incompressible LE: E=3μ, ν=0.499.  Incompressible NH: same linearised G.
     μ = 1.0; t = 1.0
     mat_LE = LinearElastic(3μ, 0.499, t)
-    mat_NH = HyperelasticShell(C -> μ/2 * (tr(C) - 3), t)
+    mat_NH = Hyperelastic(C -> μ/2 * (tr(C) - 3), t)
     n_mesh = 16
 
     tip_LE = _cook_rm_solve(mat_LE, n_mesh)
@@ -284,7 +284,7 @@ end
     @test tip_LE_fine > tip_LE
 end
 
-@testset "HyperelasticShell — MITC9" begin
+@testset "Hyperelastic — MITC9" begin
     scv_mitc = ShellCellValues(QuadratureRule{RefQuadrilateral}(3),
                                Lagrange{RefQuadrilateral,2}(), Lagrange{RefQuadrilateral,2}();
                                mitc=MITC9)
@@ -292,7 +292,7 @@ end
     n = 45
 
     # ── 1. Zero energy at reference ───────────────────────────────────────────
-    @test FerriteShells.rm_energy(zeros(n), scv_mitc, mat_NH) ≈ 0.0 atol=1e-12
+    @test FerriteShells.energy_RM(zeros(n), scv_mitc, mat_NH) ≈ 0.0 atol=1e-12
 
     # ── 2. Tangent symmetry ───────────────────────────────────────────────────
     u_pert = zeros(n)
@@ -315,8 +315,8 @@ end
         u_kl[5I-1] = -1e-3 * X[2]    # φ₁ ≈ -∂w/∂x
         u_kl[5I  ] = -1e-3 * X[1]    # φ₂ ≈ -∂w/∂y
     end
-    W_mitc   = FerriteShells.rm_energy(u_kl, scv_mitc, mat_NH)
-    W_nomitc = FerriteShells.rm_energy(u_kl, scv_ref,  mat_NH)
+    W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc, mat_NH)
+    W_nomitc = FerriteShells.energy_RM(u_kl, scv_ref,  mat_NH)
     @test W_mitc > 0.0
     @test W_mitc ≈ W_nomitc rtol=0.05   # should be close for smooth KL mode
 end

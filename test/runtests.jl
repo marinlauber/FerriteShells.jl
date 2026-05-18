@@ -83,12 +83,12 @@ end
 # RM helpers
 function rm_residual(scv, u, mat)
     re = zeros(length(u))
-    rm_residuals_RM_FD!(re, scv, u, mat)
+    residuals_RM_FD!(re, scv, u, mat)
     re
 end
 function rm_tangent(scv, u, mat)
     ke = zeros(length(u), length(u))
-    rm_tangent_RM_FD!(ke, scv, u, mat)
+    tangent_RM_FD!(ke, scv, u, mat)
     ke
 end
 function rm_fd_tangent(scv, u, mat; ε=1e-5)

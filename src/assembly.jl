@@ -141,9 +141,9 @@ end
 @inline bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric, A₁, A₂, G₃) =
     0.5 * (κ ⊡ contravariant_bending_stiffness(mat, A_metric) ⊡ κ)
 
-# HyperelasticShell: through-thickness Gauss quadrature in the physical Cartesian frame.
+# Hyperelastic: through-thickness Gauss quadrature in the physical Cartesian frame.
 # Subtracts midsurface term to isolate the bending contribution (KL has no shear).
-@inline function bending_kl_qp_energy(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T},
+@inline function bending_kl_qp_energy(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
                                        κ, A_metric, A₁, A₂, G₃) where T
     det_A = det(A_metric)
     Jinv  = inv(_J_ref(A₁, A₂, G₃))
@@ -229,7 +229,7 @@ end
 
 # Per-QP strain energy density for the RM element, dispatched on material type.
 # LinearElastic: closed-form quadratic forms with κ_s = 5/6 shear correction.
-# HyperelasticShell: 3-point through-thickness Gauss quadrature of W(C(ξ₃)).
+# Hyperelastic: 3-point through-thickness Gauss quadrature of W(C(ξ₃)).
 @inline function rm_qp_energy(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
                               κ, γ₁, γ₂, A_metric, A₁, A₂, G₃) where T
     E   = (c_ms - A_metric) / 2
@@ -241,7 +241,7 @@ end
            0.5*cs*(Aup[1,1]*γ₁^2 + 2*Aup[1,2]*γ₁*γ₂ + Aup[2,2]*γ₂^2)
 end
 
-@inline function rm_qp_energy(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T},
+@inline function rm_qp_energy(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
                               κ, γ₁, γ₂, A_metric, A₁, A₂, G₃) where T
     det_A = det(A_metric)
     Jinv  = inv(_J_ref(A₁, A₂, G₃))
@@ -255,13 +255,13 @@ end
 end
 
 """
-    rm_energy(u_flat, scv::ShellCellValues, mat)
+    energy_RM(u_flat, scv::ShellCellValues, mat)
 
 Total Reissner–Mindlin strain energy (membrane + bending + transverse shear) per element.
 DOF layout: 5 DOFs per node — [u₁,u₂,u₃,φ₁,φ₂,…].
 Material dispatch happens at the per-QP level via `rm_qp_energy`.
 """
-function rm_energy(u_flat, scv::ShellCellValues, mat)
+function energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
@@ -281,23 +281,23 @@ function rm_energy(u_flat, scv::ShellCellValues, mat)
 end
 
 """
-    rm_residuals_RM_FD!(re, scv, u_e, mat)
+    residuals_RM_FD!(re, scv, u_e, mat)
 
-Reissner–Mindlin total residual (membrane + bending + shear) via ForwardDiff.gradient of `rm_energy`.
+Reissner–Mindlin total residual (membrane + bending + shear) via ForwardDiff.gradient of `energy_RM`.
 `u_e` is a flat vector of length 5·`n_nodes`.
 """
-function rm_residuals_RM_FD!(re, scv, u_e, mat)
-    re .+= ForwardDiff.gradient(u -> rm_energy(u, scv, mat), u_e)
+function residuals_RM_FD!(re, scv, u_e, mat)
+    re .+= ForwardDiff.gradient(u -> energy_RM(u, scv, mat), u_e)
 end
 
 """
-    rm_tangent_RM_FD!(ke, scv, u_e, mat)
+    tangent_RM_FD!(ke, scv, u_e, mat)
 
-Reissner–Mindlin total tangent (membrane + bending + shear) via ForwardDiff.hessian of `rm_energy`.
+Reissner–Mindlin total tangent (membrane + bending + shear) via ForwardDiff.hessian of `energy_RM`.
 `u_e` is a flat vector of length 5·`n_nodes`.
 """
-function rm_tangent_RM_FD!(ke, scv, u_e, mat)
-    ke .+= ForwardDiff.hessian(u -> rm_energy(u, scv, mat), u_e)
+function tangent_RM_FD!(ke, scv, u_e, mat)
+    ke .+= ForwardDiff.hessian(u -> energy_RM(u, scv, mat), u_e)
 end
 
 # Precompute per-QP "frame stiffness" tensors M_{\\alphaδ} = C^{\\alpha\\betaγδ} a_\\beta⊗a_γ.

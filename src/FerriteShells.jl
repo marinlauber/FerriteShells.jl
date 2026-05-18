@@ -23,14 +23,14 @@ include("kinematics.jl")
 export kinematics, kinematics_strains
 
 include("material.jl")
-export LinearElastic, HyperelasticShell
+export LinearElastic, Hyperelastic
 export contravariant_elasticity, contravariant_bending_stiffness
 export membrane_stress_and_tangent, bending_and_shear_stiffness
 
 include("assembly.jl")
 export membrane_residuals_KL!, membrane_tangent_KL!, bending_residuals_KL!, bending_tangent_KL!
 export membrane_residuals_RM!, membrane_tangent_RM!, bending_residuals_RM!, bending_tangent_RM!
-export rm_residuals_RM_FD!, rm_tangent_RM_FD!
+export residuals_RM_FD!, tangent_RM_FD!
 export assemble_pressure!, assemble_pressure_tangent!, assemble_traction!, apply_pointload!, mass_matrix!
 
 include("utils.jl")

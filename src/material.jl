@@ -2,12 +2,17 @@ using Tensors
 
 abstract type AbstractMaterial end
 
+"""
+    LinearElastic(E, ν, thickness=1.0)
 
+Linear elastic shell material defined by Young's modulus `E`, Poisson's ratio `ν`,
+and thickness `thickness`.
+"""
 struct LinearElastic{T} <: AbstractMaterial
     E::T
     ν::T
     thickness::T
-    function LinearElastic(E::T, ν, thickness=one(T)) where T
+    function LinearElastic(E::T, ν::T, thickness::T=one(T)) where T
         @assert E > 0 "Young's modulus must be positive"
         @assert 0 ≤ ν < 0.5 "Poisson's ratio must be in [0, 0.5)"
         @assert thickness > 0 "Thickness must be positive"
@@ -29,20 +34,8 @@ function contravariant_bending_stiffness(mat::LinearElastic, A_metric::Symmetric
     (mat.thickness^2 / 12) * contravariant_elasticity(mat, A_metric)
 end
 
-# membrane_stress_and_tangent(mat, c_ms, A_metric)
-#   Returns (N, C): membrane stress resultant N^{αβ} and consistent tangent C^{αβγδ}
-#   evaluated at the current midsurface metric c_ms.
-#
-# bending_and_shear_stiffness(mat, c_ms, A_metric)
-#   Returns (D, Cs): bending stiffness D^{αβγδ} and transverse shear stiffness matrix
-#   Cs^{αβ} (2×2 SymmetricTensor, replaces κ_s·G·t·A^{αβ}), both at current state.
-#
-# Both functions have default implementations for LinearElastic that reproduce the
-# existing closed-form expressions.  HyperelasticShell overrides them with derivatives
-# of W evaluated at c_ms.
-
 """
-    HyperelasticShell(W, thickness=1.0)
+    Hyperelastic(W, thickness=1.0)
 
 Incompressible hyperelastic shell material defined by a full 3D strain energy density
 `W(C::SymmetricTensor{2,3,T}) -> T`.
@@ -63,7 +56,7 @@ Example — Neo-Hookean incompressible
 ```julia
 μ = 80.0e3; t = 1.0e-3
 W_NH(C) = μ/2 * (tr(C) - 3)
-mat = HyperelasticShell(W_NH, t)
+mat = Hyperelastic(W_NH, t)
 ```
 
 Example — Mooney–Rivlin
@@ -71,13 +64,13 @@ Example — Mooney–Rivlin
 ```julia
 c₁ = 40.0e3; c₂ = 20.0e3; t = 1.0e-3
 W_MR(C) = c₁*(tr(C) - 3) + c₂*((tr(C)^2 - C ⊡ C)/2 - 3)
-mat = HyperelasticShell(W_MR, t)
+mat = Hyperelastic(W_MR, t)
 ```
 """
-struct HyperelasticShell{F, T<:AbstractFloat} <: AbstractMaterial
+struct Hyperelastic{F, T<:AbstractFloat} <: AbstractMaterial
     W         :: F
     thickness :: T
-    function HyperelasticShell(W::F, thickness::T=one(Float64)) where {F, T<:AbstractFloat}
+    function Hyperelastic(W::F, thickness::T=one(Float64)) where {F, T<:AbstractFloat}
         @assert thickness > 0 "Thickness must be positive"
         new{F, T}(W, thickness)
     end
@@ -86,8 +79,7 @@ end
 # C₃₃ from det(C_nat) = det_A so that det(C_cart) = 1 (physical incompressibility).
 # det_A = det(A_metric) = |A₁ × A₂|² (reference area element squared).
 # Reduces to det_A/det₂(c) when γ=0 (KL / no-shear limit).
-@inline get_C33(c::SymmetricTensor{2,2}, γ₁, γ₂, det_A) =
-    (det_A + c[2,2]*γ₁^2 - 2*c[1,2]*γ₁*γ₂ + c[1,1]*γ₂^2) / det(c)
+@inline get_C33(c::SymmetricTensor{2,2}, γ₁, γ₂, det_A) = (det_A + c[2,2]*γ₁^2 - 2*c[1,2]*γ₁*γ₂ + c[1,1]*γ₂^2) / det(c)
 
 # Build the full 3×3 right Cauchy–Green tensor.
 # SymmetricTensor{2,3} lower-triangle column-major storage: (C₁₁,C₁₂,C₁₃,C₂₂,C₂₃,C₃₃)
@@ -97,28 +89,26 @@ end
 end
 
 # Reference Jacobian: columns = A₁, A₂, G₃ in Cartesian.  Stored column-major.
-@inline _J_ref(A₁, A₂, G₃) =
-    Tensor{2,3}((A₁[1],A₁[2],A₁[3], A₂[1],A₂[2],A₂[3], G₃[1],G₃[2],G₃[3]))
+@inline _J_ref(A₁, A₂, G₃) = Tensor{2,3}((A₁[1],A₁[2],A₁[3], A₂[1],A₂[2],A₂[3], G₃[1],G₃[2],G₃[3]))
 
 # Transform C_nat (natural frame) → C_cart (Cartesian): C_cart = Jinv' C_nat Jinv.
-@inline _to_C_cart(C_nat::SymmetricTensor{2,3}, Jinv::Tensor{2,3}) =
-    symmetric(Jinv' ⋅ Tensor{2,3}(C_nat) ⋅ Jinv)
+@inline _to_C_cart(C_nat::SymmetricTensor{2,3}, Jinv::Tensor{2,3}) = symmetric(Jinv' ⋅ Tensor{2,3}(C_nat) ⋅ Jinv)
 
 # Evaluate W at the physical Cartesian C, no shear (γ=0).
-@inline function _W_phys(mat::HyperelasticShell, c::SymmetricTensor{2,2}, det_A, Jinv)
+@inline function _W_phys(mat::Hyperelastic, c::SymmetricTensor{2,2}, det_A, Jinv)
     C33 = det_A / det(c)
     mat.W(_to_C_cart(build_C3D(c, zero(eltype(c)), zero(eltype(c)), C33), Jinv))
 end
 
 # Evaluate W at the physical Cartesian C, with shear γ₁, γ₂.
-@inline function _W_phys(mat::HyperelasticShell, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv)
+@inline function _W_phys(mat::Hyperelastic, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv)
     C33 = get_C33(c, γ₁, γ₂, det_A)
     mat.W(_to_C_cart(build_C3D(c, γ₁, γ₂, C33), Jinv))
 end
 
 # Membrane stress N and consistent tangent C via nested gradient of _W_phys.
 # N^{αβ} = 2t ∂W/∂C_{αβ}; factor 2 from Tensors.jl Mandel off-diagonal convention.
-function membrane_stress_and_tangent(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2},
+function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,2},
                                       A_metric, A₁, A₂, G₃)
     det_A = det(A_metric)
     Jinv  = inv(_J_ref(A₁, A₂, G₃))
@@ -138,7 +128,7 @@ function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2
 end
 
 # Bending and shear stiffness tensors in the physical Cartesian frame.
-function bending_and_shear_stiffness(mat::HyperelasticShell, c_ms::SymmetricTensor{2,2,T},
+function bending_and_shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
                                       A_metric, A₁, A₂, G₃) where T
     _, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
     D     = (mat.thickness^2 / 12) * C
