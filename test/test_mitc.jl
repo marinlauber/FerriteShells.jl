@@ -55,7 +55,7 @@
 
     # 2b. Consistent MITC9 tangent: bending_tangent_RM! (MITC dispatch) must match
     #     the ForwardDiff Jacobian of bending_residuals_RM! (not the energy Hessian —
-    #     the MITC explicit residual is not the exact gradient of bending_shear_energy_RM).
+    #     the MITC explicit residual is not the exact gradient of energy_RM).
     ke_ex  = zeros(n_dof, n_dof)
     bending_tangent_RM!(ke_ex, scv_mitc, u_pert, mat)
     ke_jac = ForwardDiff.jacobian(u -> begin

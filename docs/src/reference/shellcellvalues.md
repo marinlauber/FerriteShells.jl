@@ -19,9 +19,3 @@ The following functions are applicable
 reinit!
 function_value(::ShellCellValues, qp::Int, u_e::AbstractVector)
 ```
-
-## Kinematics
-
-```@docs
-kinematics
-```

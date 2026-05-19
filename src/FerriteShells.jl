@@ -8,19 +8,11 @@ using Base: @propagate_inbounds
 
 import Ferrite: reinit!
 
-abstract type AbstractStrainMeasure end
-struct LinearStrain <: AbstractStrainMeasure end
-struct GreenLagrangeStrain <: AbstractStrainMeasure end
-export LinearStrain, GreenLagrangeStrain
-
 include("mitc.jl")
 export AbstractMITC, NoMITC, MITC, MITC9
 
 include("shellcellvalues.jl")
 export ShellCellValues
-
-include("kinematics.jl")
-export kinematics, kinematics_strains
 
 include("material.jl")
 export LinearElastic, Hyperelastic
@@ -34,6 +26,6 @@ export assemble_pressure!, assemble_pressure_tangent!, assemble_traction!, apply
 
 include("utils.jl")
 export shell_grid, shelldofs, get_ferrite_grid, compute_volume, volume_residual, volume_gradient!, director_field
-export shell_strains, embed23
+export shell_strains, embed23, NodeFrames
 
 end # module FerriteShells

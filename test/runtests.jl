@@ -37,12 +37,19 @@ make_t6_scv(; qr_order=4) = ShellCellValues(QuadratureRule{RefTriangle}(qr_order
 @inline R(θ) = Tensor{2,3}([cos(θ) -sin(θ) 0; sin(θ) cos(θ) 0; 0 0 1])
 
 # KL membrane element strain energy
-function element_strain_energy(scv, u_vec, mat)
+function element_strain_energy(scv, u_vec::AbstractVector{T}, mat) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
     W = 0.0
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, u_vec)
-        E = 0.5 * (a_metric - A_metric)
-        N, _ = membrane_stress_and_tangent(mat, a_metric, A_metric)
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for i in 1:n_nodes
+            ui = Vec{3,T}((u_vec[3i-2], u_vec[3i-1], u_vec[3i]))
+            Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
+        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        E = 0.5 * (c_ms - scv.A_metric[qp])
+        N, _ = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp])
         W += 0.5 * (N ⊡ E) * scv.detJdV[qp]
     end
     W

@@ -333,3 +333,37 @@ end
     u_tip3 = first(evaluate_at_points(ph3, dh3, u3, :u))
     @test u_tip3[3] > 0.0   # positive z-deflection under +z traction
 end
+
+@testset "utils.jl" begin
+    # test embeding
+    Cαβ = SymmetricTensor{2,2}(rand(3))
+    C = FerriteShells.embed23(Cαβ)
+    @test all(C[1:2,1:2] .≈ Cαβ) # correct embedding for output
+    # NodeFrames
+    for (P,E,O) in zip([Quadrilateral, QuadraticQuadrilateral, Triangle, QuadraticTriangle],
+                        [RefQuadrilateral, RefQuadrilateral, RefTriangle, RefTriangle],
+                        [1,2,1,2])
+        corners = [Vec{2}((0.0,0.0)), Vec{2}((1.0,0.0)), Vec{2}((1.0,1.0)), Vec{2}((0.0,1.0))]
+        grid = shell_grid(generate_grid(P, (1,1), corners))
+        ip   = Lagrange{E, O}()
+        nf  = NodeFrames(grid, ip)
+        @test all([all(Gᵢ .≈ nf.G₃[1]) for Gᵢ in nf.G₃])
+        @test all([all(Gᵢ .≈ Vec{3}((0.0, 0.0, 1.0))) for Gᵢ in nf.G₃])
+        @test all([all(T₁ .≈ nf.T₁[1]) for T₁ in nf.T₁])
+        @test all([all(T₂ .≈ nf.T₂[1]) for T₂ in nf.T₂])
+        # try reinit
+        qr  = QuadratureRule{E}(O+1)
+        scv = ShellCellValues(qr, ip, ip)
+        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^3); close!(dh)
+        cell = first(CellIterator(dh))
+        reinit!(scv, cell, nf)
+        node_ids = getnodes(cell)
+        @test all([all(scv.G₃_elem[I] .≈ nf.G₃[node_ids[I]]) for I in 1:getnbasefunctions(scv.ip_geo)])
+        @test all([all(scv.T₁_elem[I] .≈ nf.T₁[node_ids[I]]) for I in 1:getnbasefunctions(scv.ip_geo)])
+        @test all([all(scv.T₂_elem[I] .≈ nf.T₂[node_ids[I]]) for I in 1:getnbasefunctions(scv.ip_geo)])
+        # test the shell_strain output, should all be zero
+        uₑ = zero(shelldofs(cell))
+        @test all(shell_strains(scv, 1, uₑ) .≈ ([0.0 0.0; 0.0 0.0], [0.0 0.0; 0.0 0.0], [0.0; 0.0]))
+    end
+end
+
