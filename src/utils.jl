@@ -372,6 +372,23 @@ function NodeFrames(grid::Grid, ip_geo::Interpolation)
     NodeFrames(G₃, T₁, T₂)
 end
 
+"""
+    reinit!(scv::ShellCellValues, x::AbstractVector, nf::NodeFrames)
+    reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames)
+    reinit!(scv::ShellCellValues, cell::AbstractCell, nf::NodeFrames)
+
+Update the `ShellCellValues` object for a cell with cell coordinates `x` and a `NodeFrames` object.
+
+The reference surface measures such as the covariant basis are obtained from the `NodeFrames` object
+pre-computed initially from `nf = NodeFrames(grid, ip_geo)`.
+
+**Note:**
+For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
+"""
+reinit!
+
+reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinates(cell), nf, getnodes(cell))
+reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
     reinit!(scv, x)
     n_geo = getnbasefunctions(scv.ip_geo)
