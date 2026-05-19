@@ -11,7 +11,6 @@ shelldofs
 compute_volume
 volume_gradient!
 director_field
-embed23
-NodeFrames
 shell_strains
+embed23
 ```
