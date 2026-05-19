@@ -141,10 +141,10 @@ println("Time step:              Δt  = $(round(Δt,  digits=4)) s  (T₁/50)\n"
 @printf("%-8s  %-12s  %-12s  %-6s\n", "t [s]", "u_z [m]", "u_anal [m]", "iters")
 
 using WriteVTK
-pvd = paraview_collection("cantilever")
+pvd = paraview_collection("cantilever_dynamic")
 vtk_step = Ref(0)
 # save to the pvd
-VTKGridFile("cantilever-$(vtk_step[])", dh) do vtk
+VTKGridFile("cantilever_dynamic-$(vtk_step[])", dh) do vtk
     write_solution(vtk, dh, u); pvd[0.0] = vtk
 end
 
@@ -194,7 +194,7 @@ for step in 1:n_steps
     u    .= u_new
 
     # save to the pvd
-    VTKGridFile("cantilever-$(vtk_step[])", dh) do vtk
+    VTKGridFile("cantilever_dynamic-$(vtk_step[])", dh) do vtk
         write_solution(vtk, dh, u); pvd[t_now] = vtk
     end
 

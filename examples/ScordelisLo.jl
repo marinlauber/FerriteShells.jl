@@ -1,21 +1,11 @@
 using FerriteShells
 
-# Scordelis-Lo roof — Kirchhoff-Love shell
-#
-# Cylindrical barrel vault: R=25, L=50, half-angle Φ=40°, t=0.25, E=4.32e8, ν=0.
-# Self-weight q=90 per unit area acts in the -y direction (gravity).
-# BCs: rigid diaphragm at the straight ends (x=0, x=L) → u_y=u_z=0; free curved edges.
-# Reference vertical deflection at midpoint of free edge: 0.3024.
-#
-# Coordinate map: 2D grid (θ,axial) → (axial, R·cos θ, R·sin θ)
-#   Crown (θ=0):      X = (axial, R, 0)          — top of vault
-#   Free edges (θ=±Φ): X = (axial, R·cosΦ, ±R·sinΦ) — lower edges
+# Scordelis-Lo roof — Reissner-Mindlin shell
+# Same geometry and loading as ScordelisLo.jl; see that file for full description.
+# Two-field DofHandler (:u ip^3, :θ ip^2).  DOF reordering via shelldofs().
 
-const R_sl, L_sl, Φ_sl = 25.0, 50.0, 40π/180
-const E_sl, ν_sl, t_sl = 4.32e8, 0.0, 0.25
-const q_sl = Vec{3}((0.0, -90.0, 0.0))  # self-weight in -y direction
-
-function scordelis_lo_grid(ns, nt)
+function scordelis_lo_rm_grid(ns, nt)
+    R_sl, L_sl, Φ_sl = 25.0, 50.0, 40π/180
     g = shell_grid(
         generate_grid(QuadraticQuadrilateral, (ns, nt),
                       Vec{2}((-Φ_sl, 0.0)), Vec{2}((Φ_sl, L_sl)));
@@ -27,37 +17,39 @@ function scordelis_lo_grid(ns, nt)
     return g
 end
 
-function scordelis_lo_solve(ns, nt)
+function scordelis_lo_rm_solve(ns, nt)
     ip  = Lagrange{RefQuadrilateral, 2}()
-    qr  = QuadratureRule{RefQuadrilateral}(4)
+    qr  = QuadratureRule{RefQuadrilateral}(3)
     scv = ShellCellValues(qr, ip, ip)
-    mat = LinearElastic(E_sl, ν_sl, t_sl)
+    mat = LinearElastic(4.32e8, 0.0, 0.25)
 
-    grid   = scordelis_lo_grid(ns, nt)
-    dh     = DofHandler(grid); add!(dh, :u, ip^3); close!(dh)
-    n_el   = ndofs_per_cell(dh)
+    grid = scordelis_lo_rm_grid(ns, nt)
+    dh   = DofHandler(grid)
+    add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    n_el   = ndofs_per_cell(dh)   # 5·n_base (interleaved after shelldofs)
     n_base = getnbasefunctions(ip)
 
     K  = allocate_matrix(dh)
     f  = zeros(ndofs(dh))
     asmb = start_assemble(K, zeros(ndofs(dh)))
-    ke = zeros(n_el, n_el); re = zeros(n_el); fe = zeros(n_el)
-
+    ke = zeros(5n_base, 5n_base); re = zeros(5n_base); fe = zeros(5n_base)
+    q_sl = Vec{3}((0.0, -90.0, 0.0))
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
         reinit!(scv, cell)
-        u0 = zeros(n_el)
-        membrane_tangent_KL!(ke, scv, u0, mat)
-        bending_tangent_KL!(ke, scv, u0, mat)
-        assemble!(asmb, celldofs(cell), ke, re)
+        u0 = zeros(5n_base)
+        membrane_tangent_RM_FD!(ke, scv, u0, mat)
+        bending_tangent_RM_FD!(ke, scv, u0, mat)
+        sd = shelldofs(cell)
+        assemble!(asmb, sd, ke, re)
         for qp in 1:getnquadpoints(scv)
             ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
             for I in 1:n_base
                 NI = Ferrite.reference_shape_value(ip, ξ, I)
-                @views fe[3I-2:3I] .+= NI * q_sl * dΩ
+                @views fe[5I-4:5I-2] .+= NI * q_sl * dΩ
             end
         end
-        @views f[celldofs(cell)] .+= fe
+        @views f[sd] .+= fe
     end
 
     dbc = ConstraintHandler(dh)
@@ -66,18 +58,23 @@ function scordelis_lo_solve(ns, nt)
 
     u_sol = K \ f
 
+    # write to vtk
+    VTKGridFile("scordelis_Lo_roof", dh) do vtk
+        write_solution(vtk, dh, u_sol)
+    end
+
     ref_nodes = collect(getnodeset(grid, "ref_point"))
-    @assert length(ref_nodes) == 1 "Expected exactly one reference node"
+    @assert length(ref_nodes) == 1
     for cell in CellIterator(dh)
         for (I, gid) in enumerate(getnodes(cell))
             if gid == ref_nodes[1]
                 cd = celldofs(cell)
-                return u_sol[cd[3I-1]]  # y-component (vertical)
+                return u_sol[cd[3I-1]]  # y-component of :u
             end
         end
     end
     error("ref_point node not found in any cell")
 end
 
-w = scordelis_lo_solve(16, 16)
-println("Scordelis-Lo (KL, 16×16): u_y at free-edge midpoint = $(round(w; digits=5))  (reference: -0.3024)")
+w = scordelis_lo_rm_solve(16, 16)
+println("Scordelis-Lo: u_y at free-edge midpoint = $(round(w; digits=5)) (reference: -0.3024)")
