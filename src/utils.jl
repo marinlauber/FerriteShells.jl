@@ -313,8 +313,7 @@ Embed a surface `SymmetricTensor{2,2}` into a 3D symmetric tensor by padding
 the out-of-plane rows/columns with zeros. Useful for writing shell strain or
 stress tensors to VTK (ParaView expects 6-component symmetric tensors).
 """
-@inline embed23(S::SymmetricTensor{2,2,T}) where T =
-    SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
+@inline embed23(S::SymmetricTensor{2,2,T}) where T = SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
 
 """
     NodeFrames
