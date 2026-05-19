@@ -20,6 +20,27 @@ struct LinearElastic{T} <: AbstractMaterial
     end
 end
 
+# LinearElastic: frame arguments accepted but ignored.
+function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
+                                     A_metric, A₁=nothing, A₂=nothing, G₃=nothing) where T
+    Aup = inv(A_metric)
+    μ = mat.E * mat.thickness / (2*(1 + mat.ν))
+    λ = mat.ν * mat.thickness * mat.E / (1 - mat.ν^2)
+    C = SymmetricTensor{4,2,T}((α,β,γ,δ) -> λ*Aup[α,β]*Aup[γ,δ] + μ*(Aup[α,γ]*Aup[β,δ] + Aup[α,δ]*Aup[β,γ]))
+    return C ⊡ ((c_ms - A_metric) / 2), C
+end
+
+# LinearElastic: frame arguments accepted but ignored.
+function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
+                                     A_metric::SymmetricTensor{2,2,T},
+                                     A₁=nothing, A₂=nothing, G₃=nothing) where T
+    _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
+    D    = (mat.thickness^2 / 12) * C
+    cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    Aup  = inv(A_metric)
+    Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
+    return D, Cs
+end
 
 """
     Hyperelastic(W, thickness=1.0)
@@ -96,7 +117,7 @@ end
 # Membrane stress N and consistent tangent C via nested gradient of _W_phys.
 # N^{αβ} = 2t ∂W/∂C_{αβ}; factor 2 from Tensors.jl Mandel off-diagonal convention.
 function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,2},
-                                      A_metric, A₁, A₂, G₃)
+                                     A_metric, A₁, A₂, G₃)
     det_A = det(A_metric)
     Jinv  = inv(_J_ref(A₁, A₂, G₃))
     ∇W(c) = gradient(x -> _W_phys(mat, x, det_A, Jinv), c)
@@ -106,19 +127,9 @@ function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,
     return N, C
 end
 
-# LinearElastic: frame arguments accepted but ignored.
-function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
-                                      A_metric, A₁=nothing, A₂=nothing, G₃=nothing) where T
-    Aup = inv(A_metric)
-    μ = mat.E * mat.thickness / (2*(1 + mat.ν))
-    λ = mat.ν * mat.thickness * mat.E / (1 - mat.ν^2)
-    C = SymmetricTensor{4,2,T}((α,β,γ,δ) -> λ*Aup[α,β]*Aup[γ,δ] + μ*(Aup[α,γ]*Aup[β,δ] + Aup[α,δ]*Aup[β,γ]))
-    return C ⊡ ((c_ms - A_metric) / 2), C
-end
-
 # Bending and shear stiffness tensors in the physical Cartesian frame.
 function bending_and_shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
-                                      A_metric, A₁, A₂, G₃) where T
+                                     A_metric, A₁, A₂, G₃) where T
     _, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
     D     = (mat.thickness^2 / 12) * C
     det_A = det(A_metric)
@@ -126,17 +137,5 @@ function bending_and_shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,
     W_sh(γ) = _W_phys(mat, c_ms, γ[1], γ[2], det_A, Jinv)
     Cs_full = mat.thickness * hessian(W_sh, zero(Vec{2,T}))
     Cs = SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
-    return D, Cs
-end
-
-# LinearElastic: frame arguments accepted but ignored.
-function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
-                                      A_metric::SymmetricTensor{2,2,T},
-                                      A₁=nothing, A₂=nothing, G₃=nothing) where T
-    _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
-    D    = (mat.thickness^2 / 12) * C
-    cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    Aup  = inv(A_metric)
-    Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
     return D, Cs
 end
