@@ -1,128 +1,81 @@
-using FerriteShells,LinearAlgebra
+using FerriteShells, LinearAlgebra, Printf
+using WriteVTK
 
-function assemble_global_shell!(K, g, u, dh, scv, mat)
-    n_e = ndofs_per_cell(dh)
-    ke  = zeros(n_e, n_e)
-    re  = zeros(n_e)
-    asm = start_assemble(K, g)
-    for cell in CellIterator(dh)
-        fill!(ke, 0.0); fill!(re, 0.0)
-        reinit!(scv, cell)
-        u_e = u[shelldofs(cell)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
-        bending_tangent_RM!(ke, scv, u_e, mat)
-        membrane_residuals_RM!(re, scv, u_e, mat)
-        bending_residuals_RM!(re, scv, u_e, mat)
-        assemble!(asm, shelldofs(cell), ke, re)
-    end
-end
+# Partly clamped hyperbolic paraboloid — Lee & Bathe, Comp. Struct. 80 (2002) 235-255
+# Bending-dominated benchmark (Section 3.3, Fig. 17).
+# Surface: z = x² - y², (x,y) ∈ [-L/2,L/2]², clamped at y = -L/2, free elsewhere.
+# Loading: self-weight q = 80·q₀(ε,μ) per unit area (Bathe Eq. 23, F∝ε scaling).
+# Table 2 gives q₀(ε=0.01, μ=1) = 1.0, so q = 80 [force/area] for t/L=0.01.
+# Reference scaled strain energy E₀ = E_actual/q₀ (half-shell, Bathe Table 7):
+#   t/L = 0.01  →  E₀ = 8.37658e-4  →  E_actual_half = 8.37658e-4
+#   t/L = 0.001 →  E₀ = 5.48614e-2  →  q₀ = 0.1  →  E_actual_half = 5.486e-3
+# Full-shell strain energy = 2 × E_actual_half (using x-symmetry of the surface).
 
-# domain ω ∈ ]-1/2; 1/2[ and 3D grid
-grid = shell_grid(generate_grid(QuadraticQuadrilateral, (40, 40), Vec(-0.5, -0.5), Vec(0.5, 0.5));
-                  map=(n)->(100*n.x[1], 100*n.x[2], 100*(n.x[1]^2-n.x[2]^2)))
+const L  = 1.0
+const E  = 2e11
+const ν  = 0.3
+const tL = 0.01         # thickness ratio t/L
+const t  = tL * L
+const q_z = 80.0       # self-weight load per unit area (q₀=1 at ε=0.01, Bathe Table 2)
 
-# add the Dirichlet Boundary on the faces of the model
-addfacetset!(grid, "clamped",  x -> x[1] ≈  50.0)
-addfacetset!(grid, "traction", x -> x[1] ≈ -50.0)
+mat  = LinearElastic(E, ν, t)
+grid = shell_grid(generate_grid(QuadraticQuadrilateral, (200, 200),
+                                Vec(-L/2, -L/2), Vec(L/2, L/2));
+                  map = n -> (n.x[1], n.x[2], n.x[1]^2 - n.x[2]^2))
 
-# interpolation order
-ip = Lagrange{RefQuadrilateral, 2}() # Q9
-qr = QuadratureRule{RefQuadrilateral}(3)
+addfacetset!(grid, "clamped", x -> x[2] ≈ -L/2)
 
-# cell (shell) values
-scv = ShellCellValues(qr, ip, ip)
-fqr = FacetQuadratureRule{RefQuadrilateral}(3)
+ip  = Lagrange{RefQuadrilateral, 2}()
+qr  = QuadratureRule{RefQuadrilateral}(3)
+nf  = NodeFrames(grid, ip)
+scv = ShellCellValues(qr, ip, ip; mitc=MITC9)
 
-# Linear elastic material
-E = 200000.0 # MPa
-ν = 0.30     # n-a
-t = 2.0      # thickness in mm
-mat = LinearElastic(E, ν, t)
-
-# degrees of freedom
 dh = DofHandler(grid)
 add!(dh, :u, ip^3)
 add!(dh, :θ, ip^2)
 close!(dh)
 
-# add the boundary condition to the dh
 dbc = ConstraintHandler(dh)
 add!(dbc, Dirichlet(:u, getfacetset(grid, "clamped"), x -> zero(x), [1,2,3]))
 add!(dbc, Dirichlet(:θ, getfacetset(grid, "clamped"), x -> zeros(2), [1,2]))
 close!(dbc)
 
-# Pre-allocation of vectors for the solution and Newton increments
-_ndofs = ndofs(dh)
-un = zeros(_ndofs) # previous solution vector
-u = zeros(_ndofs)
-Δu = zeros(_ndofs)
+n_el   = ndofs_per_cell(dh)
+n_base = getnbasefunctions(scv.ip_shape)
+ke = zeros(n_el, n_el)
+fe = zeros(n_el)
 
-# Create sparse matrix and residual vector
-K = allocate_matrix(dh)
-g = zeros(_ndofs)
-
-using WriteVTK
-pvd = paraview_collection("hyperbolic_paraboloid")
-VTKGridFile("hyperbolic_paraboloid-0", dh) do vtk
-    write_solution(vtk, dh, u); pvd[0] = vtk
-end
-
-# traction is constant along load step, assemble once
-traction = Vec{3}((0., 0., -40.0))
+K     = allocate_matrix(dh)
 f_ext = zeros(ndofs(dh))
-assemble_traction!(f_ext, dh, getfacetset(grid, "traction"), ip, fqr, traction)
 
-# solve with Newton-Raphson
-# let newton_itr = 0; @time while true
-#     newton_itr += 1
-#     # Construct the current guess
-#     u .= un .+ Δu
-#     # Compute residual and tangent for current guess
-#     assemble_global_shell!(K, g, u, dh, scv, mat)
-#     g .-= f_ext # apply external force
-#     # Apply boundary conditions
-#     apply_zero!(K, g, dbc)
-#     # Compute the residual norm and compare with tolerance
-#     norm(g[dbc.free_dofs]) < 1e-6 && break
-#     newton_itr > 30 && break
-#     # Compute increment
-#     Δu .-= K \ g
-#     # make sure BC are zero
-#     apply_zero!(Δu, dbc)
-#     # save
-#     VTKGridFile("hyperbolic_paraboloid-$newton_itr", dh) do vtk
-#         write_solution(vtk, dh, u); pvd[newton_itr] = vtk
-#     end
-# end; println("Converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
-# end
-# close(pvd);
+asm = start_assemble(K, f_ext)
+for cell in CellIterator(dh)
+    fill!(ke, 0.0); fill!(fe, 0.0)
+    reinit!(scv, cell, nf)
+    u_e = zeros(n_el)
+    membrane_tangent_RM!(ke, scv, u_e, mat)
+    bending_tangent_RM!(ke, scv, u_e, mat)
+    for qp in 1:getnquadpoints(scv)
+        dΩ = scv.detJdV[qp]; ξ = scv.qr.points[qp]
+        for I in 1:n_base
+            NI = Ferrite.reference_shape_value(scv.ip_shape, ξ, I)
+            fe[5(I-1)+3] -= NI * q_z * dΩ   # u_z in shelldofs ordering
+        end
+    end
+    assemble!(asm, shelldofs(cell), ke, fe)
+end
 
-# load controlled Newton-Raphson
-let λᵢ=0; @time for λ in 0.2:0.2:1.0
-    # Newton solve for current load step
-    λᵢ += 1; newton_itr = 0
-    while true
-        newton_itr += 1
-        # Construct the current guess
-        u .= un .+ Δu
-        # Compute residual and tangent for current guess
-        assemble_global_shell!(K, g, u, dh, scv, mat)
-        g .-= λ .* f_ext # apply external force
-        # Apply boundary conditions
-        apply_zero!(K, g, dbc)
-        # Compute the residual norm and compare with tolerance
-        norm(g[dbc.free_dofs]) < 1e-6 && break
-        newton_itr > 30 && break
-        # Compute increment
-        Δu .-= K \ g
-        # make sure BC are zero
-        apply_zero!(Δu, dbc)
-    end
-    println("Load step λ=$(round(λ; digits=2)) converged in $newton_itr iterations to $(norm(g[dbc.free_dofs]))")
-    # save
-    VTKGridFile("hyperbolic_paraboloid-$newton_itr", dh) do vtk
-        write_solution(vtk, dh, u); pvd[newton_itr] = vtk
-    end
+f_ref = copy(f_ext)   # save before BCs overwrite f_ext
+apply!(K, f_ext, dbc)
+u = K \ f_ext
+
+E_total = 0.5 * dot(u, f_ref)                # = 0.5 · f_ext · u at equilibrium
+E_ref   = 2 * 8.37658e-4                     # full shell: 2 × E₀ (q₀=1 at ε=0.01), Bathe Table 7
+
+@printf("Strain energy (computed) : %.5e\n", E_total)
+@printf("Strain energy (Bathe ref): %.5e\n", E_ref)
+@printf("Error                    : %.2f%%\n", abs(E_total - E_ref) / E_ref * 100)
+
+VTKGridFile("hyperbolic_paraboloid", dh) do vtk
+    write_solution(vtk, dh, u)
 end
-end
-close(pvd);

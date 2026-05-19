@@ -313,27 +313,17 @@ Embed a surface `SymmetricTensor{2,2}` into a 3D symmetric tensor by padding
 the out-of-plane rows/columns with zeros. Useful for writing shell strain or
 stress tensors to VTK (ParaView expects 6-component symmetric tensors).
 """
-@inline embed23(S::SymmetricTensor{2,2,T}) where T =
-    SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
+@inline embed23(S::SymmetricTensor{2,2,T}) where T = SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
 
 """
     NodeFrames
-    NodeFrames(grid, ip_geo)
 
 Per-node area-weighted averaged director frames for a shell mesh. Eliminates the
 O(h/R) inter-element frame inconsistency that occurs when adjacent curved-shell
-elements each derive their own centroid frame: each element computes a slightly
-different normal at a shared node, making the rotation DOF interpretation inconsistent.
+elements each derive their own centroid frame.
 
-`NodeFrames(grid, ip_geo)` constructs the frames by accumulating area-weighted element
-normals at each node and then orthonormalising via Gram-Schmidt.
-
-Usage: pass to [`reinit!`](@ref) instead of the plain `reinit!(scv, cell)`:
-```julia
-nf = NodeFrames(grid, ip)
-# inside cell loop:
-reinit!(scv, getcoordinates(cell), nf, collect(getnodes(cell)))
-```
+Construct via `NodeFrames(grid, ip_geo)`. Pass to `reinit!(scv, x, nf, node_ids)`
+instead of the plain `reinit!(scv, x)` to activate per-node frames.
 
 For flat shells the result is identical to the centroid-frame approach.
 """
@@ -382,6 +372,23 @@ function NodeFrames(grid::Grid, ip_geo::Interpolation)
     NodeFrames(G₃, T₁, T₂)
 end
 
+"""
+    reinit!(scv::ShellCellValues, x::AbstractVector, nf::NodeFrames)
+    reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames)
+    reinit!(scv::ShellCellValues, cell::AbstractCell, nf::NodeFrames)
+
+Update the `ShellCellValues` object for a cell with cell coordinates `x` and a `NodeFrames` object.
+
+The reference surface measures such as the covariant basis are obtained from the `NodeFrames` object
+pre-computed initially from `nf = NodeFrames(grid, ip_geo)`.
+
+**Note:**
+For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
+"""
+reinit!
+
+reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinates(cell), nf, getnodes(cell))
+reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
     reinit!(scv, x)
     n_geo = getnbasefunctions(scv.ip_geo)
