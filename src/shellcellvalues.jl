@@ -43,7 +43,7 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure,
     T₁       :: Vector{Vec{3, T}}
     T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
-    G₃_elem  :: Vector{Vec{3, T}}   # element-centroid frame (length 1) — shared by all QPs
+    G₃_elem  :: Vector{Vec{3, T}}   # per-node frame (length n_shape) — updated each reinit!
     T₁_elem  :: Vector{Vec{3, T}}
     T₂_elem  :: Vector{Vec{3, T}}
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
@@ -82,8 +82,8 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
-        fill(zero(Vec{3, T}), 1), fill(zero(Vec{3, T}), 1),
-        fill(zero(Vec{3, T}), 1), m
+        fill(zero(Vec{3, T}), n_shape), fill(zero(Vec{3, T}), n_shape),
+        fill(zero(Vec{3, T}), n_shape), m
     )
 end
 
@@ -189,8 +189,11 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     t₁   = ref - (ref ⋅ G₃_c) * G₃_c
     T₁_c = t₁ / norm(t₁)
     T₂_c = G₃_c × T₁_c
-    scv.G₃_elem[1] = G₃_c; scv.T₁_elem[1] = T₁_c; scv.T₂_elem[1] = T₂_c
-    reinit!(scv.mitc, scv.ip_geo, x, G₃_c, T₁_c, T₂_c)
+    n_shape = getnbasefunctions(scv.ip_shape)
+    for I in 1:n_shape
+        scv.G₃_elem[I] = G₃_c; scv.T₁_elem[I] = T₁_c; scv.T₂_elem[I] = T₂_c
+    end
+    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
 
 # compute the centroid coordinates for different element topologies
