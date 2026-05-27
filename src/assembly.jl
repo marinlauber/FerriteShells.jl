@@ -704,6 +704,8 @@ end
              Vec{2}(( 0.0, -0.5))
 
 """
+    assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
+
 Assemble external traction into force vector f for embedded shell elements (2D mesh in 3D).
 `traction` is either a `Vec{3}` (uniform) or a callable `x::Vec{3} -> Vec{3}`.
 Uses a `FacetQuadratureRule` and computes the edge length element directly from 3D node positions,
