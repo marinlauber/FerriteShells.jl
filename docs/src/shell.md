@@ -4,9 +4,7 @@ Most shells theories rely on the definition of a smooth injective immersion ``\P
 \mathbf{g}_i=\frac{\partial \Phi(\xi^1,\xi^2,\xi^3)}{\partial \xi^i}, \quad i\in 1,2,3.
 ```
 For an immersed 2D shell, where the curvilinear coordinates are obtained from an open set ``\omega\in\mathbb{R}^2``, see Figure 1. The immersion is fully characterized by two sets of equations, the **surface** metric tensor and the **curvature** tensor, both of which play an important role in shell theories.
-```@raw html
-<img src="./images/shell_kinematic_init.png" style="background-color:white" figcaption="**Figure 1**:" />
-```
+![Shell reference kinematics](images/shell_kinematic_init.png)
 The surface metric tensor ``a_{\alpha\beta}=\mathbf{a}_\alpha\cdot\mathbf{a}_\beta`` and the curvature tensor ``b_{\alpha\beta}=\hat{\mathbf{a}}_3\cdot\partial_\alpha\mathbf{a}_\beta`` are derive from the **surface** basis vectors
 ```math
 \mathbf{a}_\alpha=\frac{\partial \phi(\xi^1,\xi^2)}{\partial \xi^\alpha}, \quad \alpha\in 1,2,
@@ -38,7 +36,7 @@ which allows to transform covariant quantities into their contravariant form
 
 The Green-Lagrange strain tensor is given by half the increment in the metric tensor [chapelle2011](@citet)
 ```math
-e_{ij} = \frac{1}{2}\left(g_{ij} - G_{ji}\right).
+e_{ij} = \frac{1}{2}\left(g_{ij} - G_{ij}\right).
 ```
 where ``g_{i,j}`` and ``G_{ij}`` are the metric tensor in the current and in the reference configuration, respectively.
 Another form can be obtained by subsituting the definition of ``g_{ij}`` and ``G_{i,j}`` to get
@@ -55,7 +53,7 @@ where we can substitute the displacement field for the mapping in the current co
 ```
 dropping the ``(\xi^1,\xi^2,\xi^3)`` terms for brevity, we get
 ```math
-e_{ij} = \frac{1}{2}\left(\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right)\cdot\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right) - \frac{\partial\Phi^0}{\partial\xi^i}\cdot\frac{\partial\Phi^0}{\partial\xi^j}\right)
+e_{ij} = \frac{1}{2}\left(\left(\frac{\partial\Phi^0}{\partial\xi^i}+\frac{\partial\mathbf{u}}{\partial\xi^i}\right)\cdot\left(\frac{\partial\Phi^0}{\partial\xi^j}+\frac{\partial\mathbf{u}}{\partial\xi^j}\right) - \frac{\partial\Phi^0}{\partial\xi^i}\cdot\frac{\partial\Phi^0}{\partial\xi^j}\right)
 ```
 expanding the first term and cancelling the last contribution with the first expansion, we get
 ```math
