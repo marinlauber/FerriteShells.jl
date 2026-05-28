@@ -219,10 +219,22 @@ function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     return W
 end
 
+"""
+    bending_residuals_KL!(re, scv, u_e, mat)
+
+Kirchhoff–Love bending residual via `ForwardDiff.gradient` of [`bending_energy_KL`](@ref).
+`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+"""
 function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
 end
 
+"""
+    bending_tangent_KL!(ke, scv, u_e, mat)
+
+Kirchhoff–Love bending tangent via `ForwardDiff.hessian` of [`bending_energy_KL`](@ref).
+`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+"""
 function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> bending_energy_KL(u, scv, mat), u_e)
 end
@@ -751,7 +763,6 @@ Follower pressure residual for embedded shell elements.
 ``\\mathrm{detJdV}[q] = \\|A_1 \\times A_2\\| \\cdot w`` (reference area times quadrature weight).
 ``\\mathrm{cross}(a_1, a_2)`` has magnitude ``\\|a_1 \\times a_2\\|`` (current area per parametric area).
 """
-# Follower pressure residual
 function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
     for qp in 1:getnquadpoints(scv)

@@ -3,7 +3,7 @@ CurrentModule = FerriteShells
 DocTestSetup = :(using FerriteShells)
 ```
 
-Utility function
+Utility functions
 
 ```@docs
 shell_grid

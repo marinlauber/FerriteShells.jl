@@ -16,14 +16,14 @@ Some formulation that can be assembled with this package:
 
 Function | Membrane | Kirchhoff–Love | Reissner–Mindlin
 :------------ | :-------------| :-------------| :-------------
-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
-non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
-`Lagrange{RefTriangle, 1}` (T3) | :white_check_mark: |  :x: | :white_check_mark:
-`Lagrange{RefQuadrilateral, 1}` (Q4) | :white_check_mark: |  :x: | :white_check_mark:
-`Lagrange{RefTriangle, 2}` (T6) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
-`Serendipity{RefQuadrilateral, 2}` (Q8) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
-`Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
-MITC |  |   | :construction_worker:
+linear | ✓ | ✓ | ✓
+non-linear | ✓ | ✓ | ✓
+`Lagrange{RefTriangle, 1}` (T3) | ✓ | ✗ | ✓
+`Lagrange{RefQuadrilateral, 1}` (Q4) | ✓ | ✗ | ✓
+`Lagrange{RefTriangle, 2}` (T6) | ✓ | ~ | ✓
+`Serendipity{RefQuadrilateral, 2}` (Q8) | ✓ | ~ | ✓
+`Lagrange{RefQuadrilateral, 2}` (Q9) | ✓ | ~ | ✓
+MITC | | | (in progress)
 
 We refer the reader to the documentation for the specific weak form, numerical implementation and limitation of the different shell models.
 

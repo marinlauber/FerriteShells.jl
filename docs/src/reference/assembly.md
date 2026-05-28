@@ -9,11 +9,13 @@ DocTestSetup = :(using FerriteShells)
 mass_matrix!
 ```
 
-## Kirchhof-Love functions
+## Kirchhoff-Love functions
 
 ```@docs
 membrane_residuals_KL!
 membrane_tangent_KL!
+bending_residuals_KL!
+bending_tangent_KL!
 bending_energy_KL
 ```
 
@@ -34,6 +36,7 @@ energy_RM
 ```@docs
 assemble_traction!
 apply_pointload!
+assemble_pressure!
 assemble_pressure_tangent!
 ```
 
