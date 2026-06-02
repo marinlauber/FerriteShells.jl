@@ -121,7 +121,7 @@ r_{I,k}^\varphi = \int_\omega F_I \cdot \mathrm{dd}_{Ik}\,\sqrt{A}\,\mathrm{d}y,
 ```
 where ``S^\alpha = M^{\alpha\beta}\mathbf{d}_{,\beta}``.
 
-In FerriteShells the explicit forms are implemented in [`membrane_residuals_RM!`](@ref) and [`bending_residuals_RM!`](@ref). ForwardDiff-based variants are also available as [`membrane_residuals_RM_FD!`](@ref) and [`bending_residuals_RM_FD!`](@ref).
+In FerriteShells the explicit forms are implemented in [`membrane_residuals_RM!`](@ref) and [`bending_residuals_RM!`](@ref). ForwardDiff-based residuals are also available as [`residuals_RM_FD!`](@ref) for both membrane, bending and shear contributions.
 
 ### 2.2 Consistent tangent and second variation
 
@@ -132,4 +132,4 @@ The consistent tangent is the second variation of ``\mathcal{W}_\text{int}``. It
 - **φu** (2×3): transpose of the uφ block at ``(J,I)``, by symmetry of ``\mathcal{W}``.
 - **φφ** (2×2): material part from ``\delta F_I\cdot\mathrm{dd}_{Jk}`` plus a geometric part from the second Rodrigues derivative ``\partial^2\mathbf{d}_I/\partial\varphi_k\partial\varphi_l`` (non-zero only for the diagonal ``J=I`` block).
 
-The explicit implementation is in [`membrane_tangent_RM!`](@ref) and [`bending_tangent_RM!`](@ref). ForwardDiff-based variants are available as [`membrane_tangent_RM_FD!`](@ref) and [`bending_tangent_RM_FD!`](@ref).
+The explicit implementation is in [`membrane_tangent_RM!`](@ref) and [`bending_tangent_RM!`](@ref). ForwardDiff-based variants are available as [`tangent_RM_FD!`](@ref).

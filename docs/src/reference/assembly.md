@@ -24,14 +24,11 @@ bending_energy_KL
 ```@docs
 membrane_residuals_RM!
 bending_residuals_RM!
-membrane_residuals_RM_FD!
-bending_residuals_RM_FD!
-bending_shear_energy_RM
-membrane_energy_RM
 membrane_tangent_RM!
 bending_tangent_RM!
-membrane_tangent_RM_FD!
-bending_tangent_RM_FD!
+residuals_RM_FD!
+tangent_RM_FD!
+energy_RM
 ```
 
 ## External loading functions
@@ -41,4 +38,11 @@ assemble_traction!
 apply_pointload!
 assemble_pressure!
 assemble_pressure_tangent!
+```
+
+## Volume functions
+
+```@docs
+volume_residuals!
+volume_gradient!
 ```

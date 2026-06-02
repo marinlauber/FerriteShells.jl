@@ -18,14 +18,13 @@ functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
 
 **Keyword arguments:** The following keyword arguments are experimental and may change in future minor releases
 * `mitc`:  an instant of [`MITC`](@ref) to specify the shear treatment used in the element (default `NoMITC`)
-* `E` : an instance of `AbstractStrainMeasure` to specify the strain measure used in the element (default `GreenLagrangeStrain`)
 
 **Common methods:**
 * [`reinit!`](@ref) computes the reference geometry (``A_1``, ``A_2``, ``G_3``, ``B``, ``\\cdots``) by differentiating the coordinate map using `ip_geo`.
 """
 ShellCellValues
 
-struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, E<:AbstractStrainMeasure, M} <: AbstractCellValues
+struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
     qr       :: QR
     ip_geo   :: IPG
     ip_shape :: IPS
@@ -55,7 +54,7 @@ Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 @propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_geo)
 
-function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; E=GreenLagrangeStrain, mitc=nothing)
+function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing)
     n_qp    = length(qr.weights)
     n_shape = getnbasefunctions(ip_shape)
     T       = Float64
@@ -74,7 +73,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
     end
 
     m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
-    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, E, typeof(m)}(
+    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m)}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2, zeros(T, n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),

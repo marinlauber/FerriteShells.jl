@@ -147,18 +147,21 @@ function get_cell_type(faces)
 end
 
 """
-    compute_volume()
+    compute_volume(dh, scv, u; cellset, h, b)
 
-Computes the volume of a shell in the configuration `u`.
+Computes the volume of a shell in the configuration `u`. The default behavior is to use all the `cellset` attached
+to the `DofHandler`. By passing unions of cellsets, you can tailor the volume computation to specific regions of the shell.
+
 The vectors ``h`` and ``b`` define the reference and base positions, respectively. These can be used for open shells to remove
 contribution to the volume. For example, an inflated membrane on the x-y plane with +z deformation would be measured as
 ```Julia
 vol = compute_volume(dh, scv, u; h=Vec((0.0,0.0,1.0)), b=Vec((0.0,0.0,0.0)))
 ```
 """
-function compute_volume(dh, scv, u::AbstractVector{T}; h::Vec{3, T}=Vec((0.0,0.0,1.0)), b::Vec{3, T}=Vec((0.0,0.0,0.0))) where T
+function compute_volume(dh, scv, u::AbstractVector{T}; cellset=1:getncells(dh.grid),
+                        h::Vec{3, T}=Vec((0.0,0.0,1.0)), b::Vec{3, T}=Vec((0.0,0.0,0.0))) where T
     volume = zero(T)
-    for cell in CellIterator(dh)
+    for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         uₑ = u[shelldofs(cell)] # arranged as [u₁,u₂,u₃,φ₁,φ₂,…]
@@ -180,30 +183,45 @@ function volume_residual(scv, coords, uₑ::AbstractVector{T}, h, b) where T
     return -val
 end
 
-function volume_residuals!(re, dh, scv::ShellCellValues, u::AbstractVector{T}, V⁰ᴰ; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
-    for cell in CellIterator(dh)
+"""
+    volume_residuals!(re, dh, scv, u, V⁰; cellset, h, b)
+
+Compute the volume residuals ``r =  V^0 - \\oint J(\\vec{h}\\otimes\\vec{h}) \\cdot (\\vec{x} + \\vec{d} - \\vec{b} ) \\cdot  (F^{-\\top}\\cdot\\vec{n}) \\text{ d}\\Omega``.
+The residual is stored in the first index of the `re` vector.
+
+The default behavior is to use all the `cellset` attached to the `DofHandler`. By passing unions of cellsets, you can tailor the volume computation to specific regions of the shell.
+
+See also [`compute_volume`](@ref).
+"""
+function volume_residuals!(re, dh, scv::ShellCellValues, u::AbstractVector{T}, V⁰; cellset=1:getncells(dh.grid),
+                           h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
+    for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         uₑ = u[shelldofs(cell)]
         re[1] += volume_residual(scv, coords, uₑ, h, b)
     end
-    re[1] += V⁰ᴰ
+    re[1] += V⁰
 end
 
 """
-    volume_gradient!(dVdu, dh, scv, u; h, b)
+    volume_gradient!(dVdu, dh, scv, u; cellset, h, b)
 
 Compute the volume gradient ``\\partial V_{3D}/\\partial u`` into `dVdu` via ForwardDiff.
 Each element contribution is `ForwardDiff.gradient(ue -> volume_residual(..., ue, h, b), ue)`
 assembled into the global DOF vector using the shell DOF permutation.
+
+See also [`compute_volume`](@ref).
 """
-function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
+function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; cellset=1:getncells(dh.grid),
+                          h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
     fill!(dVdu, zero(T))
-    for cell in CellIterator(dh)
+    for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         sd  = shelldofs(cell)
         uₑ  = u[sd]
+        #TODO this could be replaced by an expression to save allocations
         dVdu[sd] .+= ForwardDiff.gradient(v -> volume_residual(scv, coords, v, h, b), uₑ)
     end
 end
