@@ -25,6 +25,13 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
     T₁_node :: Vector{Vec{3,T}}
     T₂_node :: Vector{Vec{3,T}}
+    # Reusable scratch for bending_tangent_RM! (overwritten each call; not thread-safe).
+    a₁_tie_s :: Vector{Vec{3,T}}; a₂_tie_s :: Vector{Vec{3,T}}   # length M (tying points)
+    d_tie1_s :: Vector{Vec{3,T}}; d_tie2_s :: Vector{Vec{3,T}}
+    dd1_s    :: Vector{Vec{3,T}}; dd2_s    :: Vector{Vec{3,T}}   # length N (nodes), Rodrigues ∂d/∂φ
+    Bγ₁u_s   :: Vector{Vec{3,T}}; Bγ₂u_s   :: Vector{Vec{3,T}}   # length N
+    Bγ₁φ1_s  :: Vector{T}; Bγ₁φ2_s :: Vector{T}
+    Bγ₂φ1_s  :: Vector{T}; Bγ₂φ2_s :: Vector{T}
 end
 function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) where N
     n_shape = getnbasefunctions(ip_shape)
@@ -52,6 +59,12 @@ function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) 
         fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
         ξ_tie_1, ξ_tie_2,
         fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N),
+        Vector{Vec{3,T}}(undef, Nt), Vector{Vec{3,T}}(undef, Nt),
+        Vector{Vec{3,T}}(undef, Nt), Vector{Vec{3,T}}(undef, Nt),
+        Vector{Vec{3,T}}(undef, N),  Vector{Vec{3,T}}(undef, N),
+        Vector{Vec{3,T}}(undef, N),  Vector{Vec{3,T}}(undef, N),
+        Vector{T}(undef, N), Vector{T}(undef, N),
+        Vector{T}(undef, N), Vector{T}(undef, N),
     )
 end
 
