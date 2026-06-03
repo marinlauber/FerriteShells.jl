@@ -49,14 +49,14 @@ end
 @inline function director_field(scv, qp, u_e::AbstractVector{T}, n_nodes) where T
     d = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
     for I in 1:n_nodes
-        # Use the stored Float64 frame vectors directly; scalar·Vec promotion
-        # handles the Dual (AD) case. Wrapping in Vec{3,T}(Tuple(...)) boxes and
-        # allocates ~5 KB/QP, which dominates the bending-kernel churn.
+        # get sotred frame data for node I
         G₃_I = scv.G₃_elem[I]
         T₁_I = scv.T₁_elem[I]
         T₂_I = scv.T₂_elem[I]
+        # get rotation dofs for node I
         φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
         cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
+        # and compute Rodrigues interpolation
         d_I = cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I)
         d  += scv.N[I, qp]       * d_I
         d₁ += scv.dNdξ[I, qp][1] * d_I

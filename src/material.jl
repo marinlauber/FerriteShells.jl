@@ -27,8 +27,6 @@ function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2
     μ = mat.E * mat.thickness / (2*(1 + mat.ν))
     λ = mat.ν * mat.thickness * mat.E / (1 - mat.ν^2)
     # C^{αβγδ} = λ Aup^{αβ} Aup^{γδ} + μ (Aup^{αγ} Aup^{βδ} + Aup^{αδ} Aup^{βγ})
-    # built with non-capturing tensor algebra (otimesu/otimesl) to avoid the
-    # heap allocation of the closure-based SymmetricTensor constructor.
     C = λ * (Aup ⊗ Aup) + μ * symmetric(otimesu(Aup, Aup) + otimesl(Aup, Aup))
     return C ⊡ ((c_ms - A_metric) / 2), C
 end
