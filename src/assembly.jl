@@ -362,8 +362,7 @@ function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        N, C = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], G₃)
+        N, C = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], G₃)
         M₁₁, M₁₂, M₂₂ = frame_stiffness(C, a₁, a₂)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
@@ -409,8 +408,7 @@ function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T},
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], d₀)
+        D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         M   = D ⊡ κ
         Q₁  = Cs[1,1]*γ₁ + Cs[1,2]*γ₂
         Q₂  = Cs[2,1]*γ₁ + Cs[2,2]*γ₂
@@ -514,8 +512,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], d₀)
+        D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
         Q₁  = Cs[1,1]*γ₁ + Cs[1,2]*γ₂
         Q₂  = Cs[2,1]*γ₁ + Cs[2,2]*γ₂
@@ -614,8 +611,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], d₀)
+        D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         M   = D ⊡ κ
         Q₁  = Cs[1,1]*γ₁ + Cs[1,2]*γ₂
         Q₂  = Cs[2,1]*γ₁ + Cs[2,2]*γ₂

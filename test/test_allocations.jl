@@ -40,6 +40,7 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
         (Q,R,O,M) = elem # unpack
         # unit element
         grid     = shell_grid(generate_grid(Q, (2, 2)))
+        addnodeset!(grid, "all", x->true)
         ip       = Lagrange{R, O}()
         qr       = QuadratureRule{R}(O+1)
         fqr      = FacetQuadratureRule{R}(O+1)
@@ -64,8 +65,9 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
         # Follower-pressure kernels
         @test alloc_of(() -> assemble_pressure!(re, scv_mitc, u_e, 1.0))         == 0
         @test alloc_of(() -> assemble_pressure_tangent!(ke, scv_mitc, u_e, 1.0)) == 0
-        # test other external loading function
+        # test other external loading function TODO fix these two
         @test alloc_of(() ->assemble_traction!(f_ext, dh, getfacetset(grid, "left"), ip, fqr, Vec{3}((0.,0.,1.)))) != 0
+        @test alloc_of(() -> apply_pointload!(f_ext, dh, "all", Vec{3}((0.,0.,1.)))) != 0
         # mass matrix, although it's usually used once...
         @test alloc_of(() -> mass_matrix!(ke, scv_mitc, 1.0, mat)) == 0
         # Residual/tangent kernels
@@ -74,7 +76,7 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
         @test alloc_of(() -> membrane_tangent_RM!(ke, scv_mitc, u_e, mat))   == 0
         @test alloc_of(() -> bending_tangent_RM!(ke, scv_mitc, u_e, mat))    == 0
         # non MITC case
-        @test alloc_of(() -> bending_tangent_RM!(ke, scv, u_e, mat))    == 0
+        @test alloc_of(() -> bending_tangent_RM!(ke, scv, u_e, mat)) == 0
         # A full per-cell assembly sweep (all four kernels) — also allocation-free.
         full() = (fill!(ke, 0.0); fill!(re, 0.0);
                   membrane_residuals_RM!(re, scv_mitc, u_e, mat); bending_residuals_RM!(re, scv_mitc, u_e, mat);
