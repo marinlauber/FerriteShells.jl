@@ -1,4 +1,4 @@
-using FerriteShells, LinearAlgebra,Printf
+using FerriteShells,LinearAlgebra,Printf
 
 # Nonlinear cantilever roll-up under end moment (after Sze, Liu & Lo 2004, Problem 1).
 # L=10, W=1, t=0.1, E=1.2e6, ν=0.
@@ -129,7 +129,7 @@ armijo_c = 1e-4   # sufficient-decrease constant for energy Armijo
 println("Roll-up cantilever (RM, Q9)  M_ref=$(round(M_ref;digits=4))")
 println("  step |  λ     |  u_x_tip  |  u_z_tip  | ux_an   | uz_an   | iters")
 
-u = zeros(N_dofs)
+u = zeros(N_dofs); tip = []
 for step in 1:n_steps
     λ = step / n_steps
     F = λ .* F_ext
@@ -162,6 +162,7 @@ for step in 1:n_steps
             cd = celldofs(cell); tip_ux = u[cd[3I-2]]; tip_uz = u[cd[3I]]; break
         end
     end
+    push!(tip, [λ, tip_ux, tip_uz])
     ux_an, uz_an = analytical_tip(λ)
     step %10==0 && @printf("  %4d | %.4f | %9.4f | %9.4f | %7.4f | %7.4f | %d\n",
                            step, λ, tip_ux, tip_uz, ux_an, uz_an, n_iter)
@@ -171,3 +172,11 @@ for step in 1:n_steps
         write_solution(vtk, dh, u)
     end
 end
+
+using Plots
+sol = analytical_tip.(0:0.05:1)
+x, y = getindex.(sol,1), getindex.(sol, 2)
+scatter([-x./L, y./L], 0:0.05:1, marker=:o, label=["uₐ-analytic" "wₐ-analytic"])
+tipx, tipy, λ = getindex.(tip, 2), getindex.(tip, 3), getindex.(tip, 1)
+plot!([-tipx./L, tipy./L], λ, label=["uₐ" "wₐ"], xlabel="Tip delfection (/L)",  
+        ylabel="Load factor (λ)")
