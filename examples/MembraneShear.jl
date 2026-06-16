@@ -5,8 +5,8 @@ function make_grid(nx, ny; primitive=Quadrilateral)
                Vec{2}((380.0, 128.0)), Vec{2}((0.0, 128.0))]
     grid2D = generate_grid(primitive, (nx, ny), corners)
     grid = shell_grid(grid2D; map = n -> (n.x[1], n.x[2], 0.01 * cos(2*n.x[1]/20) * cos(2*n.x[2]/20)))
-    addfacetset!(grid, "top",    x -> isapprox(x[2], 128.0, atol=1e-10))
-    addfacetset!(grid, "bottom", x -> isapprox(x[2],   0.0, atol=1e-10))
+    # addfacetset!(grid, "top",    x -> isapprox(x[2], 128.0, atol=1e-10))
+    # addfacetset!(grid, "bottom", x -> isapprox(x[2],   0.0, atol=1e-10))
 end
 
 function assemble_all!(K_int, r_int, dh, scv, u, mat)
@@ -141,7 +141,7 @@ K_diag_free = @views K_int.nzval[diag_idx[free]]
 Δτ₀_ptc = length(K_diag_free) / sum(K_diag_free)   # = 1 / mean(diag K_free)
 
 # PTC shear (t ∈ [1,2]).
-# SER drives Δτ → ∞ near equilibrium (recovering Newton) and back to Δτ₀ through snap-throughs.
+# SER drives Δτ near equilibrium (recovering Newton) and back to Δτ₀ through snap-throughs.
 tol_ptc      = 1e-6
 max_iter_ptc = 200
 for t in range(1.0, 2.0, 101)[2:end]

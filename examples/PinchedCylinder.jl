@@ -1,9 +1,6 @@
 using FerriteShells
 
-# Pinched cylinder — Reissner-Mindlin shell (1/8 symmetry model)
-# Same geometry, loading, and BCs as PinchedCylinder.jl; see that file for full description.
-# Two-field DofHandler (:u ip^3, :θ ip^2).  DOF reordering via shelldofs().
-
+# grid helper
 function pinched_cylinder_rm_grid(ns, na)
     g = shell_grid(
         generate_grid(QuadraticQuadrilateral, (ns, na),
@@ -13,21 +10,19 @@ function pinched_cylinder_rm_grid(ns, na)
     addnodeset!(g, "sym_axial",   x -> x[1] ≈ 600.0/2)
     addnodeset!(g, "sym_theta0",  x -> abs(x[2]) < 1e-6)
     addnodeset!(g, "sym_theta90", x -> abs(x[3]) < 1e-6)
-    addnodeset!(g, "load_point",
-        x -> x[1] ≈ 600.0/2 && abs(x[2]) < 1e-6 && abs(x[3] - 300.0) < 1e-6)
+    addnodeset!(g, "load_point", x -> x[1] ≈ 600.0/2 && abs(x[2]) < 1e-6 && abs(x[3] - 300.0) < 1e-6)
     return g
 end
+
+# material and grid
+mat = LinearElastic(3.0e6, 0.3, 3.0)
+grid = pinched_cylinder_rm_grid(32, 32)
 
 # interplation space
 ip  = Lagrange{RefQuadrilateral, 2}() # Q9
 qr  = QuadratureRule{RefQuadrilateral}(3)
-scv = ShellCellValues(qr, ip, ip)
-
-# material
-mat = LinearElastic(3.0e6, 0.3, 3.0)
-
-# make grid
-grid = pinched_cylinder_rm_grid(32, 32)
+nf  = NodeFrames(grid, ip) # directors are not uniform, must be passed to reinit!
+scv = ShellCellValues(qr, ip, ip; mitc=MITC9)
 
 # degrees of freedom
 dh   = DofHandler(grid)
@@ -42,18 +37,21 @@ f  = zeros(ndofs(dh))
 asmb = start_assemble(K, zeros(ndofs(dh)))
 ke = zeros(5n_base, 5n_base); re = zeros(5n_base)
 
+# assemble once
 for cell in CellIterator(dh)
     fill!(ke, 0.0); fill!(re, 0.0)
-    reinit!(scv, cell)
+    reinit!(scv, cell, nf)
     u0 = zeros(5n_base)
-    membrane_tangent_RM_FD!(ke, scv, u0, mat)
-    bending_tangent_RM_FD!(ke, scv, u0, mat)
+    membrane_tangent_RM!(ke, scv, u0, mat)
+    bending_tangent_RM!(ke, scv, u0, mat)
     sd = shelldofs(cell)
     assemble!(asmb, sd, ke, re)
 end
 
-apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -1/4)))
+# apply loading
+apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -1)))
 
+# boundary conditions
 dbc = ConstraintHandler(dh)
 add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"),   x -> zeros(2), [2, 3]))
 add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_axial"),   x -> 0.0,      [1]))
@@ -68,7 +66,8 @@ add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta90"), x -> 0.0, [1]))
 add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_axial"),   x -> 0.0, [2]))
 close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
 
-u_sol = K \ f
+# solver and time it
+@time u_sol = K \ f
 
 # write to vtk
 VTKGridFile("pinched_cylinder", dh) do vtk

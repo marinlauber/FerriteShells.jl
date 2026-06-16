@@ -1,4 +1,4 @@
-using FerriteShells, LinearAlgebra, Printf, WriteVTK
+using FerriteShells,LinearAlgebra,Printf,WriteVTK
 
 # colors the surface in the mesh by their ID from the *.inp file
 function color(vtk, grid, cellset)

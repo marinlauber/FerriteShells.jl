@@ -28,98 +28,62 @@ function hemisphere_grid(n; R=10.0, θ_hole_deg=18.0)
     return g
 end
 
-const mat = LinearElastic(6.825e7, 0.3, 0.04)
-const ip  = Lagrange{RefQuadrilateral, 2}()
-const qr  = QuadratureRule{RefQuadrilateral}(3)
+# material and grid
+mat = LinearElastic(6.825e7, 0.3, 0.04)
+grid = hemisphere_grid(32)
 
-println("Pinched hemisphere RM (Q9): mesh convergence, P=1")
-println("   n | elements |   u_x(A)   |  ref=-0.0924 | error(%)")
+# interpolation space and shell with shear treatmens
+ip  = Lagrange{RefQuadrilateral, 2}()
+qr  = QuadratureRule{RefQuadrilateral}(3)
+nf = NodeFrames(grid, ip)
+scv  = ShellCellValues(qr, ip, ip; mitc=MITC9)
 
-for n in [2, 4, 8, 16, 32]
-    grid = hemisphere_grid(n)
-    scv  = ShellCellValues(qr, ip, ip)
+# degrees of freedom
+dh = DofHandler(grid)
+add!(dh, :u, ip^3)
+add!(dh, :θ, ip^2)
+close!(dh)
 
-    dh = DofHandler(grid)
-    add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+# boundary conditions
+ch = ConstraintHandler(dh)
+add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
+add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
+add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
+add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi90"), x -> 0.0, [2]))
+close!(ch); Ferrite.update!(ch, 0.0)
 
-    ch = ConstraintHandler(dh)
-    add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
-    add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
-    add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
-    add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi90"), x -> 0.0, [2]))
-    close!(ch); Ferrite.update!(ch, 0.0)
+# allocate matrices and vectors
+N      = ndofs(dh)
+n_base = getnbasefunctions(ip)
+K      = allocate_matrix(dh)
+f      = zeros(N)
+ke     = zeros(5n_base, 5n_base)
+re     = zeros(5n_base)
 
-    N      = ndofs(dh)
-    n_base = getnbasefunctions(ip)
-    K      = allocate_matrix(dh)
-    f      = zeros(N)
-    ke     = zeros(5n_base, 5n_base)
-    re     = zeros(5n_base)
-
-    asm = start_assemble(K, zeros(N))
-    for cell in CellIterator(dh)
-        fill!(ke, 0.0)
-        reinit!(scv, cell)
-        u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, u0, mat)
-        bending_tangent_RM!(ke, scv, u0, mat)
-        assemble!(asm, shelldofs(cell), ke, re)
-    end
-
-    apply_pointload!(f, dh, "load_A", Vec{3}((-1.0, 0.0, 0.0)))
-    apply_pointload!(f, dh, "load_B", Vec{3}(( 0.0, 1.0, 0.0)))
-    apply!(K, f, ch)
-    u_sol = K \ f
-
-    A_node = only(getnodeset(grid, "load_A"))
-    u_x_A  = 0.0
-    for cell in CellIterator(dh), (I, gid) in enumerate(getnodes(cell))
-        gid == A_node || continue
-        u_x_A = u_sol[celldofs(cell)[3I-2]]
-    end
-    @printf("  %2d |    %4d  | %10.6f | %12.6f | %6.2f\n",
-            n, getncells(grid), u_x_A, -0.0924, abs(u_x_A + 0.0924) / 0.0924 * 100)
+# assemble once
+asm = start_assemble(K, zeros(N))
+for cell in CellIterator(dh)
+    fill!(ke, 0.0)
+    reinit!(scv, cell)
+    u0 = zeros(5n_base)
+    membrane_tangent_RM!(ke, scv, u0, mat)
+    bending_tangent_RM!(ke, scv, u0, mat)
+    assemble!(asm, shelldofs(cell), ke, re)
 end
 
-# VTK output at n=8
-let n = 8
-    grid = hemisphere_grid(n)
-    scv  = ShellCellValues(qr, ip, ip)
+# apply loading
+apply_pointload!(f, dh, "load_A", Vec{3}((-1.0, 0.0, 0.0)))
+apply_pointload!(f, dh, "load_B", Vec{3}(( 0.0, 1.0, 0.0)))
+apply!(K, f, ch)
 
-    dh = DofHandler(grid)
-    add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+#solve and time it
+@time u_sol = K \ f
 
-    ch = ConstraintHandler(dh)
-    add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
-    add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
-    add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
-    add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi90"), x -> 0.0, [2]))
-    close!(ch); Ferrite.update!(ch, 0.0)
-
-    N      = ndofs(dh)
-    n_base = getnbasefunctions(ip)
-    K      = allocate_matrix(dh)
-    f      = zeros(N)
-    ke     = zeros(5n_base, 5n_base)
-    re     = zeros(5n_base)
-
-    asm = start_assemble(K, zeros(N))
-    for cell in CellIterator(dh)
-        fill!(ke, 0.0)
-        reinit!(scv, cell)
-        u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, u0, mat)
-        bending_tangent_RM!(ke, scv, u0, mat)
-        assemble!(asm, shelldofs(cell), ke, re)
-    end
-
-    apply_pointload!(f, dh, "load_A", Vec{3}((-1.0, 0.0, 0.0)))
-    apply_pointload!(f, dh, "load_B", Vec{3}(( 0.0, 1.0, 0.0)))
-    apply!(K, f, ch)
-    u_sol = K \ f
-
-    VTKGridFile("pinched_hemisphere", dh) do vtk
-        write_solution(vtk, dh, u_sol)
-    end
-    println("VTK written to pinched_hemisphere.vtu")
+# extract solution at point
+ph     = PointEvalHandler(grid, [grid.nodes[first(grid.nodesets["load_A"])]])
+u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
+@show u_eval
+# save
+VTKGridFile("pinched_hemisphere", dh) do vtk
+    write_solution(vtk, dh, u_sol)
 end
