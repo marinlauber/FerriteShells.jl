@@ -312,6 +312,7 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
+    E₁₁_k, E₂₂_k = tying_membrane_strains(scv.mitc, u_flat)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes)
@@ -319,7 +320,7 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
-        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        c_ms = membrane_metric(scv.A_metric[qp], qp, a₁, a₂, scv.mitc, E₁₁_k, E₂₂_k)
         W += rm_qp_energy(mat, c_ms, κ, γ₁, γ₂, scv.A_metric[qp],
                           scv.A₁[qp], scv.A₂[qp], d₀) * scv.detJdV[qp]
     end

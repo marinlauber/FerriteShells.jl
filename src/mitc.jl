@@ -177,6 +177,50 @@ Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`.
     γ₁, γ₂
 end
 
+# default: no membrane tying
+@inline tying_membrane_strains(::NoMITC, u_e) = nothing, nothing
+
+"""
+    tying_membrane_strains(mitc::MITC{N,M,T}, u_e)
+
+Covariant Green–Lagrange membrane normal strains ``E_{11}=½(a_1·a_1-A_1·A_1)`` and
+``E_{22}=½(a_2·a_2-A_2·A_2)`` at the MITC tying points (the same point sets used for the
+shear, `ξ_tie_1`/`ξ_tie_2`). Interpolating these to the quadrature points (via `h_tie`)
+relaxes membrane locking on curved geometry — the in-plane counterpart of the shear MITC.
+Returns (`E₁₁_k`, `E₂₂_k`) as NTuples of length `M`, ForwardDiff-safe.
+"""
+function tying_membrane_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T}
+    E₁₁_k = ntuple(Val(M)) do k
+        a₁ = mitc.A₁_tie_1[k]
+        @inbounds for I in 1:N
+            a₁ += Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2])) * mitc.dNdξ_tie_1[I,k][1]
+        end
+        (dot(a₁, a₁) - dot(mitc.A₁_tie_1[k], mitc.A₁_tie_1[k])) / 2
+    end
+    E₂₂_k = ntuple(Val(M)) do k
+        a₂ = mitc.A₂_tie_2[k]
+        @inbounds for I in 1:N
+            a₂ += Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2])) * mitc.dNdξ_tie_2[I,k][2]
+        end
+        (dot(a₂, a₂) - dot(mitc.A₂_tie_2[k], mitc.A₂_tie_2[k])) / 2
+    end
+    E₁₁_k, E₂₂_k
+end
+
+# Membrane metric c_ms = (a₁·a₁, a₁·a₂, a₂·a₂) used to form the strain (c_ms-A)/2.
+# NoMITC: direct at the QP. MITC: normal components E₁₁,E₂₂ interpolated from tying
+# points; the in-plane shear E₁₂ is left QP-direct (prototype — full MITC9 ties it too).
+@inline membrane_metric(A, qp, a₁, a₂, ::NoMITC, E₁₁_k, E₂₂_k) =
+    SymmetricTensor{2,2}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+@inline function membrane_metric(A, qp::Int, a₁, a₂, mitc::MITC{N,M}, E₁₁_k, E₂₂_k) where {N,M}
+    E₁₁ = zero(eltype(E₁₁_k)); E₂₂ = zero(eltype(E₂₂_k))
+    @inbounds for k in 1:M
+        E₁₁ += mitc.h_tie_1[qp, k] * E₁₁_k[k]
+        E₂₂ += mitc.h_tie_2[qp, k] * E₂₂_k[k]
+    end
+    SymmetricTensor{2,2}((A[1,1] + 2E₁₁, dot(a₁, a₂), A[2,2] + 2E₂₂))
+end
+
 # MITC3
 # include("mitc/mitc3.jl")
 # export MITC3
