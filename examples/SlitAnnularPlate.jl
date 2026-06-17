@@ -1,17 +1,35 @@
-using FerriteShells,LinearAlgebra,Printf,WriteVTK
+using FerriteShells, FerriteGmsh, LinearAlgebra, Printf, WriteVTK
+const gmsh = FerriteGmsh.gmsh
 
-# helper for the mesh
-function annular_plate_grid(n_θ, n_r;a=6.0,b=10.0,slit_gap=1e-3)
-    g = shell_grid(
-        generate_grid(QuadraticQuadrilateral, (n_θ, n_r),
-                      Vec{2}((0.0, a)), Vec{2}((2π - slit_gap, b)));
-        map = nd -> (nd.x[2]*cos(nd.x[1]), nd.x[2]*sin(nd.x[1]), 0.0))
-    addfacetset!(g, "clamped", x -> abs(x[2]) < 1e-8 && x[1] > 0.5a)
-    addfacetset!(g, "free",    x -> x[2] < -1e-4 && x[2] > -0.05 && x[1] > 0.5a)
-    addnodeset!(g, "tip_outer", x -> abs(norm(x[1:2]) - b) < 0.15 && x[2] < -1e-4 && x[2] > -0.05)
-    return g
+# Slit annular plate (Sze, Liu & Lo 2004) 10.1016/j.finel.2003.11.001
+function slit_annular_grid(a, b, n_r, n_q)
+    gmsh.initialize(); gmsh.option.setNumber("General.Terminal", 0)
+    g = gmsh.model.geo
+    c   = g.addPoint(0, 0, 0)
+    ang = (0.0, π/2, π, 3π/2, 2π)            # 2π and 0 coincide → the slit
+    ip  = [g.addPoint(a*cos(θ), a*sin(θ), 0) for θ in ang]
+    op  = [g.addPoint(b*cos(θ), b*sin(θ), 0) for θ in ang]
+    radials = [g.addLine(ip[k], op[k]) for k in 1:5]
+    surfs   = Int[]
+    for k in 1:4
+        ia = g.addCircleArc(ip[k], c, ip[k+1])
+        oa = g.addCircleArc(op[k], c, op[k+1])
+        s  = g.addPlaneSurface([g.addCurveLoop([radials[k], oa, -radials[k+1], -ia])])
+        push!(surfs, s)
+        g.mesh.setTransfiniteCurve(ia, n_q+1); g.mesh.setTransfiniteCurve(oa, n_q+1)
+        g.mesh.setTransfiniteCurve(radials[k], n_r+1); g.mesh.setTransfiniteCurve(radials[k+1], n_r+1)
+        g.mesh.setTransfiniteSurface(s); g.mesh.setRecombine(2, s)
+    end
+    g.synchronize()
+    gmsh.model.addPhysicalGroup(2, surfs, -1, "plate")
+    gmsh.model.addPhysicalGroup(1, [radials[1]], -1, "clamped")   # θ = 0 edge
+    gmsh.model.addPhysicalGroup(1, [radials[5]], -1, "loaded")    # θ = 2π edge
+    gmsh.model.mesh.generate(2); gmsh.model.mesh.setOrder(2)
+    grid = togrid(); gmsh.finalize()
+    return shell_grid(grid)                    # embed the planar Q9 grid into 3D (z = 0)
 end
 
+# Residual + tangent via ForwardDiff on energy_RM, required because theexplciit MITC variant is assymetric
 function assemble_global!(K, r, dh, scv, u, mat)
     n_e = ndofs_per_cell(dh); ke = zeros(n_e, n_e); re = zeros(n_e)
     asm = start_assemble(K, r)
@@ -19,27 +37,33 @@ function assemble_global!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         u_e = u[shelldofs(cell)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
-        membrane_residuals_RM!(re, scv, u_e, mat)
-        bending_tangent_RM!(ke, scv, u_e, mat)
-        bending_residuals_RM!(re, scv, u_e, mat)
+        residuals_RM_FD!(re, scv, u_e, mat)
+        tangent_RM_FD!(ke, scv, u_e, mat)
         assemble!(asm, shelldofs(cell), ke, re)
     end
 end
 
-# mesh dimensions and material
-a = 6.0
-b = 10.0
-slit_gap = 1e-3
-t = 0.03
-mat = LinearElastic(2.1e7, 0.0, t)
+# Global u_z DOF of a node, from the interleaved :u block (3 dofs/node, node-major).
+function nodal_uz_dof(dh, node_id)
+    for cell in CellIterator(dh), (I, gid) in enumerate(getnodes(cell))
+        gid == node_id && return celldofs(cell)[3I]
+    end
+    error("node $node_id not found in any cell")
+end
+nodal_uz(dh, u, node_id) = u[nodal_uz_dof(dh, node_id)]
 
-# grid and interpolation space
-grid  = annular_plate_grid(20, 8; a, b, slit_gap)
-ip  = Lagrange{RefQuadrilateral, 2}()
-qr  = QuadratureRule{RefQuadrilateral}(3)
-fqr = FacetQuadratureRule{RefQuadrilateral}(3)
-scv = ShellCellValues(qr, ip, ip; mitc=MITC9)
+# geometry, material and reference load (Sze, Liu & Lo 2004): a=6, b=10, t=0.03,
+# E=21e6, ν=0, max transverse line load q_max=0.8 (force / length) at the free edge.
+a, b, t = 6.0, 10.0, 0.03
+mat     = LinearElastic(21.0e6, 0.0, t)
+q_max   = 0.8
+
+# mesh and interpolation
+grid = slit_annular_grid(a, b, 4, 10)
+ip   = Lagrange{RefQuadrilateral, 2}()
+qr   = QuadratureRule{RefQuadrilateral}(3)
+fqr  = FacetQuadratureRule{RefQuadrilateral}(3)
+scv  = ShellCellValues(qr, ip, ip; mitc=MITC9)
 
 # degrees of freedom
 dh = DofHandler(grid)
@@ -47,95 +71,78 @@ add!(dh, :u, ip^3)
 add!(dh, :θ, ip^2)
 close!(dh)
 
-# boundary conditions
+# boundary conditions: fully clamp the θ = 0 slit edge
 ch = ConstraintHandler(dh)
 add!(ch, Dirichlet(:u, getfacetset(grid, "clamped"), x -> zeros(3), [1,2,3]))
 add!(ch, Dirichlet(:θ, getfacetset(grid, "clamped"), x -> zeros(2), [1,2]))
-close!(ch); Ferrite.update!(ch, 0.0)
+close!(ch)
 
-# Ndofs and evaluation points
+# corner evaluation nodes on the loaded edge: A = outer (r=b), B = inner (r=a)
+loaded_nodes = unique(vcat([collect(Ferrite.facets(grid.cells[c])[f])
+                            for (c, f) in getfacetset(grid, "loaded")]...))
+radius(nid)  = norm(grid.nodes[nid].x)
+node_A = loaded_nodes[argmax(radius.(loaded_nodes))]
+node_B = loaded_nodes[argmin(radius.(loaded_nodes))]
+
+# reference load vector (full line load); the actual load is λ·F_ext
 N_dofs = ndofs(dh)
-point_A = Vec{3}((b*cos(2π - slit_gap), b*sin(2π - slit_gap), 0.0))  # outer free edge
-point_B = Vec{3}((a*cos(2π - slit_gap), a*sin(2π - slit_gap), 0.0))  # inner free edge
-ph = PointEvalHandler(grid, [point_A, point_B])
+f_ext  = zeros(N_dofs)
+assemble_traction!(f_ext, dh, getfacetset(grid, "loaded"), ip, fqr, Vec{3}((0.0, 0.0, q_max)))
 
-# Reference (full) edge traction; the actual load is λ·F_ext with λ the unknown load factor.
-F_ext = zeros(N_dofs)
-assemble_traction!(F_ext, dh, getfacetset(grid, "free"), ip, fqr, Vec{3}((0.0,0.0,0.8)))
+# Load-controlled Newton–Raphson with automatic load-increment cutback (Sze et al. 2004)
+w_dof    = nodal_uz_dof(dh, node_A)   # outer free corner, for monitoring only
+tol      = 1e-6
+max_iter = 16
+Δλ       = 0.05
+Δλ_min   = 1e-6
 
-# Global u_z DOF at the outer corner of the loaded edge (point A) — the control DOF.
-tip_node = only(getnodeset(grid, "tip_outer"))
-w_dof = let dof = 0
-    for cell in CellIterator(dh)
-        for (I, gid) in enumerate(getnodes(cell))
-            gid == tip_node && (dof = celldofs(cell)[3I]; break)
-        end
-        dof > 0 && break
-    end
-    dof
-end
-@assert w_dof > 0 "control u_z DOF (point A) not found"
-
-# Displacement-controlled path following (bordering method).
-#   Equilibrium: R(u) − λ·F_ext = 0,   constraint: u[w_dof] = w_target
-#   v₁ = K⁻¹(λ·F_ext − R_int),  v₂ = K⁻¹·F_ext
-#   δλ = (w_target − u[w_dof] − v₁[w_dof]) / v₂[w_dof],   δu = v₁ + δλ·v₂
-# Load control fails here: from the flat reference the thin plate (t/(b−a)=0.0075) has a
-# near-singular bending-dominated tangent, so a load increment overshoots equilibrium and
-# the residual climbs instead of dropping. Displacement control keeps the linearisation on
-# the equilibrium path. λ is traced from 0 up to the full load (λ=1).
-w_max   = 20.0          # upper bound on u_z(A); λ=1 is reached well before this
-n_steps = 200
-Δw      = w_max / n_steps
-tol     = 1e-6
-max_iter = 20
-
-K  = allocate_matrix(dh)
-r_int = zeros(N_dofs)
-v1 = zeros(N_dofs)
-v2 = zeros(N_dofs)
+K = allocate_matrix(dh)
+r = zeros(N_dofs)
+Δ = zeros(N_dofs)
 
 pvd = paraview_collection("slit_annular_plate")
-println("Slit annular plate (displacement control, n=$(getncells(grid)) cells)")
-println("  step |   λ    |  u_z(A,outer) | u_z(B,inner) | iters")
-
+println("Slit annular plate (load control + cutback, $(getncells(grid)) cells)")
+println("     λ    |   Δλ     |  u_z(A,outer) | u_z(B,inner) | iters")
 VTKGridFile("slit_annular_plate-0", dh) do vtk
     write_solution(vtk, dh, zeros(N_dofs)); pvd[0.0] = vtk
 end
 
-let u = zeros(N_dofs), λ = 0.0
-    # Symbolic LU from the linearised system at u=0; lu! reuses it numerically each step.
-    assemble_global!(K, r_int, dh, scv, u, mat)
-    apply_zero!(K, r_int, ch)
-    F_lu = lu(K)
-
-    for step in 1:n_steps
-        w_target = step * Δw
-        converged = false; n_iter = 0
-        for iter in 1:max_iter
-            assemble_global!(K, r_int, dh, scv, u, mat)
-            rhs1 = λ .* F_ext .- r_int          # −R(u,λ)
-            apply_zero!(K, rhs1, ch)
-            if norm(rhs1) < tol && abs(u[w_dof] - w_target) < tol
-                converged = true; n_iter = iter - 1; break
-            end
-            n_iter = iter
-            lu!(F_lu, K)
-            ldiv!(v1, F_lu, rhs1)               # equilibrium correction
-            ldiv!(v2, F_lu, F_ext)              # load-direction vector
-            δλ = (w_target - u[w_dof] - v1[w_dof]) / v2[w_dof]
-            u .+= v1 .+ δλ .* v2
-            λ += δλ
-            apply!(u, ch)
-        end
-        !converged && (@warn "step $step (w_target=$(round(w_target;digits=3))) did not converge (λ=$λ)"; break)
-
-        u_pts = evaluate_at_points(ph, dh, u, :u)
-        @printf("  %4d | %.4f | %13.4f | %12.4f | %d\n", step, λ, u_pts[1][3], u_pts[2][3], n_iter)
-        VTKGridFile("slit_annular_plate-$step", dh) do vtk
-            write_solution(vtk, dh, u); pvd[float(step)] = vtk
-        end
-        λ ≥ 1.0 && (@printf("  Reached full load λ=1 at step %d (u_z(A)=%.3f).\n", step, u[w_dof]); break)
+u = zeros(N_dofs); u_conv = zeros(N_dofs); λ = 0.0; n_out = 0
+trace = Tuple{Float64,Float64,Float64}[(0.0, 0.0, 0.0)]
+while λ < 1.0 - 1e-12
+    global u, u_conv, λ, Δλ, n_out
+    Δλ    = min(Δλ, 1.0 - λ)
+    λ_try = λ + Δλ
+    u .= u_conv                              # restart this attempt from last converged state
+    converged = false; n_iter = 0
+    for iter in 1:max_iter
+        assemble_global!(K, r, dh, scv, u, mat)
+        @. r = r - λ_try * f_ext             # R(u) = R_int(u) − λ·f_ext
+        apply_zero!(K, r, ch)
+        res = norm(r)
+        isfinite(res) && res < tol && (converged = true; n_iter = iter - 1; break)
+        n_iter = iter
+        Δ .= K \ r; apply_zero!(Δ, ch)
+        u .-= Δ
     end
+    if !converged
+        Δλ /= 4
+        Δλ < Δλ_min && (@warn "load increment below Δλ_min at λ=$λ; aborting"; break)
+        continue
+    end
+    λ = λ_try; u_conv .= u; n_out += 1
+    w_A, w_B = nodal_uz(dh, u, node_A), nodal_uz(dh, u, node_B)
+    push!(trace, (λ, w_A, w_B))
+    @printf("  %.5f | %.6f | %13.4f | %12.4f | %d\n", λ, Δλ, w_A, w_B, n_iter)
+    VTKGridFile("slit_annular_plate-$n_out", dh) do vtk
+        write_solution(vtk, dh, u); pvd[float(n_out)] = vtk
+    end
+    n_iter ≤ 5 && (Δλ *= 1.5) # grow the increment after an easy step
 end
 vtk_save(pvd)
+
+# Reference (Sze et al. 2004) at full load (λ=1): u_z(A,outer) ≈ 17.5, u_z(B,inner) ≈ 13.9
+using Plots
+λs, wA, wB = getindex.(trace, 1), getindex.(trace, 2), getindex.(trace, 3)
+plot([wA, wB], λs, marker=:o, label=["u_z(A) outer" "u_z(B) inner"],
+     xlabel="tip deflection", ylabel="load factor λ", legend=:bottomright)
