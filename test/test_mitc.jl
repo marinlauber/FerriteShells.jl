@@ -51,11 +51,12 @@
     re_ex_lg = zeros(n_dof); bending_residuals_RM!(re_ex_lg, scv_mitc, u_large, mat)
     re_fd_lg = zeros(n_dof); residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
     re_mem_lg = zeros(n_dof); membrane_residuals_RM!(re_mem_lg, scv_mitc, u_large, mat)
-    @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-2
+    @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-10
 
-    # 2b. Consistent MITC9 tangent: bending_tangent_RM! (MITC dispatch) must match
-    #     the ForwardDiff Jacobian of bending_residuals_RM! (not the energy Hessian —
-    #     the MITC explicit residual is not the exact gradient of energy_RM).
+    # 2b. Consistent MITC9 tangent: the explicit MITC residual is the exact gradient of
+    #     energy_RM (it varies the tying-interpolated shear strain via the MITC B-operators),
+    #     so bending_tangent_RM! (MITC dispatch) equals both its ForwardDiff Jacobian and the
+    #     energy Hessian, and is symmetric — on curved elements too.
     ke_ex  = zeros(n_dof, n_dof)
     bending_tangent_RM!(ke_ex, scv_mitc, u_pert, mat)
     ke_jac = ForwardDiff.jacobian(u -> begin
@@ -63,7 +64,8 @@
         bending_residuals_RM!(re, scv_mitc, u, mat)
         re
     end, u_pert)
-    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-3
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-8
+    @test norm(ke_ex .- ke_ex') / norm(ke_ex) < 1e-10   # symmetric (conservative residual)
 
     # At zero state: tangent matches Jacobian of residual to near-machine precision.
     ke_ex0  = zeros(n_dof, n_dof)
