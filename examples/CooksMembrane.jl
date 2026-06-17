@@ -23,7 +23,7 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
     end
 end
 
-
+# helper to compute the membrane, bending, and shear strains at quadrature points for postprocessing
 function compute_strains(dh, scv, u)
     n_qp    = getnquadpoints(scv)
     n_cells = getncells(dh.grid)
@@ -54,7 +54,7 @@ addfacetset!(grid, "traction", x -> norm(x[1]) ≈ 48.0)
 # interpolation order
 # ip = Lagrange{RefQuadrilateral, 1}() # Q4
 ip = Lagrange{RefQuadrilateral, 2}() # Q9
-# ip = Lagrange{RefTriangle, 2}() # S3 TODO this requires different interpolation method
+# ip = Lagrange{RefTriangle, 2}() # S3
 qr = QuadratureRule{RefQuadrilateral}(3)
 
 # cell (shell) values
@@ -112,7 +112,7 @@ u_eval = first(evaluate_at_points(ph, dh, ue, :u))
 @show u_eval
 
 # write to vtk
-VTKGridFile("cooks_membrane_RM", dh) do vtk
+VTKGridFile("cooks_membrane", dh) do vtk
     write_solution(vtk, dh, ue)
     E_mem, κ, γ = compute_strains(dh, scv, ue)
     write_projection(vtk, proj, project(proj, E_mem, qr), "E_membrane")
