@@ -318,7 +318,8 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
+        r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+        γ₁ -= r₁; γ₂ -= r₂
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         W += rm_qp_energy(mat, c_ms, κ, γ₁, γ₂, scv.A_metric[qp],
                           scv.A₁[qp], scv.A₂[qp], d₀) * scv.detJdV[qp]
@@ -479,9 +480,8 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM
         a₁, a₂ = covariant_basis(scv, qp, u_e, NN)
         d, d₁, d₂ = director_field(scv, qp, u_e, NN)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, NN)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
@@ -594,9 +594,8 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
