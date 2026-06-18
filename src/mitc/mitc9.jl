@@ -9,15 +9,17 @@ Tying points (reference domain ``[-1,1]^2``):
 
 The points ``\\pm1/\\sqrt{3}`` are superconvergent points for linear functions.
 """
-function MITC9(ip_shape::Interpolation, qr::QuadratureRule)
+# Build the Q9 shear tying data (γ₁/γ₂, 6 points each) and the in-plane-shear E₁₂ data
+# (2×2 set at ±1/√3, bilinear interpolation), shared by MITC9 and MITC9M.
+function _mitc9_tying(qr::QuadratureRule)
     T    = Float64
     n_qp = length(qr.weights)
-    # tying point for Q9
     s = T(1/sqrt(3))
     ξ_tie_1 = [Vec{2}((-s,-1.)), Vec{2}((s,-1.)), Vec{2}((-s,0.)), Vec{2}((s,0.)), Vec{2}((-s,1.)), Vec{2}((s,1.))]
     ξ_tie_2 = [Vec{2}((-1.,-s)), Vec{2}((0.,-s)), Vec{2}((1.,-s)), Vec{2}((-1.,s)), Vec{2}((0.,s)), Vec{2}((1.,s))]
+    ξ_tie_12 = [Vec{2}((-s,-s)), Vec{2}((s,-s)), Vec{2}((-s,s)), Vec{2}((s,s))]
     # Interpolation weights h_tie[qp, k] such that γ̃(ξ_qp) = Σ_k h_tie[qp,k] · γ(ξ_tie_k)
-    h_tie_1 = zeros(T, n_qp, 6);  h_tie_2 = zeros(T, n_qp, 6)
+    h_tie_1 = zeros(T, n_qp, 6);  h_tie_2 = zeros(T, n_qp, 6);  h_tie_12 = zeros(T, n_qp, 4)
     for q in 1:n_qp
         ξ, η = qr.points[q][1], qr.points[q][2]
         h₁ = (1 - sqrt(3)*ξ)/2;  h₂ = (1 + sqrt(3)*ξ)/2
@@ -26,7 +28,18 @@ function MITC9(ip_shape::Interpolation, qr::QuadratureRule)
         l₁ = ξ*(ξ-1)/2;           l₂ = 1 - ξ^2;           l₃ = ξ*(ξ+1)/2
         g₁ = (1 - sqrt(3)*η)/2;   g₂ = (1 + sqrt(3)*η)/2
         h_tie_2[q, :] = [l₁*g₁, l₂*g₁, l₃*g₁, l₁*g₂, l₂*g₂, l₃*g₂]
+        # bilinear interpolation between the 2×2 superconvergent points for E₁₂
+        h_tie_12[q, :] = [h₁*g₁, h₂*g₁, h₁*g₂, h₂*g₂]
     end
-    # return the structure
-    MITC{9}(ip_shape, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2)
+    return h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2, h_tie_12, ξ_tie_12
+end
+
+function MITC9(ip_shape::Interpolation, qr::QuadratureRule)
+    MITC{9,false}(ip_shape, _mitc9_tying(qr)...)
+end
+
+# MITC9 + membrane tying (E₁₁,E₂₂,E₁₂) — opt-in development variant for membrane locking.
+# Identical to MITC9 except the `Mem=true` flag activates the in-plane assumed-strain field.
+function MITC9M(ip_shape::Interpolation, qr::QuadratureRule)
+    MITC{9,true}(ip_shape, _mitc9_tying(qr)...)
 end

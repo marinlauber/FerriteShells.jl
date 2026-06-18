@@ -13,13 +13,15 @@ function MITC4(ip_shape::Interpolation, qr::QuadratureRule)
     # tying points for Q4
     ξ_tie_1 = [Vec{2,T}((0.,-1.)), Vec{2,T}((0.,1.))]
     ξ_tie_2 = [Vec{2,T}((-1.,0.)), Vec{2,T}((1.,0.))]
+    # membrane E₁₂ tying unused for Q4 (Mem=false): single centroid placeholder
+    ξ_tie_12 = [Vec{2,T}((0.,0.))]
     # Interpolation weights h_tie[qp, k] such that γ̃(ξ_qp) = Σ_k h_tie[qp,k] · γ(ξ_tie_k)
-    h_tie_1 = zeros(T, n_qp, 2);  h_tie_2 = zeros(T, n_qp, 2)
+    h_tie_1 = zeros(T, n_qp, 2);  h_tie_2 = zeros(T, n_qp, 2);  h_tie_12 = ones(T, n_qp, 1)
     for q in 1:n_qp
         ξ, η = qr.points[q][1], qr.points[q][2]
         h_tie_1[q, :] = [(1 - η)/2, (1 + η)/2]
         h_tie_2[q, :] = [(1 - ξ)/2, (1 + ξ)/2]
     end
     # return the structure
-    MITC{4}(ip_shape, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2)
+    MITC{4,false}(ip_shape, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2, h_tie_12, ξ_tie_12)
 end

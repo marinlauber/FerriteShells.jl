@@ -312,15 +312,16 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_flat)
-    E₁₁_k, E₂₂_k = tying_membrane_strains(scv.mitc, u_flat)
+    E₁₁_k, E₂₂_k, E₁₂_k = tying_membrane_strains(scv.mitc, u_flat)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
-        c_ms = membrane_metric(scv.A_metric[qp], qp, a₁, a₂, scv.mitc, E₁₁_k, E₂₂_k)
+        r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+        γ₁ -= r₁; γ₂ -= r₂
+        c_ms = membrane_metric(scv.A_metric[qp], qp, a₁, a₂, scv.mitc, E₁₁_k, E₂₂_k, E₁₂_k)
         W += rm_qp_energy(mat, c_ms, κ, γ₁, γ₂, scv.A_metric[qp],
                           scv.A₁[qp], scv.A₂[qp], d₀) * scv.detJdV[qp]
     end
@@ -445,7 +446,7 @@ end
 # Only then is the residual the exact gradient of energy_RM (conservative ⇒ symmetric
 # tangent). The QP-direct variant is only ~O(1%) accurate and non-symmetric on curved
 # elements. Bending (κ/D) terms are QP-direct as in the NoMITC path.
-function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM,MT}}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,NN,MM,MT,T}
+function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM,MT,M12,Mem}}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,NN,MM,MT,M12,Mem,T}
     mitc = scv.mitc
     # Tying-point deformed tangents/directors and per-node Rodrigues Jacobians (node frame),
     # built as stack-allocated tuples (Val(MM)/Val(NN)) so the kernel stays allocation-free
@@ -480,9 +481,8 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM
         a₁, a₂ = covariant_basis(scv, qp, u_e, NN)
         d, d₁, d₂ = director_field(scv, qp, u_e, NN)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, NN)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
@@ -595,9 +595,8 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
