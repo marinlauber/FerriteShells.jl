@@ -8,14 +8,14 @@ tags:
 authors:
   - name: Marin Lauber
     orcid: 0000-0003-2191-9318
-    affiliation: 1
+    affiliation: "1"
   - name: Viola Bini
     orcid: 0009-0000-2522-827X
-    affiliation: 1
+    affiliation: "1"
   - name: Mathias Peirlinck
     orcid: 0000-0002-4948-5585
-    affiliation: 1
-    affiliations:
+    affiliation: "1"
+affiliations:
   - name: Department of Biomechanical Engineering, Faculty of Mechanical Engineering, Delft University of Technology, The Netherlands
     index: 1
 date: 01 July 2026
