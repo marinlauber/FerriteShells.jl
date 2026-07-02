@@ -147,18 +147,21 @@ function get_cell_type(faces)
 end
 
 """
-    compute_volume()
+    compute_volume(dh, scv, u; cellset, h, b)
 
-Computes the volume of a shell in the configuration `u`.
+Computes the volume of a shell in the configuration `u`. The default behavior is to use all the `cellset` attached
+to the `DofHandler`. By passing unions of cellsets, you can tailor the volume computation to specific regions of the shell.
+
 The vectors ``h`` and ``b`` define the reference and base positions, respectively. These can be used for open shells to remove
 contribution to the volume. For example, an inflated membrane on the x-y plane with +z deformation would be measured as
 ```Julia
 vol = compute_volume(dh, scv, u; h=Vec((0.0,0.0,1.0)), b=Vec((0.0,0.0,0.0)))
 ```
 """
-function compute_volume(dh, scv, u::AbstractVector{T}; h::Vec{3, T}=Vec((0.0,0.0,1.0)), b::Vec{3, T}=Vec((0.0,0.0,0.0))) where T
+function compute_volume(dh, scv, u::AbstractVector{T}; cellset=1:getncells(dh.grid),
+                        h::Vec{3, T}=Vec((0.0,0.0,1.0)), b::Vec{3, T}=Vec((0.0,0.0,0.0))) where T
     volume = zero(T)
-    for cell in CellIterator(dh)
+    for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         uₑ = u[shelldofs(cell)] # arranged as [u₁,u₂,u₃,φ₁,φ₂,…]
@@ -180,30 +183,45 @@ function volume_residual(scv, coords, uₑ::AbstractVector{T}, h, b) where T
     return -val
 end
 
-function volume_residuals!(re, dh, scv::ShellCellValues, u::AbstractVector{T}, V⁰ᴰ; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
-    for cell in CellIterator(dh)
+"""
+    volume_residuals!(re, dh, scv, u, V⁰; cellset, h, b)
+
+Compute the volume residuals ``r =  V^0 - \\oint J(\\vec{h}\\otimes\\vec{h}) \\cdot (\\vec{x} + \\vec{d} - \\vec{b} ) \\cdot  (F^{-\\top}\\cdot\\vec{n}) \\text{ d}\\Omega``.
+The residual is stored in the first index of the `re` vector.
+
+The default behavior is to use all the `cellset` attached to the `DofHandler`. By passing unions of cellsets, you can tailor the volume computation to specific regions of the shell.
+
+See also [`compute_volume`](@ref).
+"""
+function volume_residuals!(re, dh, scv::ShellCellValues, u::AbstractVector{T}, V⁰; cellset=1:getncells(dh.grid),
+                           h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
+    for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         uₑ = u[shelldofs(cell)]
         re[1] += volume_residual(scv, coords, uₑ, h, b)
     end
-    re[1] += V⁰ᴰ
+    re[1] += V⁰
 end
 
 """
-    volume_gradient!(dVdu, dh, scv, u; h, b)
+    volume_gradient!(dVdu, dh, scv, u; cellset, h, b)
 
 Compute the volume gradient ``\\partial V_{3D}/\\partial u`` into `dVdu` via ForwardDiff.
 Each element contribution is `ForwardDiff.gradient(ue -> volume_residual(..., ue, h, b), ue)`
 assembled into the global DOF vector using the shell DOF permutation.
+
+See also [`compute_volume`](@ref).
 """
-function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
+function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; cellset=1:getncells(dh.grid),
+                          h::Vec{3,T}=Vec((0.0,0.0,1.0)), b::Vec{3,T}=Vec((0.0,0.0,0.0))) where T
     fill!(dVdu, zero(T))
-    for cell in CellIterator(dh)
+    for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
         sd  = shelldofs(cell)
         uₑ  = u[sd]
+        #TODO this could be replaced by an expression to save allocations
         dVdu[sd] .+= ForwardDiff.gradient(v -> volume_residual(scv, coords, v, h, b), uₑ)
     end
 end
@@ -266,4 +284,136 @@ function director_field(dh::DofHandler, scv::ShellCellValues, u)
         end
     end
     return d_sum, G3_sum
+end
+
+"""
+    shell_strains(scv, qp, u_e) -> (E, κ, γ)
+
+Compute all three RM shell strain measures at quadrature point `qp` from a flat
+5-DOF/node element vector `u_e = [u₁,u₂,u₃,φ₁,φ₂, …]`.
+
+Returns:
+- `E :: SymmetricTensor{2,2}` — membrane strain, Green–Lagrange: Eαβ = ½(aα·aβ − Aα·Aβ)
+- `κ :: SymmetricTensor{2,2}` — bending curvature change: καβ = ½(aα·d,β + aβ·d,α) − Bαβ
+- `γ :: Vec{2}` — transverse shear strain: γα = aα·d − Aα·G₃ (MITC-corrected if applicable)
+"""
+function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
+
+    Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+    for I in 1:n_nodes
+        u_I  = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+        Δa₁ += u_I * scv.dNdξ[I, qp][1]
+        Δa₂ += u_I * scv.dNdξ[I, qp][2]
+    end
+    a₁ = scv.A₁[qp] + Δa₁
+    a₂ = scv.A₂[qp] + Δa₂
+
+    E = membrane_strain(a₁, a₂, scv.A_metric[qp])
+
+    d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
+
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+
+    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
+    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+    d₀  = reference_director(scv, qp, n_nodes)
+    γ₁ -= dot(scv.A₁[qp], d₀)
+    γ₂ -= dot(scv.A₂[qp], d₀)
+
+    return E, κ, Vec{2,T}((γ₁, γ₂))
+end
+
+"""
+    embed23(S) -> SymmetricTensor{2,3}
+
+Embed a surface `SymmetricTensor{2,2}` into a 3D symmetric tensor by padding
+the out-of-plane rows/columns with zeros. Useful for writing shell strain or
+stress tensors to VTK (ParaView expects 6-component symmetric tensors).
+"""
+@inline embed23(S::SymmetricTensor{2,2,T}) where T = SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
+
+"""
+    NodeFrames
+
+Per-node area-weighted averaged director frames for a shell mesh. Eliminates the
+O(h/R) inter-element frame inconsistency that occurs when adjacent curved-shell
+elements each derive their own centroid frame.
+
+Construct via `NodeFrames(grid, ip_geo)`. Pass to `reinit!(scv, x, nf, node_ids)`
+instead of the plain `reinit!(scv, x)` to activate per-node frames.
+
+For flat shells the result is identical to the centroid-frame approach.
+"""
+struct NodeFrames
+    G₃ :: Vector{Vec{3,Float64}}
+    T₁ :: Vector{Vec{3,Float64}}
+    T₂ :: Vector{Vec{3,Float64}}
+end
+
+function NodeFrames(grid::Grid, ip_geo::Interpolation)
+    n_nodes = getnnodes(grid)
+    G₃_sum  = fill(zero(Vec{3,Float64}), n_nodes)
+
+    for cellid in 1:getncells(grid)
+        cell     = getcells(grid, cellid)
+        node_ids = collect(cell.nodes)
+        x        = [grid.nodes[nid].x for nid in node_ids]
+        ξ_c      = reference_centroid(ip_geo)
+        A₁ = zero(Vec{3,Float64}); A₂ = zero(Vec{3,Float64})
+        n_geo = getnbasefunctions(ip_geo)
+        for i in 1:n_geo
+            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_c, i)
+            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
+        end
+        n_vec = A₁ × A₂
+        area  = norm(n_vec)
+        G₃_c  = n_vec / area
+        for nid in node_ids
+            G₃_sum[nid] += area * G₃_c
+        end
+    end
+
+    G₃ = Vector{Vec{3,Float64}}(undef, n_nodes)
+    T₁ = Vector{Vec{3,Float64}}(undef, n_nodes)
+    T₂ = Vector{Vec{3,Float64}}(undef, n_nodes)
+    for i in 1:n_nodes
+        g      = G₃_sum[i]
+        g_norm = norm(g)
+        g_norm < 1e-14 && continue
+        G₃[i] = g / g_norm
+        ref    = abs(G₃[i][1]) < 0.9 ? Vec{3}((1.,0.,0.)) : Vec{3}((0.,1.,0.))
+        t₁     = ref - (ref ⋅ G₃[i]) * G₃[i]
+        T₁[i]  = t₁ / norm(t₁)
+        T₂[i]  = G₃[i] × T₁[i]
+    end
+    NodeFrames(G₃, T₁, T₂)
+end
+
+"""
+    reinit!(scv::ShellCellValues, x::AbstractVector, nf::NodeFrames)
+    reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames)
+    reinit!(scv::ShellCellValues, cell::AbstractCell, nf::NodeFrames)
+
+Update the `ShellCellValues` object for a cell with cell coordinates `x` and a `NodeFrames` object.
+
+The reference surface measures such as the covariant basis are obtained from the `NodeFrames` object
+pre-computed initially from `nf = NodeFrames(grid, ip_geo)`.
+
+**Note:**
+For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
+"""
+reinit!
+
+reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinates(cell), nf, getnodes(cell))
+reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
+function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
+    reinit!(scv, x)
+    n_geo = getnbasefunctions(scv.ip_geo)
+    for I in 1:n_geo
+        scv.G₃_elem[I] = nf.G₃[node_ids[I]]
+        scv.T₁_elem[I] = nf.T₁[node_ids[I]]
+        scv.T₂_elem[I] = nf.T₂[node_ids[I]]
+    end
+    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end

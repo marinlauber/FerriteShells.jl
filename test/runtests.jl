@@ -14,22 +14,42 @@ const X_Q9_UNIT = [
     Vec{3}((0.5, 0.5, 0.0)),
 ]
 
+# T3: right triangle corners; T6: corners + midpoints (Ferrite order: v1,v2,v3,mid12,mid23,mid31)
+const X_T3_UNIT = [
+    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)), Vec{3}((0.0, 1.0, 0.0)),
+]
+const X_T6_UNIT = [
+    Vec{3}((0.0, 0.0, 0.0)), Vec{3}((1.0, 0.0, 0.0)), Vec{3}((0.0, 1.0, 0.0)),
+    Vec{3}((0.5, 0.0, 0.0)), Vec{3}((0.5, 0.5, 0.0)), Vec{3}((0.0, 0.5, 0.0)),
+]
+
 # Cell value constructors
 make_q4_scv(; qr_order=1) = ShellCellValues(QuadratureRule{RefQuadrilateral}(qr_order),
                                              Lagrange{RefQuadrilateral,1}(), Lagrange{RefQuadrilateral,1}())
 make_q9_scv(; qr_order=3) = ShellCellValues(QuadratureRule{RefQuadrilateral}(qr_order),
                                              Lagrange{RefQuadrilateral,2}(), Lagrange{RefQuadrilateral,2}())
+make_t3_scv() = ShellCellValues(QuadratureRule{RefTriangle}(2),
+                                Lagrange{RefTriangle,1}(), Lagrange{RefTriangle,1}())
+make_t6_scv(; qr_order=4) = ShellCellValues(QuadratureRule{RefTriangle}(qr_order),
+                                             Lagrange{RefTriangle,2}(), Lagrange{RefTriangle,2}())
 
 # In-plane rotation about z
 @inline R(θ) = Tensor{2,3}([cos(θ) -sin(θ) 0; sin(θ) cos(θ) 0; 0 0 1])
 
 # KL membrane element strain energy
-function element_strain_energy(scv, u_vec, mat)
+function element_strain_energy(scv, u_vec::AbstractVector{T}, mat) where T
+    n_nodes = getnbasefunctions(scv.ip_shape)
     W = 0.0
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂, A_metric, a_metric = FerriteShells.kinematics(scv, qp, u_vec)
-        E = 0.5 * (a_metric - A_metric)
-        N = FerriteShells.contravariant_elasticity(mat, A_metric) ⊡ E
+        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
+        for i in 1:n_nodes
+            ui = Vec{3,T}((u_vec[3i-2], u_vec[3i-1], u_vec[3i]))
+            Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
+        end
+        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
+        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+        E = 0.5 * (c_ms - scv.A_metric[qp])
+        N, _ = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp])
         W += 0.5 * (N ⊡ E) * scv.detJdV[qp]
     end
     W
@@ -70,14 +90,12 @@ end
 # RM helpers
 function rm_residual(scv, u, mat)
     re = zeros(length(u))
-    membrane_residuals_RM!(re, scv, u, mat)
-    bending_residuals_RM_FD!(re, scv, u, mat)
+    residuals_RM_FD!(re, scv, u, mat)
     re
 end
 function rm_tangent(scv, u, mat)
     ke = zeros(length(u), length(u))
-    membrane_tangent_RM!(ke, scv, u, mat)
-    bending_tangent_RM_FD!(ke, scv, u, mat)
+    tangent_RM_FD!(ke, scv, u, mat)
     ke
 end
 function rm_fd_tangent(scv, u, mat; ε=1e-5)
@@ -179,6 +197,7 @@ function assemble_kl_tangent!(K, r, dh, scv, u, mat)
     end
 end
 
+include("test_hyperelastic.jl")
 include("test_kl.jl")
 include("test_rm.jl")
 include("test_mitc.jl")

@@ -136,6 +136,40 @@ end
         apply!(K, r2, ch); u_sol = K \ r2
         @test norm(u_sol[ch.free_dofs] .- u_ex[ch.free_dofs]) ≤ 1e-8 * norm(u_ex[ch.free_dofs])
     end
+
+    # T3 version: same 8-node geometry (scale 10), 10 triangle cells.
+    # Linear field is exactly representable by T3, so patch test passes at machine precision.
+    let
+        grid_t3 = patch_grid(primitive=Triangle)
+        addnodeset!(grid_t3, "boundary",
+            x -> isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+                 isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10))
+        addnodeset!(grid_t3, "interior",
+            x -> !(isapprox(x[1],0.0,atol=1e-10)||isapprox(x[1],10.0,atol=1e-10)||
+                   isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10)))
+        ip_t3  = Lagrange{RefTriangle,1}()
+        scv_t3 = ShellCellValues(QuadratureRule{RefTriangle}(2), ip_t3, ip_t3)
+        dh_t3  = DofHandler(grid_t3); add!(dh_t3, :u, ip_t3^3); close!(dh_t3)
+        mat_t3 = LinearElastic(1.0e6, 0.3, 0.01)
+        ε_xx_t3, ε_yy_t3, γ_xy_t3 = 1e-3, 2e-3, 5e-4
+        u_lin_t3(x::Vec{3}) = Vec{3}((ε_xx_t3*x[1]+0.5γ_xy_t3*x[2], 0.5γ_xy_t3*x[1]+ε_yy_t3*x[2], 0.0))
+
+        u_ex_t3 = make_u_exact(dh_t3, u_lin_t3)
+        r_t3 = zeros(ndofs(dh_t3)); assemble_kl_residual!(r_t3, dh_t3, scv_t3, u_ex_t3, mat_t3)
+        ch_tmp_t3 = ConstraintHandler(dh_t3)
+        add!(ch_tmp_t3, Dirichlet(:u, getnodeset(grid_t3, "boundary"), x -> zero(x), [1,2,3]))
+        close!(ch_tmp_t3)
+        @test norm(r_t3[ch_tmp_t3.free_dofs]) ≤ 1e-8 * norm(r_t3)
+
+        K_t3 = allocate_matrix(dh_t3); r2_t3 = zeros(ndofs(dh_t3))
+        assemble_kl_tangent!(K_t3, r2_t3, dh_t3, scv_t3, zeros(ndofs(dh_t3)), mat_t3)
+        ch_t3 = ConstraintHandler(dh_t3)
+        add!(ch_t3, Dirichlet(:u, getnodeset(grid_t3, "boundary"), x -> u_lin_t3(x), [1,2,3]))
+        add!(ch_t3, Dirichlet(:u, getnodeset(grid_t3, "interior"), x -> 0.0, [3]))
+        close!(ch_t3); Ferrite.update!(ch_t3, 0.0)
+        apply!(K_t3, r2_t3, ch_t3); u_sol_t3 = K_t3 \ r2_t3
+        @test norm(u_sol_t3[ch_t3.free_dofs] .- u_ex_t3[ch_t3.free_dofs]) ≤ 1e-8 * norm(u_ex_t3[ch_t3.free_dofs])
+    end
 end
 
 @testset "KL Cook's membrane" begin
