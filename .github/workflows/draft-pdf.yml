@@ -9,6 +9,10 @@ jobs:
   paper:
     runs-on: ubuntu-latest
     name: Paper Draft
+    env:
+      # openjournals/openjournals-draft-action is still built on Node 20,
+      # which GitHub runners are deprecating. Allow it until upstream updates.
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
