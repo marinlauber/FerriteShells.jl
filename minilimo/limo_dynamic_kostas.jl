@@ -1,26 +1,19 @@
 using FerriteShells, LinearAlgebra, Printf, WriteVTK, QuadGK
 
-# Two-phase dynamic (HHT-α) miniLIMO simulation on the rectangular multi-surface
-# mesh built by `make_minilimo_grid` (same geometry as `limo_dynamic.jl`).  Two
-# separate implicit time-integration loops share the carried-over state (u, v, a,
-# g_old):
+# Dynamic (HHT-α) miniLIMO simulation on the rectangular multi-surface mesh built
+# by `make_minilimo_grid` (same geometry as `limo_dynamic.jl`).  A single implicit
+# time-integration loop advances the whole protocol; a `schedule(t)` maps global
+# time to the edge-morph ramp argument and the two chamber pressures, so the morph,
+# actuation and pressurization stages are just successive segments of one loop:
 #
-#   Phase 1 — morph (identical to `limo_dynamic.jl`):
-#       edge nodes are driven from the flat reference to the elliptic arc with a
-#       smooth sinusoidal ramp while a follower Plv pressure fills the endocardium
-#       (SRF_1 ∪ SRF_2).  End state: fully morphed, Plv = p_hold.
+#   [0, T_sim]        morph   : edge → elliptic arc, Plv ramps 0 → p_hold
+#   [T_sim, +T_act]   actuate : Plv held, Pact ramps 0 → Pact_max
+#   [+T_act, +T_pres] pressur : Pact held, Plv ramps → Plv_max
 #
-#   Phase 2 — actuation:
-#       Plv is held constant at p_hold and the actuator pressure Pact is ramped
-#       0 → 40 mmHg over T_act = 10 s (smooth sinusoidal).  The follower load uses
-#       all three surfaces
-#           F_ext = Plv·F_plv + Pact·F_pact − Pact·F_plvpact
-#       SRF_1: endocardium, Plv only (outward)
-#       SRF_2: endocardium + actuator footprint, Plv (outward) and Pact (inward)
-#       SRF_3: actuator exterior, Pact only (outward)
-#
-# Both phases use the same HHT-α integrator with mass-proportional Rayleigh
-# damping C = α_damp·M, adaptive Δt, and a backtracking line search:
+# The three follower surfaces give F_ext = Plv·F_plv + Pact·F_pact − Pact·F_plvpact
+# (SRF_1 Plv; SRF_2 Plv−Pact; SRF_3 Pact).  One HHT-α corrector `solve_step!` with
+# mass-proportional Rayleigh damping C = α_damp·M, adaptive Δt and a backtracking
+# line search serves every stage (morph is just Pact = 0):
 #   g(u,v) = C·v + r_int(u) − F_ext(u)
 #   R = M·ä_{n+1} + (1−α)·g_{n+1} + α·g_old = 0
 #   γ = ½ − α,  β = (1−α)²/4   (2nd-order, unconditionally stable for α ∈ [−⅓,0])
@@ -281,11 +274,15 @@ Plv_srf     = getcellset(grid, "SRF_1") ∪ getcellset(grid, "SRF_2")  # Plv act
 Pact_srf    = getcellset(grid, "SRF_3")                              # +Pact
 PlvPact_srf = getcellset(grid, "SRF_2")                              # −Pact (opposes Plv)
 
-# Smooth sinusoidal ramp: λ(t) = ½(1 − cos(πt/T_morph)) for t ≤ T_morph, 1 beyond.
+# Smooth sinusoidal ramp: ½(1 − cos(πt/T)) for t ≤ T, 1 beyond.
 T_morph = 2.0   # morphing duration [s]
-T_sim   = 2.0   # Phase-1 (morph) simulation duration [s]
+T_sim   = 2.0   # morph stage duration [s]
+T_act   = 2.0   # actuation ramp duration [s]
+T_pres  = 2.0   # pressurization ramp duration [s]
+T_total = T_sim + T_act + T_pres
 Δt      = 0.001 # initial time step [s]
-ramp(t) = t < T_morph ? 0.5 * (1 - cos(π * t / T_morph)) : 1.0
+smoothramp(t, T) = t < T ? 0.5 * (1 - cos(π * t / T)) : 1.0
+ramp(t) = smoothramp(t, T_morph)
 
 function generate_boundary_function(grid, nodeset)
     top_nodes = get_node_coordinate.(getnodes(grid, nodeset))
@@ -324,13 +321,22 @@ max_iter = 50
 Δt_min   = 1e-7
 Δt_max   = 0.1
 
-Pa2mmHg = 0.00750062       # Pa/mmHg
-p_hold   = .0  / Pa2mmHg  # Plv held constant in Phase 2 [Pa] (6 mmHg)
+Pa2mmHg  = 0.00750062      # Pa/mmHg
+p_hold   = 0.0  / Pa2mmHg  # Plv held during morph + actuation [Pa]
 Pact_max = 40.0 / Pa2mmHg  # actuator pressure target [Pa] (40 mmHg)
-Plv_max  = 40.0 / Pa2mmHg  # final ventricular pressure after ramp
-T_act    = 2.0            # actuator ramp duration [s]
-T_pres   = 2.0            # pressure ramp at the end
-ramp_act(t) = t < T_act ? 0.5 * (1 - cos(π * t / T_act)) : 1.0
+Plv_max  = 40.0 / Pa2mmHg  # final ventricular pressure after ramp [Pa]
+
+# schedule(t) → (morph_arg, Plv, Pact) at global time t.  The edge morph is driven
+# by `ramp(5t)` (completes early, well within the morph stage) then frozen.
+function schedule(t)
+    if t < T_sim
+        return (5t, p_hold * ramp(t), 0.0)
+    elseif t < T_sim + T_act
+        return (T_morph, p_hold, Pact_max * smoothramp(t - T_sim, T_act))
+    else
+        return (T_morph, Plv_max * smoothramp(t - T_sim - T_act, T_pres), Pact_max)
+    end
+end
 
 K_int     = allocate_matrix(dh)
 K_eff     = allocate_matrix(dh)
@@ -379,59 +385,13 @@ bufs = (; K_int, r_int, K_plv, F_plv, K_pact, F_pact, K_plvpact, F_plvpact, M, K
           res, rhs, δu, u_trial, a_new, v_new, Ma, Mv, F_lu, free, g_old,
           sdofs, ke, re, u_e, α_hht, γ_hht, β_hht, α_damp)
 
-# HHT-α Newton corrector (with backtracking line search) for one morph time step.
-# `u_new` is updated in place; returns (converged, iters). Plv pressure acts on
-# `Plv_srf` only.  All vector arithmetic is in-place / mul!-based.
-function solve_morph_step!(u_new, ũ, ṽ, p_new, Δt, dh, scv, mat, ch, Plv_srf, bufs; max_iter=20, tol=1e-4)
-    (; K_int, r_int, K_plv, F_plv, M, K_eff, res, rhs, δu, u_trial, a_new, v_new,
-       Ma, Mv, F_lu, free, g_old, sdofs, ke, re, u_e, α_hht, γ_hht, β_hht, α_damp) = bufs
-    mfac = 1 / (β_hht * Δt^2) + (1 - α_hht) * α_damp * γ_hht / (β_hht * Δt)
-    converged = false; iters = 0
-    for iter in 1:max_iter
-        iters = iter
-        assemble_all!(K_int, r_int, dh, scv, u_new, mat, sdofs, ke, re, u_e)
-        assemble_pressure_region!(K_plv, F_plv, dh, scv, u_new, Plv_srf, sdofs, ke, re, u_e)
-        @. a_new = (u_new - ũ) / (β_hht * Δt^2)
-        @. v_new = ṽ + (Δt * γ_hht) * a_new
-        mul!(Ma, M, a_new); mul!(Mv, M, v_new)
-        @. res = Ma + (1 - α_hht) * (α_damp * Mv + r_int - p_new * F_plv) + α_hht * g_old
-        apply_zero!(res, ch)
-        res_norm = norm(@views res[free])
-        res_norm < tol && (converged = true; break)
-        K_eff.nzval .= M.nzval .* mfac .+ (1 - α_hht) .* (K_int.nzval .- p_new .* K_plv.nzval)
-        @. rhs = -res
-        apply_zero!(K_eff, rhs, ch)
-        lu!(F_lu, K_eff)
-        ldiv!(δu, F_lu, rhs)
-        α_ls = 1.0; ls_ok = false
-        for _ in 1:8
-            @. u_trial = u_new + α_ls * δu
-            apply!(u_trial, ch)
-            assemble_residual!(r_int, dh, scv, u_trial, mat, sdofs, re, u_e)
-            assemble_pressure_residual!(F_plv, dh, scv, u_trial, Plv_srf, sdofs, re, u_e)
-            @. a_new = (u_trial - ũ) / (β_hht * Δt^2)
-            @. v_new = ṽ + (Δt * γ_hht) * a_new
-            mul!(Ma, M, a_new); mul!(Mv, M, v_new)
-            @. res = Ma + (1 - α_hht) * (α_damp * Mv + r_int - p_new * F_plv) + α_hht * g_old
-            apply_zero!(res, ch)
-            (norm(@views res[free]) ≤ res_norm) && (ls_ok = true; break)
-            α_ls /= 2
-        end
-        u_new .= u_trial
-        # Line search stalled (even α_ls=1/256 did not reduce the residual): the
-        # step is not making progress, so bail and let the outer loop reject it
-        # (halve Δt) instead of burning all max_iter full-tangent sweeps.
-        ls_ok || break
-    end
-    return converged, iters
-end
-
-# HHT-α Newton corrector (with backtracking line search) for one actuation time
-# step.  Plv is held constant; Pact ramps.  Full three-surface follower load
-# F_ext = Plv·F_plv + Pact·F_pact − Pact·F_plvpact acts, with the follower tangent
-# K_int − Plv·K_plv − Pact·K_pact + Pact·K_plvpact.  `u_new` updated in place.
-function solve_actuation_step!(u_new, ũ, ṽ, Plv, Pact, Δt, dh, scv, mat, ch,
-                               Plv_srf, Pact_srf, PlvPact_srf, bufs; max_iter=20, tol=1e-4)
+# HHT-α Newton corrector (with backtracking line search) for one time step, valid
+# for every stage.  The follower load F_ext = Plv·F_plv + Pact·F_pact − Pact·F_plvpact
+# and its tangent K_int − Plv·K_plv − Pact·K_pact + Pact·K_plvpact are assembled on
+# the three surfaces; the morph stage is recovered by passing Pact = 0.  `u_new` is
+# updated in place; returns (converged, iters).  All vector arithmetic is in-place.
+function solve_step!(u_new, ũ, ṽ, Plv, Pact, Δt, dh, scv, mat, ch,
+                     Plv_srf, Pact_srf, PlvPact_srf, bufs; max_iter=20, tol=1e-4)
     (; K_int, r_int, K_plv, F_plv, K_pact, F_pact, K_plvpact, F_plvpact, M, K_eff,
        res, rhs, δu, u_trial, a_new, v_new, Ma, Mv, F_lu, free, g_old,
        sdofs, ke, re, u_e, α_hht, γ_hht, β_hht, α_damp) = bufs
@@ -472,6 +432,9 @@ function solve_actuation_step!(u_new, ũ, ṽ, Plv, Pact, Δt, dh, scv, mat, ch,
             α_ls /= 2
         end
         u_new .= u_trial
+        # Line search stalled (even α_ls=1/256 did not reduce the residual): bail
+        # and let the outer loop reject the step (halve Δt) instead of burning all
+        # max_iter full-tangent sweeps.
         ls_ok || break
     end
     return converged, iters
@@ -483,7 +446,7 @@ v = zeros(N_dof)
 a = zeros(N_dof)
 
 pvd = paraview_collection("minilimo-dynamic-actuation")
-vtk_step = Ref(0)
+vtk_step = Ref(-1)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
 
@@ -508,143 +471,49 @@ function write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, t)
     end
 end
 
-d, G3 = director_field(dh, scv, u)
-VTKGridFile("minilimo-dynamic-actuation-0", dh) do vtk
-    write_solution(vtk, dh, u)
-    Ferrite.write_node_data(vtk, resu, "ru")
-    Ferrite.write_node_data(vtk, resθ, "rθ")
-    Ferrite.write_node_data(vtk, d,  "director")
-    Ferrite.write_node_data(vtk, G3, "G3")
-    for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
-    pvd[0.0] = vtk
-end
+write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, 0.0)
 
-println("PHASE 1 — dynamic HHT-α morph (Plv → $(round(p_hold*Pa2mmHg, digits=2)) mmHg)")
-@printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "λ", "Plv [mmHg]", "iters", "Δt")
+println("dynamic HHT-α: morph → actuation → pressurization")
+@printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "Plv [mmHg]", "Pact [mmHg]", "iters", "Δt")
 
-let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
-@time while t < T_sim - 1e-10
-    t_new = min(t + Δt_cur, T_sim)
-    p_new = p_hold * ramp(t_new)
+un = zeros(N_dof)
+let t = 0.0; step = 0; Δt_cur = Δt
+@time while t < T_total - 1e-10
+    t_new = min(t + Δt_cur, T_total)
+    marg, Plv, Pact = schedule(t_new)
 
     @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
     @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
 
     u_new .= ũ
-    Ferrite.update!(ch, t_new * 5)
+    Ferrite.update!(ch, marg)
     apply!(u_new, ch)
 
-    converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs;
-                                         max_iter=max_iter, tol=tol)
+    converged, iters = solve_step!(u_new, ũ, ṽ, Plv, Pact, Δt_cur, dh, scv, mat, ch,
+                                   Plv_srf, Pact_srf, PlvPact_srf, bufs; max_iter=max_iter, tol=tol)
 
     if converged
         step += 1
         @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
         @. v = ṽ + (Δt_cur * γ_hht) * a
-        mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
-        p = p_new; u .= u_new; t = t_new
+        mul!(Mv, M, v)
+        @. g_old = α_damp * Mv + r_int - Plv * F_plv - Pact * F_pact + Pact * F_plvpact
+        u .= u_new; t = t_new
         Δt_cur = min(Δt_cur * 1.2, Δt_max)
         if step % 4 == 0
             write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, t)
-            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
+            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
+                    step, t, Plv * Pa2mmHg, Pact * Pa2mmHg, iters, Δt_cur)
         end
     else
         Δt_cur /= 2
         Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
     end
 end
-write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, t)
-end
-
-# The morph is complete: freeze the edge constraint at the fully-morphed arc so
-# ch is time-independent for the whole actuation phase.
-Ferrite.update!(ch, T_morph)
-apply!(u, ch)
-
-println("\nPHASE 2 — dynamic HHT-α actuation (Plv held at $(round(p_hold*Pa2mmHg, digits=2)) mmHg, Pact → $(round(Pact_max*Pa2mmHg, digits=1)) mmHg over $(T_act) s)")
-@printf("%-6s  %-8s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "τ", "Plv [mmHg]", "Pact [mmHg]", "iters", "Δt")
-
-un = zeros(N_dof)
-let τ = 0.0; step = 0; Δt_cur = Δt; Plv = p_hold
-@time while τ < T_act - 1e-10
-    τ_new    = min(τ + Δt_cur, T_act)
-    Pact_new = Pact_max * ramp_act(τ_new)
-
-    @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
-    @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
-
-    u_new .= ũ
-    apply!(u_new, ch)
-
-    converged, iters = solve_actuation_step!(u_new, ũ, ṽ, Plv, Pact_new, Δt_cur, dh, scv, mat, ch,
-                                             Plv_srf, Pact_srf, PlvPact_srf, bufs;
-                                             max_iter=max_iter, tol=tol)
-
-    if converged
-        step += 1
-        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
-        @. v = ṽ + (Δt_cur * γ_hht) * a
-        mul!(Mv, M, v)
-        @. g_old = α_damp * Mv + r_int - Plv * F_plv - Pact_new * F_pact + Pact_new * F_plvpact
-        u .= u_new; τ = τ_new
-        Δt_cur = min(Δt_cur * 1.2, Δt_max)
-        if step % 5 == 0
-            write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, T_sim + τ)
-            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
-                    step, T_sim + τ, ramp_act(τ), Plv * Pa2mmHg, Pact_new * Pa2mmHg, iters, Δt_cur)
-        end
-    else
-        Δt_cur /= 2
-        Δt_cur < Δt_min && error("minimum Δt reached at τ=$(round(τ, digits=4)) s")
-    end
-end
     un .= u
-    write_vtk!(pvd, vtk_step, dh, scv, grid, un, res, resu, resθ, T_sim + τ)
-end
-
-
-println("\nPHASE 3 — dynamic HHT-α pressurozation (Pact held at $(round(Pact_max*Pa2mmHg, digits=2)) mmHg, Plv → $(round(Plv_max*Pa2mmHg, digits=1)) mmHg over $(T_pres) s)")
-@printf("%-6s  %-8s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "τ", "Plv [mmHg]", "Pact [mmHg]", "iters", "Δt")
-
-un = zeros(N_dof)
-let τ = 0.0; step = 0; Δt_cur = Δt; Pact = Pact_max
-@time while τ < T_pres - 1e-10
-    τ_new    = min(τ + Δt_cur, T_act)
-    Plv_new = Plv_max * ramp_act(τ_new)
-
-    @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
-    @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
-
-    u_new .= ũ
-    apply!(u_new, ch)
-
-    converged, iters = solve_actuation_step!(u_new, ũ, ṽ, Plv_new, Pact, Δt_cur, dh, scv, mat, ch,
-                                             Plv_srf, Pact_srf, PlvPact_srf, bufs;
-                                             max_iter=max_iter, tol=tol)
-
-    if converged
-        step += 1
-        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
-        @. v = ṽ + (Δt_cur * γ_hht) * a
-        mul!(Mv, M, v)
-        @. g_old = α_damp * Mv + r_int - Plv_new * F_plv - Pact * F_pact + Pact * F_plvpact
-        u .= u_new; τ = τ_new
-        Δt_cur = min(Δt_cur * 1.2, Δt_max)
-        if step % 5 == 0
-            write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, T_sim +T_act + τ)
-            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
-                    step, T_sim + τ, ramp_act(τ), Plv_new * Pa2mmHg, Pact * Pa2mmHg, iters, Δt_cur)
-        end
-    else
-        Δt_cur /= 2
-        Δt_cur < Δt_min && error("minimum Δt reached at τ=$(round(τ, digits=4)) s")
-    end
-end
-    un .= u
-    write_vtk!(pvd, vtk_step, dh, scv, grid, un, res, resu, resθ, T_sim + T_act + τ)
+    write_vtk!(pvd, vtk_step, dh, scv, grid, un, res, resu, resθ, T_total)
 end
 close(pvd)
-
 
 # using JLD2
 # jldsave("minilimo_dynamic_actuation.jld2"; u=un)
