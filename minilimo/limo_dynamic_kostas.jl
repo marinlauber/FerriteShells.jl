@@ -322,9 +322,10 @@ max_iter = 50
 Δt_max   = 0.1
 
 Pa2mmHg  = 0.00750062      # Pa/mmHg
+m3_to_ml = 1.0e6           # m³ → ml
 p_hold   = 0.0  / Pa2mmHg  # Plv held during morph + actuation [Pa]
 Pact_max = 40.0 / Pa2mmHg  # actuator pressure target [Pa] (40 mmHg)
-Plv_max  = 40.0 / Pa2mmHg  # final ventricular pressure after ramp [Pa]
+Plv_max  = 100.0 / Pa2mmHg  # final ventricular pressure after ramp [Pa]
 
 # schedule(t) → (morph_arg, Plv, Pact) at global time t.  The edge morph is driven
 # by `ramp(5t)` (completes early, well within the morph stage) then frozen.
@@ -476,6 +477,10 @@ write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, 0.0)
 println("dynamic HHT-α: morph → actuation → pressurization")
 @printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "Plv [mmHg]", "Pact [mmHg]", "iters", "Δt")
 
+# Pressurization-stage history: (t, cavity volume, Plv, Pact) rows, cavity volume
+# measured over the endocardium as in the 3D–0D coupling.  Written to CSV at the end.
+hist = NTuple{4,Float64}[]
+
 un = zeros(N_dof)
 let t = 0.0; step = 0; Δt_cur = Δt
 @time while t < T_total - 1e-10
@@ -499,6 +504,10 @@ let t = 0.0; step = 0; Δt_cur = Δt
         mul!(Mv, M, v)
         @. g_old = α_damp * Mv + r_int - Plv * F_plv - Pact * F_pact + Pact * F_plvpact
         u .= u_new; t = t_new
+        if t ≥ T_sim + T_act - 1e-10   # pressurization stage: log cavity volume + pressures
+            Vlv = -2 * compute_volume(dh, scv, u; cellset=Plv_srf) * m3_to_ml
+            push!(hist, (t, Vlv, Plv * Pa2mmHg, Pact * Pa2mmHg))
+        end
         Δt_cur = min(Δt_cur * 1.2, Δt_max)
         if step % 4 == 0
             write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, t)
@@ -515,6 +524,9 @@ end
 end
 close(pvd)
 
-# using JLD2
-# jldsave("minilimo_dynamic_actuation.jld2"; u=un)
-# println("Dynamic actuation complete; final state saved to minilimo_dynamic_actuation.jld2")
+open("minilimo_pressurization.csv", "w") do io
+    println(io, "t_s,Vlv_ml,Plv_mmHg,Pact_mmHg")
+    for (t, V, Plv, Pact) in hist
+        @printf(io, "%.6f,%.6f,%.6f,%.6f\n", t, V, Plv, Pact)
+    end
+end
