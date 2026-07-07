@@ -80,7 +80,7 @@ apply!(K, f, ch)
 @time u_sol = K \ f
 
 # extract solution at point
-ph     = PointEvalHandler(grid, [grid.nodes[first(grid.nodesets["load_A"])]])
+ph     = PointEvalHandler(grid, [grid.nodes[first(grid.nodesets["load_A"])].x])
 u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
 @show u_eval
 # save

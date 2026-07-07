@@ -22,7 +22,7 @@ grid = pinched_cylinder_rm_grid(32, 32)
 ip  = Lagrange{RefQuadrilateral, 2}() # Q9
 qr  = QuadratureRule{RefQuadrilateral}(3)
 nf  = NodeFrames(grid, ip) # directors are not uniform, must be passed to reinit!
-scv = ShellCellValues(qr, ip, ip; mitc=MITC9)
+scv = ShellCellValues(qr, ip, ip; mitc=MITC9) # MITC9 shear treatment
 
 # degrees of freedom
 dh   = DofHandler(grid)
@@ -48,8 +48,8 @@ for cell in CellIterator(dh)
     assemble!(asmb, sd, ke, re)
 end
 
-# apply loading
-apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -1)))
+# apply loading: 1/8 symmetry model carries 1/4 of the unit pinching load at the corner
+apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -0.25)))
 
 # boundary conditions
 dbc = ConstraintHandler(dh)
@@ -57,13 +57,12 @@ add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"),   x -> zeros(2), [2, 3]))
 add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_axial"),   x -> 0.0,      [1]))
 add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta0"),  x -> 0.0,      [2]))
 add!(dbc, Dirichlet(:u, getnodeset(grid, "sym_theta90"), x -> 0.0,      [3]))
-# Rotation symmetry BCs: director must also be symmetric at each symmetry plane.
-# At θ=0  (T₁=e_y):   d_y = φ₁ = 0  →  fix :θ component 1
-# At θ=π/2 (T₁=−e_z): d_z = −φ₁ = 0 → fix :θ component 1
-# At x=L/2 (T₂=e_x):  d_x = φ₂ = 0  →  fix :θ component 2
-add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta0"),  x -> 0.0, [1]))
-add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta90"), x -> 0.0, [1]))
-add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_axial"),   x -> 0.0, [2]))
+# Rotation symmetry BCs: the director must stay in each symmetry plane. With the current
+# node-frame convention the in-plane director rotation to fix is φ₂ on the θ-planes and
+# φ₁ on the axial plane (matches the verified benchmark in test/test_benchmarks.jl).
+add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta0"),  x -> 0.0, [2]))
+add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_theta90"), x -> 0.0, [2]))
+add!(dbc, Dirichlet(:θ, getnodeset(grid, "sym_axial"),   x -> 0.0, [1]))
 close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
 
 # solver and time it
