@@ -103,6 +103,35 @@
     @test W_mitc ≈ W_nomitc rtol=1e-6
 end
 
+@testset "MITC9 curved-element reference state is stress-free (positive definite)" begin
+    # On a doubly-curved element the MITC tying strains are already referenced, so the
+    # QP reference subtraction `dot(A_α, d₀)` must NOT be applied again — doing so injects
+    # a spurious reference shear (zero on flat elements, nonzero on curved) that pre-stresses
+    # u=0 and makes the tangent indefinite. Regression guard for that double-subtraction.
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ip  = Lagrange{RefQuadrilateral, 2}()
+    qr  = QuadratureRule{RefQuadrilateral}(3)
+    # warp the flat unit Q9 onto a paraboloid z = 0.15(x²+y²)
+    X_curv = [Vec{3}((p[1], p[2], 0.15*(p[1]^2 + p[2]^2))) for p in X_Q9_UNIT]
+
+    scv_mitc   = ShellCellValues(qr, ip, ip; mitc=MITC9)
+    scv_nomitc = ShellCellValues(qr, ip, ip)
+    reinit!(scv_mitc,   X_curv)
+    reinit!(scv_nomitc, X_curv)
+
+    # reference (u=0) residual: MITC must not add spurious internal force beyond NoMITC
+    re_m  = zeros(45); residuals_RM_FD!(re_m,  scv_mitc,   zeros(45), mat)
+    re_nm = zeros(45); residuals_RM_FD!(re_nm, scv_nomitc, zeros(45), mat)
+    @test norm(re_m) ≤ 2 * norm(re_nm) + 1e-6
+
+    # tangent at u=0 must be positive semidefinite: exactly 6 zero modes, no negative ones
+    ke = zeros(45, 45); tangent_RM_FD!(ke, scv_mitc, zeros(45), mat)
+    λ  = eigvals(Symmetric(ke))
+    tol = 1e-7 * maximum(abs, λ)
+    @test count(<(-tol), λ) == 0
+    @test count(v -> abs(v) ≤ tol, λ) == 6
+end
+
 @testset "MITC9 anti-locking: thin SS plate h-convergence" begin
     # Simply-supported square plate [0,1]² under sinusoidal load q₀·sin(πx)·sin(πy).
     # Same reference as the NoMITC h-convergence test in test_rm.jl.

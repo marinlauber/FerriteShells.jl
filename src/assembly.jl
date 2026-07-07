@@ -318,7 +318,8 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
+        r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+        γ₁ -= r₁; γ₂ -= r₂
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         W += rm_qp_energy(mat, c_ms, κ, γ₁, γ₂, scv.A_metric[qp],
                           scv.A₁[qp], scv.A₂[qp], d₀) * scv.detJdV[qp]
@@ -444,42 +445,43 @@ end
 # Only then is the residual the exact gradient of energy_RM (conservative ⇒ symmetric
 # tangent). The QP-direct variant is only ~O(1%) accurate and non-symmetric on curved
 # elements. Bending (κ/D) terms are QP-direct as in the NoMITC path.
-function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,M<:MITC,T}
-    mitc    = scv.mitc
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    Nt      = length(mitc.ξ_tie_1)
-
-    a₁_tie = Vector{Vec{3,T}}(undef, Nt); d_tie1 = Vector{Vec{3,T}}(undef, Nt)
-    a₂_tie = Vector{Vec{3,T}}(undef, Nt); d_tie2 = Vector{Vec{3,T}}(undef, Nt)
-    for k in 1:Nt
-        Δa₁ = zero(Vec{3,T}); dk1 = zero(Vec{3,T})
-        Δa₂ = zero(Vec{3,T}); dk2 = zero(Vec{3,T})
-        for I in 1:n_nodes
+function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM,MT}}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,NN,MM,MT,T}
+    mitc = scv.mitc
+    # Tying-point deformed tangents/directors and per-node Rodrigues Jacobians (node frame),
+    # built as stack-allocated tuples (Val(MM)/Val(NN)) so the kernel stays allocation-free
+    # *and* ForwardDiff-safe — the MITC scratch arrays are Float64-only.
+    tie1 = ntuple(Val(MM)) do k
+        Δa = zero(Vec{3,T}); dk = zero(Vec{3,T})
+        @inbounds for I in 1:NN
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-            Δa₁ += u_I * mitc.dNdξ_tie_1[I,k][1]
-            Δa₂ += u_I * mitc.dNdξ_tie_2[I,k][2]
+            Δa += u_I * mitc.dNdξ_tie_1[I,k][1]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]; cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            dI = cosθ*mitc.G₃_node[I] + sincθ*(φ₁*mitc.T₁_node[I] + φ₂*mitc.T₂_node[I])
-            dk1 += mitc.N_tie_1[I,k] * dI
-            dk2 += mitc.N_tie_2[I,k] * dI
+            dk += mitc.N_tie_1[I,k] * (cosθ*mitc.G₃_node[I] + sincθ*(φ₁*mitc.T₁_node[I] + φ₂*mitc.T₂_node[I]))
         end
-        a₁_tie[k] = mitc.A₁_tie_1[k] + Δa₁; d_tie1[k] = dk1
-        a₂_tie[k] = mitc.A₂_tie_2[k] + Δa₂; d_tie2[k] = dk2
+        (mitc.A₁_tie_1[k] + Δa, dk)
     end
-    dd1n = Vector{Vec{3,T}}(undef, n_nodes); dd2n = Vector{Vec{3,T}}(undef, n_nodes)
-    for I in 1:n_nodes
+    tie2 = ntuple(Val(MM)) do k
+        Δa = zero(Vec{3,T}); dk = zero(Vec{3,T})
+        @inbounds for I in 1:NN
+            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            Δa += u_I * mitc.dNdξ_tie_2[I,k][2]
+            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]; cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
+            dk += mitc.N_tie_2[I,k] * (cosθ*mitc.G₃_node[I] + sincθ*(φ₁*mitc.T₁_node[I] + φ₂*mitc.T₂_node[I]))
+        end
+        (mitc.A₂_tie_2[k] + Δa, dk)
+    end
+    ddn = ntuple(Val(NN)) do I
         _, _, d1, d2 = rodrigues_jac(u_e[5I-1], u_e[5I], mitc.G₃_node[I], mitc.T₁_node[I], mitc.T₂_node[I])
-        dd1n[I] = d1; dd2n[I] = d2
+        (d1, d2)
     end
 
     γ₁_k, γ₂_k = tying_shear_strains(mitc, u_e)
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
-        d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
+        a₁, a₂ = covariant_basis(scv, qp, u_e, NN)
+        d, d₁, d₂ = director_field(scv, qp, u_e, NN)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
-        d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
+        d₀  = reference_director(scv, qp, NN)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
@@ -490,18 +492,20 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::A
         S¹  = Mb[1,1]*a₁ + Mb[1,2]*a₂
         S²  = Mb[2,1]*a₁ + Mb[2,2]*a₂
         dΩ  = scv.detJdV[qp]
-        for I in 1:n_nodes
+        @inbounds for I in 1:NN
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
+            ddI1 = ddn[I][1]; ddI2 = ddn[I][2]
             Bγ1u = zero(Vec{3,T}); Bγ2u = zero(Vec{3,T})
             Bγ1φ1 = zero(T); Bγ1φ2 = zero(T); Bγ2φ1 = zero(T); Bγ2φ2 = zero(T)
-            @inbounds for k in 1:Nt
+            for k in 1:MM
                 h1 = mitc.h_tie_1[qp,k]; h2 = mitc.h_tie_2[qp,k]
-                Bγ1u  += h1 * mitc.dNdξ_tie_1[I,k][1] * d_tie1[k]
-                Bγ2u  += h2 * mitc.dNdξ_tie_2[I,k][2] * d_tie2[k]
-                Bγ1φ1 += h1 * mitc.N_tie_1[I,k] * dot(a₁_tie[k], dd1n[I])
-                Bγ1φ2 += h1 * mitc.N_tie_1[I,k] * dot(a₁_tie[k], dd2n[I])
-                Bγ2φ1 += h2 * mitc.N_tie_2[I,k] * dot(a₂_tie[k], dd1n[I])
-                Bγ2φ2 += h2 * mitc.N_tie_2[I,k] * dot(a₂_tie[k], dd2n[I])
+                a1t = tie1[k][1]; d1t = tie1[k][2]; a2t = tie2[k][1]; d2t = tie2[k][2]
+                Bγ1u  += h1 * mitc.dNdξ_tie_1[I,k][1] * d1t
+                Bγ2u  += h2 * mitc.dNdξ_tie_2[I,k][2] * d2t
+                Bγ1φ1 += h1 * mitc.N_tie_1[I,k] * dot(a1t, ddI1)
+                Bγ1φ2 += h1 * mitc.N_tie_1[I,k] * dot(a1t, ddI2)
+                Bγ2φ1 += h2 * mitc.N_tie_2[I,k] * dot(a2t, ddI1)
+                Bγ2φ2 += h2 * mitc.N_tie_2[I,k] * dot(a2t, ddI2)
             end
             @views re[5I-4:5I-2] .+= (∂NI1*Pb¹ + ∂NI2*Pb² + Q₁*Bγ1u + Q₂*Bγ2u) * dΩ
             _, _, dd_I1, dd_I2 = rodrigues_jac(u_e[5I-1], u_e[5I], scv.G₃_elem[I], scv.T₁_elem[I], scv.T₂_elem[I])
@@ -590,9 +594,8 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
         κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
-        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+        γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, n_nodes)
-        γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         D, Cs = bending_and_shear_stiffness(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], d₀)
         Mb  = D ⊡ κ
