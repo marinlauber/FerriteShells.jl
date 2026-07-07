@@ -51,11 +51,12 @@
     re_ex_lg = zeros(n_dof); bending_residuals_RM!(re_ex_lg, scv_mitc, u_large, mat)
     re_fd_lg = zeros(n_dof); residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
     re_mem_lg = zeros(n_dof); membrane_residuals_RM!(re_mem_lg, scv_mitc, u_large, mat)
-    @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-2
+    @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-10
 
-    # 2b. Consistent MITC9 tangent: bending_tangent_RM! (MITC dispatch) must match
-    #     the ForwardDiff Jacobian of bending_residuals_RM! (not the energy Hessian —
-    #     the MITC explicit residual is not the exact gradient of energy_RM).
+    # 2b. Consistent MITC9 tangent: the explicit MITC residual is the exact gradient of
+    #     energy_RM (it varies the tying-interpolated shear strain via the MITC B-operators),
+    #     so bending_tangent_RM! (MITC dispatch) equals both its ForwardDiff Jacobian and the
+    #     energy Hessian, and is symmetric — on curved elements too.
     ke_ex  = zeros(n_dof, n_dof)
     bending_tangent_RM!(ke_ex, scv_mitc, u_pert, mat)
     ke_jac = ForwardDiff.jacobian(u -> begin
@@ -63,7 +64,8 @@
         bending_residuals_RM!(re, scv_mitc, u, mat)
         re
     end, u_pert)
-    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-3
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-8
+    @test norm(ke_ex .- ke_ex') / norm(ke_ex) < 1e-10   # symmetric (conservative residual)
 
     # At zero state: tangent matches Jacobian of residual to near-machine precision.
     ke_ex0  = zeros(n_dof, n_dof)
@@ -99,6 +101,35 @@
     W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc,   mat)
     W_nomitc = FerriteShells.energy_RM(u_kl, scv_nomitc, mat)
     @test W_mitc ≈ W_nomitc rtol=1e-6
+end
+
+@testset "MITC9 curved-element reference state is stress-free (positive definite)" begin
+    # On a doubly-curved element the MITC tying strains are already referenced, so the
+    # QP reference subtraction `dot(A_α, d₀)` must NOT be applied again — doing so injects
+    # a spurious reference shear (zero on flat elements, nonzero on curved) that pre-stresses
+    # u=0 and makes the tangent indefinite. Regression guard for that double-subtraction.
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ip  = Lagrange{RefQuadrilateral, 2}()
+    qr  = QuadratureRule{RefQuadrilateral}(3)
+    # warp the flat unit Q9 onto a paraboloid z = 0.15(x²+y²)
+    X_curv = [Vec{3}((p[1], p[2], 0.15*(p[1]^2 + p[2]^2))) for p in X_Q9_UNIT]
+
+    scv_mitc   = ShellCellValues(qr, ip, ip; mitc=MITC9)
+    scv_nomitc = ShellCellValues(qr, ip, ip)
+    reinit!(scv_mitc,   X_curv)
+    reinit!(scv_nomitc, X_curv)
+
+    # reference (u=0) residual: MITC must not add spurious internal force beyond NoMITC
+    re_m  = zeros(45); residuals_RM_FD!(re_m,  scv_mitc,   zeros(45), mat)
+    re_nm = zeros(45); residuals_RM_FD!(re_nm, scv_nomitc, zeros(45), mat)
+    @test norm(re_m) ≤ 2 * norm(re_nm) + 1e-6
+
+    # tangent at u=0 must be positive semidefinite: exactly 6 zero modes, no negative ones
+    ke = zeros(45, 45); tangent_RM_FD!(ke, scv_mitc, zeros(45), mat)
+    λ  = eigvals(Symmetric(ke))
+    tol = 1e-7 * maximum(abs, λ)
+    @test count(<(-tol), λ) == 0
+    @test count(v -> abs(v) ≤ tol, λ) == 6
 end
 
 @testset "MITC9 anti-locking: thin SS plate h-convergence" begin

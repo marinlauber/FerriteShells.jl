@@ -123,6 +123,10 @@ where ``S^\alpha = M^{\alpha\beta}\mathbf{d}_{,\beta}``.
 
 In FerriteShells the explicit forms are implemented in [`membrane_residuals_RM!`](@ref) and [`bending_residuals_RM!`](@ref). ForwardDiff-based residuals are also available as [`residuals_RM_FD!`](@ref) for both membrane, bending and shear contributions.
 
+!!! note
+    The advantage of the ForwardDiff-based residuals and tangents is that they are exact gradient and hessian of the internal energy, the explicit version should be as well but any small bug might break the energy consistency and lead to non-convergence of Newton-Raphson procedures. The explicit version is faster, but the ForwardDiff version is more robust, so it can be used as a reference to test the explicit version if you suspect an error in the explicit functions.
+
+
 ### 2.2 Consistent tangent and second variation
 
 The consistent tangent is the second variation of ``\mathcal{W}_\text{int}``. It has four blocks per node pair ``(I,J)``:
