@@ -137,7 +137,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₁ += u_I * mitc.dNdξ_tie_1[I,k][1]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
-            cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
+            cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie_1[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
@@ -149,7 +149,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa₂ += u_I * mitc.dNdξ_tie_2[I,k][2]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
-            cosθ, sincθ = _cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
+            cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie_2[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
@@ -176,6 +176,16 @@ Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`.
     end
     γ₁, γ₂
 end
+
+# Reference (u=0) shear to subtract so the strain is measured from the reference state.
+# NoMITC: QP-direct `dot(A_α, d₀)` (the raw `shear_strains` is not yet referenced).
+# MITC: the tying strains already subtract their own per-tying-point reference, so the
+# interpolated `shear_strains` is referenced — subtracting `dot(A_α, d₀)` again would
+# double-count. That extra term is zero on flat elements (A_α ⟂ d₀) but a spurious
+# reference shear on curved ones, which pre-stresses the reference and renders the
+# tangent indefinite. Dispatch to 0 for MITC.
+@inline reference_shear_offset(A₁, A₂, d₀, ::NoMITC) = dot(A₁, d₀), dot(A₂, d₀)
+@inline reference_shear_offset(A₁, A₂, d₀, ::MITC)    = 0.0, 0.0
 
 # MITC3
 # include("mitc/mitc3.jl")

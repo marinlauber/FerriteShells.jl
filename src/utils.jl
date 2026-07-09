@@ -269,7 +269,7 @@ function director_field(dh::DofHandler, scv::ShellCellValues, u)
         T2_avg = sum(scv.T₂[q] for q in 1:nq) / nq
         for (I, nid) in enumerate(cell.nodes)
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
-            cosθ, sincθ = _cos_sinc_sq(φ₁^2 + φ₂^2)
+            cosθ, sincθ = cos_sinc_sq(φ₁^2 + φ₂^2)
             d_I = cosθ * G3_avg + sincθ * (φ₁ * T1_avg + φ₂ * T2_avg)
             @views d_sum[:, nid]  .+= d_I
             @views G3_sum[:, nid] .+= G3_avg
