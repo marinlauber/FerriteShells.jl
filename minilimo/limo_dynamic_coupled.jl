@@ -308,7 +308,7 @@ integrator = ODE.init(prob, ODE.Tsit5(), reltol=1e-6, abstol=1e-9, save_everyste
 # coupling controls
 tol_cpl  = 1e-4
 max_iter = 50
-dt_cpl   = 0.0001
+dt_cpl   = 0.01
 
 # storages
 vols = Float64[]; pres = Float64[]; pact = Float64[]
@@ -374,7 +374,7 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
         push!(vtarget, integrator.u[1])
 
         # actuator pressure at this time [mmHg] → Pa
-        Pact_mmHg = 200 * ϕᵢ(integrator.t; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
+        Pact_mmHg = 400 * ϕᵢ(integrator.t; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
         Pact = Pact_mmHg / Pa2mmHg
 
         p, n_iter, converged, V₃D = solve_coupled_step!(u, p, Pact, V_target, dh, scv, mat, ch,
@@ -418,10 +418,30 @@ end
 close(pvd)
 
 using Plots
+# Read the (Vlv_ml, Plv_mmHg) columns of one pressurization CSV; skips the header.
+function read_pv(path)
+    Vlv = Float64[]; Plv = Float64[]
+    for line in Iterators.drop(eachline(path), 1)
+        cols = split(line, ',')
+        push!(Vlv, parse(Float64, cols[2]))
+        push!(Plv, parse(Float64, cols[3]))
+    end
+    return Vlv, Plv
+end
+
+
 times = collect(0:dt_cpl:integrator.t)[1:length(pres)]
 p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
           label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
-p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
+p2 = plot()
+for Pact_mmHg in (0,50.0,100.0,150.0,200.0,400)
+    fname = "minilimo_results_Pact_$(Pact_mmHg).csv"
+    Pact_mmHg in [0,400] && (fname = "minilimo_pressurization_pact_$(Pact_mmHg).csv")
+    isfile(fname) || (@warn "missing $fname, skipping"; continue)
+    Vlv, Plv = read_pv(fname)
+    plot!(p2, Vlv, Plv, label="Pact = $(Pact_mmHg) mmHg", lw=2, marker=:circle, ms=3)
+end
+plot!(p2, vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
 plot(p1, p2)
-# # savefig("minilimo-dynamic-coupled-N$Np.png")
+# savefig("minilimo-dynamic-coupled-Pact-400.png")
