@@ -24,14 +24,16 @@ bibliography: paper.bib
 
 # Summary
 
-FerriteShells.jl is companions for the Ferrite.jl finite-element library to simulate and analyze static and dynamic structural mechanics problem involving non-linear shells. It implements a Reissner-Mindlin shell in a residual form which allows modelling of:
+FerriteShells.jl is a companions for the Ferrite.jl finite-element library to simulate and analyze static and dynamic structural mechanics problem involving non-linear shells. It implements a Reissner-Mindlin shell in a residual form which allows modelling of:
 - thick ($t/L>5$) shells (Figure 1),
 - thin ($t/L<10$) shells with MITC treatment to prevent shear locking (Figure 2), and
 - geometric and material non-linearities through Rodrigues parametrization of the shell director and strain-energy density function-based hyperelastic material laws (Figure 3).
 
 The overall idea of FerriteShells.jl is to adapt Ferrite.jl `CellValue` and the associated `reinit!` to shells to enable seamless integration within the whole Ferrite.jl ecosystem. Since shells rely on specializing the governing equations to the curvilinear system associated with the structure's midsurface, the new `ShellCellValue` holds classical surface metrics, such as the metric tensor, local curvilinear coordinates, etc. This `ShellCellValue` is the used within assembly functions for the energy, residual and consistent tangent that can be used to construct shell problems. This implementation enables simple integration in the Ferrite.jl environment with minimal code change compared to native Ferrite.jl problems and allows user to become rapidly proficient in assembling and solving shell problems.
 
-FerriteShells.jl relies on Julia’s multiple dispatch programming paradigm [] to specialize Ferrite.jl functions to `ShellCellValues` and internally assembly function to dispatch to correct shear treatment. Additionally, the multiple dispatch allows future users to extend shear treatments to other methods (i.e. Selective Reduced Integration, etc.).
+FerriteShells.jl relies on Julia’s multiple dispatch programming paradigm [] to specialize Ferrite.jl functions to `ShellCellValues` and internally assembly function to dispatch to correct behaviour.
+Thisisespecially
+Additionally, the multiple dispatch allows future users to extend shear treatments to other methods (i.e. Selective Reduced Integration, etc.).
 
 FerriteShells.jl leverage Julia's automatic differentiation capabilities to model strain-energy-based hyperelastic material model through a very simple interface where the (scalar) strain energy function can be specified through the Cartesian Right Cauchy-Green deformation tensor ($C=F^⊤ F$) which is internally specialized to the curvilinear coordinate system of the shell through the incompressibility assumption. This is particularly handy for users modelling hyperelastic shells who do not require to specialize the material model to the shell's coordinate system themselves.
 
