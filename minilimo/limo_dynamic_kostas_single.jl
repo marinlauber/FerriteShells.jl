@@ -184,9 +184,6 @@ function solve_step!(u_new, ũ, ṽ, Plv, Pact, Δt, dh, scv, mat, ch,
     return converged, iters
 end
 
-# Actuator-pressure targets to sweep [mmHg]; reused by the plotting section below.
-pact_cases = 0:400:400
-
 let
 tol      = 1e-4
 max_iter = 50
@@ -194,17 +191,47 @@ max_iter = 50
 Δt_max   = 0.1
 
 # scaling and pressure
-Pa2mmHg  = 0.00750062      # Pa/mmHg
-m3_to_ml = 1.0e6           # m³ → ml
-p_hold   = 0.0  / Pa2mmHg  # Plv held during morph + actuation [Pa]
+Pa2mmHg  = 0.00750062       # Pa/mmHg
+m3_to_ml = 1.0e6            # m³ → ml
+p_hold   = 0.0   / Pa2mmHg  # Plv held during morph + actuation [Pa]
 Plv_max  = 150.0 / Pa2mmHg  # final ventricular pressure after ramp [Pa]
-save_vtk = true
+save_vtk = false
 
+# Actuator-pressure target [mmHg], overridable from the command line as
+# `Pact_max=<mmHg>`, e.g. `julia limo_dynamic_kostas_single.jl Pact_max=200`.
+Pact_mmHg = 0.0
+let i = findfirst(a -> startswith(a, "Pact_max="), ARGS)
+    i === nothing || (Pact_mmHg = parse(Float64, split(ARGS[i], "=")[2]))
+end
+Pact_max = Pact_mmHg / Pa2mmHg  # actuator pressure target [Pa]
+
+# schedule(t) → (morph_arg, Plv, Pact) at global time t.  The edge morph is driven
+# by `ramp(5t)` (completes early, well within the morph stage) then frozen.
+function schedule(t)
+    if t < T_sim
+        return (5t, p_hold * ramp(t), 0.0)
+    elseif t < T_sim + T_act
+        return (T_morph, p_hold, Pact_max * smoothramp(t - T_sim, T_act))
+    else
+        return (T_morph, Plv_max * smoothramp(t - T_sim - T_act, T_pres), Pact_max)
+    end
+end
+
+# Initial state: at rest, flat reference geometry; g_old = 0 (u=v=0, p=0).  Reset
+# `ch` to the flat reference (marg = 0) so re-running in the same session does not
+# start from a stale full-morph edge state.
+Ferrite.update!(ch, 0.0)
+u = zeros(N_dof); apply!(u, ch)
+v = zeros(N_dof)
+a = zeros(N_dof)
+fill!(g_old, 0.0)
+
+pvd = save_vtk ? paraview_collection("minilimo-dynamic-actuation") : nothing
+vtk_step = Ref(-1)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
 
-# Append the current solution (nodal residuals + director frame) as a frame of `pvd`.
-function write_vtk!(pvd, vtk_step, prefix, u, t)
+function write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, t)
     vtk_step[] += 1
     for cell in CellIterator(dh)
         sd = shelldofs(cell)
@@ -214,7 +241,7 @@ function write_vtk!(pvd, vtk_step, prefix, u, t)
         end
     end
     d, G3 = director_field(dh, scv, u)
-    VTKGridFile("$(prefix)-$(vtk_step[])", dh) do vtk
+    VTKGridFile("minilimo-dynamic-actuation-$(vtk_step[])", dh) do vtk
         write_solution(vtk, dh, u)
         Ferrite.write_node_data(vtk, resu, "ru")
         Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -225,132 +252,62 @@ function write_vtk!(pvd, vtk_step, prefix, u, t)
     end
 end
 
-# Advance the HHT-α solution from t0 to t1 under `sched(t) → (marg, Plv, Pact)`,
-# mutating u, v, a (and the shared g_old) in place.  `after_step(t, Plv, Pact, step,
-# iters, Δt)` runs after each accepted step (logging / VTK / printing).  Returns the
-# adaptive Δt reached at t1, so the next stage can continue from it.
-function advance!(sched, u, v, a, t0, t1, Δt_cur; after_step=(_...)->nothing)
-    t = t0; step = 0
-    while t < t1 - 1e-10
-        t_new = min(t + Δt_cur, t1)
-        marg, Plv, Pact = sched(t_new)
-        @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
-        @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
-        u_new .= ũ
-        Ferrite.update!(ch, marg)
-        apply!(u_new, ch)
-        converged, iters = solve_step!(u_new, ũ, ṽ, Plv, Pact, Δt_cur, dh, scv, mat, ch,
-                                       Plv_srf, Pact_srf, PlvPact_srf, bufs; max_iter=max_iter, tol=tol)
-        if converged
-            step += 1
-            @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
-            @. v = ṽ + (Δt_cur * γ_hht) * a
-            mul!(Mv, M, v)
-            @. g_old = α_damp * Mv + r_int - Plv * F_plv - Pact * F_pact + Pact * F_plvpact
-            u .= u_new; t = t_new
-            Δt_cur = min(Δt_cur * 1.2, Δt_max)
-            after_step(t, Plv, Pact, step, iters, Δt_cur)
-        else
-            Δt_cur /= 2
-            Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
-        end
-    end
-    return Δt_cur
-end
+save_vtk && write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, 0.0)
 
-# The morph stage ([0, T_sim]) drives Plv = p_hold and Pact = 0 for every case, so it
-# is identical across the Pact sweep — run it once and snapshot the end state.  `ch`
-# starts at the flat reference (marg = 0), so u begins flat with u = v = a = 0.
-Ferrite.update!(ch, 0.0)
-u = zeros(N_dof); apply!(u, ch)
-v = zeros(N_dof)
-a = zeros(N_dof)
-fill!(g_old, 0.0)
-morph_sched(t) = (5t, p_hold * ramp(t), 0.0)
-
-pvd_m = save_vtk ? paraview_collection("minilimo-morph") : nothing
-vtk_m  = Ref(-1)
-save_vtk && write_vtk!(pvd_m, vtk_m, "minilimo-morph", u, 0.0)
-
-println("morph stage (shared by all Pact cases)")
+println("dynamic HHT-α: morph → actuation → pressurization (Pact = $Pact_mmHg mmHg)")
 @printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "Plv [mmHg]", "Pact [mmHg]", "iters", "Δt")
-Δt_morph = @time advance!(morph_sched, u, v, a, 0.0, T_sim, Δt;
-    after_step = (t, Plv, Pact, step, iters, Δt_cur) -> step % 4 == 0 && begin
-        save_vtk && write_vtk!(pvd_m, vtk_m, "minilimo-morph", u, t)
-        @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
-                step, t, Plv * Pa2mmHg, Pact * Pa2mmHg, iters, Δt_cur)
-    end)
-save_vtk && (write_vtk!(pvd_m, vtk_m, "minilimo-morph", u, T_sim); close(pvd_m))
 
-# Shared morph end state: every Pact case restarts from this identical snapshot.
-u_m = copy(u); v_m = copy(v); a_m = copy(a); g_m = copy(g_old)
+# Pressurization-stage history: (t, cavity volume, Plv, Pact) rows, cavity volume
+# measured over the endocardium as in the 3D–0D coupling.  Written to CSV at the end.
+hist = NTuple{4,Float64}[]
 
-# Per case: actuation ([T_sim, +T_act], Pact 0→max, Plv held) then pressurization
-# ([+T_act, +T_pres], Plv 0→max, Pact held), continuing from the morph snapshot with
-# the edge morph frozen at marg = T_morph.  `Pact_mmHg` is the case id [mmHg]; the
-# scheduled actuator pressure `Pact` is in Pa.
-for Pact_mmHg in pact_cases
-    Pact_max = Pact_mmHg / Pa2mmHg  # actuator pressure target [Pa]
-    sched(t) = t < T_sim + T_act ?
-        (T_morph, p_hold, Pact_max * smoothramp(t - T_sim, T_act)) :
-        (T_morph, Plv_max * smoothramp(t - T_sim - T_act, T_pres), Pact_max)
+un = zeros(N_dof)
+let t = 0.0; step = 0; Δt_cur = Δt
+@time while t < T_total - 1e-10
+    t_new = min(t + Δt_cur, T_total)
+    marg, Plv, Pact = schedule(t_new)
 
-    u .= u_m; v .= v_m; a .= a_m; g_old .= g_m   # restore shared morph state
+    @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
+    @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
 
-    prefix   = "minilimo-dynamic-actuation-pact$(Pact_mmHg)"
-    pvd      = save_vtk ? paraview_collection(prefix) : nothing
-    vtk_step = Ref(-1)
-    save_vtk && write_vtk!(pvd, vtk_step, prefix, u, T_sim)
+    u_new .= ũ
+    Ferrite.update!(ch, marg)
+    apply!(u_new, ch)
 
-    # Pressurization-stage history: (t, cavity volume, Plv, Pact) rows, cavity volume
-    # measured over the endocardium as in the 3D–0D coupling.  Written to CSV below.
-    hist = NTuple{4,Float64}[]
+    converged, iters = solve_step!(u_new, ũ, ṽ, Plv, Pact, Δt_cur, dh, scv, mat, ch,
+                                   Plv_srf, Pact_srf, PlvPact_srf, bufs; max_iter=max_iter, tol=tol)
 
-    println("actuation + pressurization for Pact $Pact_mmHg mmHg")
-    @printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "Plv [mmHg]", "Pact [mmHg]", "iters", "Δt")
-    @time advance!(sched, u, v, a, T_sim, T_total, Δt_morph;
-        after_step = (t, Plv, Pact, step, iters, Δt_cur) -> begin
-            if t ≥ T_sim + T_act - 1e-10   # pressurization stage: log cavity volume + pressures
-                Vlv = -2 * compute_volume(dh, scv, u; cellset=Plv_srf) * m3_to_ml
-                push!(hist, (t, Vlv, Plv * Pa2mmHg, Pact * Pa2mmHg))
-            end
-            if step % 4 == 0
-                save_vtk && write_vtk!(pvd, vtk_step, prefix, u, t)
-                @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
-                        step, t, Plv * Pa2mmHg, Pact * Pa2mmHg, iters, Δt_cur)
-            end
-        end)
-    save_vtk && (write_vtk!(pvd, vtk_step, prefix, u, T_total); close(pvd))
-
-    open("minilimo_pressurization_pact_$(Pact_mmHg).csv", "w") do io
-        println(io, "t_s,Vlv_ml,Plv_mmHg,Pact_mmHg")
-        for (t, V, Plv, Pact) in hist
-            @printf(io, "%.6f,%.6f,%.6f,%.6f\n", t, V, Plv, Pact)
+    if converged
+        step += 1
+        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
+        @. v = ṽ + (Δt_cur * γ_hht) * a
+        mul!(Mv, M, v)
+        @. g_old = α_damp * Mv + r_int - Plv * F_plv - Pact * F_pact + Pact * F_plvpact
+        u .= u_new; t = t_new
+        if t ≥ T_sim + T_act - 1e-10   # pressurization stage: log cavity volume + pressures
+            Vlv = -2 * compute_volume(dh, scv, u; cellset=Plv_srf) * m3_to_ml
+            push!(hist, (t, Vlv, Plv * Pa2mmHg, Pact * Pa2mmHg))
         end
+        Δt_cur = min(Δt_cur * 1.2, Δt_max)
+        if step % 4 == 0
+            save_vtk && write_vtk!(pvd, vtk_step, dh, scv, grid, u, res, resu, resθ, t)
+            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n",
+                    step, t, Plv * Pa2mmHg, Pact * Pa2mmHg, iters, Δt_cur)
+        end
+    else
+        Δt_cur /= 2
+        Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
+    end
+end
+    un .= u
+    save_vtk && write_vtk!(pvd, vtk_step, dh, scv, grid, un, res, resu, resθ, T_total)
+end
+save_vtk && close(pvd)
+
+open("minilimo_results_Pact_$(Pact_mmHg).csv", "w") do io
+    println(io, "t_s,Vlv_ml,Plv_mmHg,Pact_mmHg")
+    for (t, V, Plv, Pact) in hist
+        @printf(io, "%.6f,%.6f,%.6f,%.6f\n", t, V, Plv, Pact)
     end
 end
 end
-
-# # Pressure–volume (Plv vs Vlv) curves from the pressurization stage of each Pact
-# # case, read back from the CSVs written above.
-# using Plots
-
-# # Read the (Vlv_ml, Plv_mmHg) columns of one pressurization CSV; skips the header.
-# function read_pv(path)
-#     Vlv = Float64[]; Plv = Float64[]
-#     for line in Iterators.drop(eachline(path), 1)
-#         cols = split(line, ',')
-#         push!(Vlv, parse(Float64, cols[2]))
-#         push!(Plv, parse(Float64, cols[3]))
-#     end
-#     return Vlv, Plv
-# end
-
-# pv = plot(xlabel="Vlv [ml]", ylabel="Plv [mmHg]", legend=:topleft, lw=2)
-# for Pact_mmHg in pact_cases
-#     fname = "minilimo_pressurization_pact_$(Pact_mmHg).csv"
-#     isfile(fname) || (@warn "missing $fname, skipping"; continue)
-#     Vlv, Plv = read_pv(fname)
-#     plot!(pv, Vlv, Plv, label="Pact = $(Pact_mmHg) mmHg", lw=2, marker=:circle, ms=3)
-# end
-# # savefig(pv, "minilimo_pressurization_pv.png")

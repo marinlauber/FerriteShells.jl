@@ -209,60 +209,65 @@ VTKGridFile("minilimo-dynamic-coupled-strong-0", dh) do vtk
     pvd[0.0] = vtk
 end
 
-println("PHASE 1 — dynamic HHT-α morph")
-@printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "λ", "p [mmHg]", "iters", "Δt")
+# println("PHASE 1 — dynamic HHT-α morph")
+# @printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "λ", "p [mmHg]", "iters", "Δt")
 
 un = zeros(N_dof)
-let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
-@time while t < T_sim - 1e-10
-    t_new = min(t + Δt_cur, T_sim)
-    p_new = p_max * ramp(t_new)
+# let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
+# @time while t < T_sim - 1e-10
+#     t_new = min(t + Δt_cur, T_sim)
+#     p_new = p_max * ramp(t_new)
 
-    @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
-    @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
+#     @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
+#     @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
 
-    u_new .= ũ
-    Ferrite.update!(ch, t_new * 5)
-    apply!(u_new, ch)
+#     u_new .= ũ
+#     Ferrite.update!(ch, t_new * 5)
+#     apply!(u_new, ch)
 
-    converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs_morph;
-                                         max_iter=max_iter, tol=tol)
+#     converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs_morph;
+#                                          max_iter=max_iter, tol=tol)
 
-    if converged
-        step += 1
-        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
-        @. v = ṽ + (Δt_cur * γ_hht) * a
-        mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
-        p = p_new; u .= u_new; t = t_new
-        Δt_cur = min(Δt_cur * 1.2, Δt_max)
-        if step % 4 == 0
-            vtk_step[] += 1
-            for cell in CellIterator(dh)
-                sd = shelldofs(cell)
-                for (I, nid) in enumerate(cell.nodes)
-                    resu[:, nid] .= res[sd[5I-4:5I-2]]
-                    resθ[:, nid] .= res[sd[5I-1:5I  ]]
-                end
-            end
-            d, G3 = director_field(dh, scv, u)
-            VTKGridFile("minilimo-dynamic-coupled-strong-$(vtk_step[])", dh) do vtk
-                write_solution(vtk, dh, u)
-                Ferrite.write_node_data(vtk, resu, "ru")
-                Ferrite.write_node_data(vtk, resθ, "rθ")
-                Ferrite.write_node_data(vtk, d,  "director")
-                Ferrite.write_node_data(vtk, G3, "G3")
-                for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
-                pvd[t] = vtk
-            end
-            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
-        end
-    else
-        Δt_cur /= 2
-        Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
-    end
-end
-    un .= u
-end
+#     if converged
+#         step += 1
+#         @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
+#         @. v = ṽ + (Δt_cur * γ_hht) * a
+#         mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
+#         p = p_new; u .= u_new; t = t_new
+#         Δt_cur = min(Δt_cur * 1.2, Δt_max)
+#         if step % 4 == 0
+#             vtk_step[] += 1
+#             for cell in CellIterator(dh)
+#                 sd = shelldofs(cell)
+#                 for (I, nid) in enumerate(cell.nodes)
+#                     resu[:, nid] .= res[sd[5I-4:5I-2]]
+#                     resθ[:, nid] .= res[sd[5I-1:5I  ]]
+#                 end
+#             end
+#             d, G3 = director_field(dh, scv, u)
+#             VTKGridFile("minilimo-dynamic-coupled-strong-$(vtk_step[])", dh) do vtk
+#                 write_solution(vtk, dh, u)
+#                 Ferrite.write_node_data(vtk, resu, "ru")
+#                 Ferrite.write_node_data(vtk, resθ, "rθ")
+#                 Ferrite.write_node_data(vtk, d,  "director")
+#                 Ferrite.write_node_data(vtk, G3, "G3")
+#                 for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
+#                 pvd[t] = vtk
+#             end
+#             @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
+#         end
+#     else
+#         Δt_cur /= 2
+#         Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
+#     end
+# end
+#     un .= u
+# end
+
+using JLD2
+# jldsave("limo_dynamic_coupled_u0.jld2"; u=un)
+# reload if done already
+un .= load("limo_dynamic_coupled_u0.jld2")["u"]
 
 # Freeze the fully-morphed edge configuration (t·5 ≥ T_morph → ramp = 1) for the coupled
 # phase; the Dirichlet morph is held constant from here on (u, v, a carried forward).
@@ -376,15 +381,11 @@ end
 V_LV0 = -2 * compute_volume(dh, scv, u; cellset=Plv_srf)   # m³
 println("Initial volume of the device: ", round(V_LV0 * m3_to_ml; digits=4), " ml")
 
-# initial 0D state (Pa): filled ventricle, arterial at 80 mmHg
-Plv = p_max
-Pa  = 80.0 / Pa2mmHg
-Pv  = p_max
-
 println("\nPHASE 2 — monolithic strong 3D-0D coupling (dt_cpl=$(dt_cpl) s)")
 println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
 
-@time let V_LVₙ = V_LV0, Paₙ = Pa, Pvₙ = Pv, t_cpl = 0.0
+# initial 0D state (Pa): filled ventricle, arterial at 80 mmHg
+@time let V_LVₙ = V_LV0, Paₙ = Pa, Pvₙ = Pv, t_cpl = 0.0, Plv=p_max, Pa = 80.0 / Pa2mmHg, Pv = p_max
     step = 0
     while t_cpl < T_beat - dt_cpl / 2
         step += 1
@@ -443,11 +444,11 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
 end
 close(pvd)
 
-# using Plots
-# times = collect(dt_cpl:dt_cpl:dt_cpl*length(pres))
-# p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
-#           label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
-# p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
-#           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
-# plot(p1, p2)
+using Plots
+times = collect(dt_cpl:dt_cpl:dt_cpl*length(pres))
+p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
+          label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
+p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
+          xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
+plot(p1, p2)
 # savefig("minilimo-dynamic-coupled-strong-N$Np.png")

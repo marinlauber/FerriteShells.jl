@@ -256,6 +256,11 @@ end
     un .= u
 end
 
+using JLD2
+# jldsave("limo_dynamic_coupled_u0.jld2"; u=un)
+# reload if done already
+un .= load("limo_dynamic_coupled_u0.jld2")["u"]
+
 # Freeze the fully-morphed edge configuration (t·5 ≥ T_morph → ramp = 1) for the coupled
 # phase; the Dirichlet morph is held constant from here on (u, v, a carried forward).
 Ferrite.update!(ch, T_sim * 5)
