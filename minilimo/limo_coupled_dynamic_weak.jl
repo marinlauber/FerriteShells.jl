@@ -4,7 +4,7 @@ import OrdinaryDiffEq as ODE
 
 # Fully-dynamic (HHT-α throughout) morphing + 3D-0D Windkessel-coupled beat of the
 # miniLIMO, on the rectangular multi-surface mesh built by `make_minilimo_grid`.  This is
-# the transient counterpart of `limo_dynamic_coupled.jl`: there the coupled phase is a
+# the transient counterpart of `limo_coupled_static_weak.jl`: there the coupled phase is a
 # quasi-static Schur solve; here inertia and damping are retained in the coupled phase too.
 #
 #   PHASE 1 — dynamic morph  (t ∈ [0, T_sim], HHT-α)
@@ -186,12 +186,12 @@ u = zeros(N_dof); apply!(u, ch)
 v = zeros(N_dof)
 a = zeros(N_dof)
 
-pvd = paraview_collection("minilimo-dynamic-coupled-transient")
+pvd = paraview_collection("minilimo-coupled-dynamic-weak")
 vtk_step = Ref(0)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
 d, G3 = director_field(dh, scv, u)
-VTKGridFile("minilimo-dynamic-coupled-transient-0", dh) do vtk
+VTKGridFile("minilimo-coupled-dynamic-weak-0", dh) do vtk
     write_solution(vtk, dh, u)
     Ferrite.write_node_data(vtk, resu, "ru")
     Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -237,7 +237,7 @@ let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
                 end
             end
             d, G3 = director_field(dh, scv, u)
-            VTKGridFile("minilimo-dynamic-coupled-transient-$(vtk_step[])", dh) do vtk
+            VTKGridFile("minilimo-coupled-dynamic-weak-$(vtk_step[])", dh) do vtk
                 write_solution(vtk, dh, u)
                 Ferrite.write_node_data(vtk, resu, "ru")
                 Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -308,7 +308,7 @@ dt_cpl   = 0.01   # doubles as the HHT-α time step in the coupled phase
 
 # storages
 vols = Float64[]; pres = Float64[]; pact = Float64[]
-paos = Float64[]; pvns = Float64[]; vtarget = Float64[]
+paos = Float64[]; pvns = Float64[]; vtarget = Float64[]; tsav = Float64[]
 
 bufs_cpl = (; K_int, r_int, K_plv, F_plv, K_pact, F_pact, K_plvpact, F_plvpact, M, K_eff,
               res, rhs, v1, v2, dVdu, a_new, v_new, Ma, Mv, F_lu, free, g_old,
@@ -366,41 +366,69 @@ end
 
 dt_cpl   = 0.005
 
-println("\nPHASE 2 — dynamic HHT-α 3D-0D coupling (dt_cpl=$(dt_cpl) s)")
-println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
+println("\nPHASE 2 — dynamic HHT-α 3D-0D coupling (adaptive Δt, Δt₀=$(dt_cpl) s)")
+println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters |    Δt [s]")
 
+# Adaptive Δt driven by 3D-0D coupling convergence (same policy as the Phase-1 morph):
+# a converged bordered-Newton step commits and grows Δt by 1.2× (capped at Δt_max); a failed
+# step is discarded — the 0D integrator is rolled back with `reinit!`, the structural state
+# (u, v, a) is left untouched, Δt is halved, and the step is retried.
 @time let p = p_max
     step = 0
-    while integrator.t < tspan[2] - dt_cpl / 2
-        step += 1
+    Δt_cur = dt_cpl
+    u_ode_save = zeros(length(integrator.u))
+    while integrator.t < tspan[2] - Δt_min
+        Δt_cur = min(Δt_cur, tspan[2] - integrator.t)   # clip to land exactly on tspan[2]
 
-        # advance Windkessel by dt_cpl (Plv = integrator.u[4] held fixed).
-        ODE.step!(integrator, dt_cpl, true)
+        # snapshot the 0D state so a failed structural solve can be rolled back
+        t_ode_save = integrator.t
+        u_ode_save .= integrator.u
+
+        # advance Windkessel by Δt_cur (Plv = integrator.u[4] held fixed).
+        ODE.step!(integrator, Δt_cur, true)
 
         # target half-model volume (m³) from the full-LV volume the ODE tracks.
         V_target = 0.5 * integrator.u[1] / m3_to_ml
-        push!(vtarget, integrator.u[1])
 
         # actuator pressure at this time [mmHg] → Pa
         Pact_mmHg = 200 * ϕᵢ(integrator.t; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
         Pact = Pact_mmHg / Pa2mmHg
 
-        # HHT-α predictors for this step (Δt = dt_cpl), morph BC frozen.
-        @. ũ = u + dt_cpl * v + (dt_cpl^2 * (0.5 - β_hht)) * a
-        @. ṽ = v + (dt_cpl * (1 - γ_hht)) * a
+        # HHT-α predictors for this step (Δt = Δt_cur), morph BC frozen.
+        @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
+        @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
         u_new .= ũ
         apply!(u_new, ch)
 
-        p, n_iter, converged, V₃D = solve_coupled_dyn_step!(u_new, ũ, ṽ, p, Pact, V_target, dt_cpl,
+        # trial Plv starts from the last committed value; only adopted on success.
+        p_t, n_iter, converged, V₃D = solve_coupled_dyn_step!(u_new, ũ, ṽ, p, Pact, V_target, Δt_cur,
                                         dh, scv, mat, ch, Plv_srf, Pact_srf, PlvPact_srf, bufs_cpl;
                                         max_iter=max_iter, tol=tol_cpl, verbose=false)
 
+        if !converged
+            # roll the 0D integrator back to the pre-step state and retry with a smaller Δt;
+            # u, v, a and p are all left at their last committed values.
+            ODE.reinit!(integrator, u_ode_save; t0=t_ode_save)
+            @warn @sprintf("coupling did not converge for step to t=%.4f s — halving Δt %.3e → %.3e",
+                           t_ode_save + Δt_cur, Δt_cur, Δt_cur / 2)
+            Δt_cur /= 2
+            Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t_ode_save, digits=4)) s")
+            continue
+        end
+
+        step += 1
+        p = p_t
+
         # commit dynamic state (velocity/accel updates + HHT history g_old).
-        @. a = (u_new - ũ) / (β_hht * dt_cpl^2)
-        @. v = ṽ + (dt_cpl * γ_hht) * a
+        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
+        @. v = ṽ + (Δt_cur * γ_hht) * a
         mul!(Mv, M, v)
         @. g_old = α_damp * Mv + r_int - (p * F_plv + Pact * F_pact - Pact * F_plvpact)
         u .= u_new
+
+        # feed the converged LV pressure back into the ODE state.
+        integrator.u[4] = p * Pa2mmHg
+        ODE.u_modified!(integrator, true)
 
         if step%50 == 0
             vtk_step[] += 1
@@ -412,7 +440,7 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
                 end
             end
             d, G3 = director_field(dh, scv, u)
-            VTKGridFile("minilimo-dynamic-coupled-transient-$(vtk_step[])", dh) do vtk
+            VTKGridFile("minilimo-coupled-dynamic-weak-$(vtk_step[])", dh) do vtk
                 write_solution(vtk, dh, u)
                 Ferrite.write_node_data(vtk, resu, "ru")
                 Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -422,29 +450,27 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
                 pvd[T_sim + integrator.t] = vtk
             end
         end
-        @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n",
-                integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter)
+        @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %5d | %.3e\n",
+                integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter, Δt_cur)
 
-        !converged && (@warn "coupling step $step (t=$(integrator.t)) did not converge"; break)
-
-        # feed the converged LV pressure back into the ODE state.
-        integrator.u[4] = p * Pa2mmHg
-        ODE.u_modified!(integrator, true)
-
+        push!(tsav, integrator.t)      # actual (non-uniform) sample time [s]
+        push!(vtarget, integrator.u[1])
         push!(vols, 2V₃D * m3_to_ml)   # full LV volume [ml]
         push!(pres, p * Pa2mmHg)       # LV pressure [mmHg]
         push!(pact, Pact_mmHg)
         push!(paos, integrator.u[2])
         push!(pvns, integrator.u[3])
+
+        Δt_cur = min(Δt_cur * 1.2, Δt_max)   # grow after a converged step
     end
 end
 close(pvd)
 
 using Plots
-times = collect(0:dt_cpl:integrator.t)[1:length(pres)]
+times = tsav   # adaptive Δt → non-uniform sample times
 p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
           label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
 p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
 plot(p1, p2)
-# savefig("minilimo-dynamic-coupled-transient-N$Np.png")
+# savefig("minilimo-coupled-dynamic-weak-N$Np.png")

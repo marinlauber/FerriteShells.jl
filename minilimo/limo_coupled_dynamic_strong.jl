@@ -3,7 +3,7 @@ include(joinpath(@__DIR__, "util.jl"))
 
 # Strongly (monolithically) coupled dynamic miniLIMO: HHT-α structure + 0D Windkessel
 # solved together in ONE Newton system per time step.  Counterpart of the weakly-coupled
-# `limo_dynamic_coupled_transient.jl` (Lie–Trotter split with a black-box ODE integrator).
+# `limo_coupled_dynamic_weak.jl` (Lie–Trotter split with a black-box ODE integrator).
 #
 #   PHASE 1 — dynamic morph  (t ∈ [0, T_sim], HHT-α)   [identical to the transient file]
 #     Morph the edge onto the elliptic arc + fill Plv → morphed state u = un, v, a, Plv=p_max.
@@ -194,12 +194,12 @@ u = zeros(N_dof); apply!(u, ch)
 v = zeros(N_dof)
 a = zeros(N_dof)
 
-pvd = paraview_collection("minilimo-dynamic-coupled-strong")
+pvd = paraview_collection("minilimo-coupled-dynamic-strong")
 vtk_step = Ref(0)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
 d, G3 = director_field(dh, scv, u)
-VTKGridFile("minilimo-dynamic-coupled-strong-0", dh) do vtk
+VTKGridFile("minilimo-coupled-dynamic-strong-0", dh) do vtk
     write_solution(vtk, dh, u)
     Ferrite.write_node_data(vtk, resu, "ru")
     Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -245,7 +245,7 @@ un = zeros(N_dof)
 #                 end
 #             end
 #             d, G3 = director_field(dh, scv, u)
-#             VTKGridFile("minilimo-dynamic-coupled-strong-$(vtk_step[])", dh) do vtk
+#             VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
 #                 write_solution(vtk, dh, u)
 #                 Ferrite.write_node_data(vtk, resu, "ru")
 #                 Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -272,6 +272,7 @@ un .= load("limo_dynamic_coupled_u0.jld2")["u"]
 # Freeze the fully-morphed edge configuration (t·5 ≥ T_morph → ramp = 1) for the coupled
 # phase; the Dirichlet morph is held constant from here on (u, v, a carried forward).
 Ferrite.update!(ch, T_sim * 5)
+u .= un
 apply!(u, ch)
 
 # actuation waveform (normalized to [0,1])
@@ -289,13 +290,13 @@ wk = (; Ra, Rp, Rv, Ca, Cv, Pscale = p_max)
 
 # coupling controls
 tol_cpl  = 1e-4
-max_iter = 20
-dt_cpl   = 0.01   # doubles as the HHT-α time step in the coupled phase
+max_iter = 50
+dt_cpl   = 0.001   # doubles as the HHT-α time step in the coupled phase
 T_beat   = 4.0    # total coupled duration [s]
 
 # storages
 vols = Float64[]; pres = Float64[]; pact = Float64[]
-paos = Float64[]; pvns = Float64[]
+paos = Float64[]; pvns = Float64[]; tsav = Float64[]
 
 bufs_cpl = (; K_int, r_int, K_plv, F_plv, K_pact, F_pact, K_plvpact, F_plvpact, M, K_eff,
               res, rhs, v1, v2, dVdu, a_new, v_new, Ma, Mv, F_lu, free, g_old,
@@ -381,32 +382,50 @@ end
 V_LV0 = -2 * compute_volume(dh, scv, u; cellset=Plv_srf)   # m³
 println("Initial volume of the device: ", round(V_LV0 * m3_to_ml; digits=4), " ml")
 
-println("\nPHASE 2 — monolithic strong 3D-0D coupling (dt_cpl=$(dt_cpl) s)")
-println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
+println("\nPHASE 2 — monolithic strong 3D-0D coupling (adaptive Δt, Δt₀=$(dt_cpl) s)")
+println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters |    Δt [s]")
 
-# initial 0D state (Pa): filled ventricle, arterial at 80 mmHg
-@time let V_LVₙ = V_LV0, Paₙ = Pa, Pvₙ = Pv, t_cpl = 0.0, Plv=p_max, Pa = 80.0 / Pa2mmHg, Pv = p_max
+# initial 0D state [Pa]: filled ventricle (Plv=Pv=p_max), arterial at 80 mmHg
+Pa0 = 80.0 / Pa2mmHg
+Pv0 = p_max
+# Adaptive Δt driven by 3D-0D coupling convergence (same policy as the Phase-1 morph):
+# a converged monolithic step commits and grows Δt by 1.2× (capped at Δt_max); a failed
+# step is discarded (structural + 0D history untouched), Δt halved, and the step retried.
+@time let V_LVₙ = V_LV0, Paₙ = Pa0, Pvₙ = Pv0, t_cpl = 0.0, Plv = p_max, Pa = Pa0, Pv = Pv0
     step = 0
-    while t_cpl < T_beat - dt_cpl / 2
-        step += 1
-        t_cpl += dt_cpl
+    Δt_cur = dt_cpl
+    while t_cpl < T_beat - Δt_min
+        t_new  = min(t_cpl + Δt_cur, T_beat)
+        Δt_cur = t_new - t_cpl   # clip the final step to land exactly on T_beat
 
-        Pact_mmHg = 200 * ϕᵢ(t_cpl; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
+        Pact_mmHg = 600 * ϕᵢ(t_new; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
         Pact = Pact_mmHg / Pa2mmHg
 
-        # HHT-α predictors (Δt = dt_cpl), morph BC frozen.
-        @. ũ = u + dt_cpl * v + (dt_cpl^2 * (0.5 - β_hht)) * a
-        @. ṽ = v + (dt_cpl * (1 - γ_hht)) * a
+        # HHT-α predictors (Δt = Δt_cur), morph BC frozen.
+        @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
+        @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
         u_new .= ũ
         apply!(u_new, ch)
 
-        Plv, Pa, Pv, n_iter, converged, V₃D = solve_coupled_strong_step!(
-            u_new, ũ, ṽ, Plv, Pa, Pv, V_LVₙ, Paₙ, Pvₙ, Pact, dt_cpl, dh, scv, mat, ch,
+        # Trial pressures start from the last committed 0D state; only adopted on success.
+        Plv_t, Pa_t, Pv_t, n_iter, converged, V₃D = solve_coupled_strong_step!(
+            u_new, ũ, ṽ, Plv, Pa, Pv, V_LVₙ, Paₙ, Pvₙ, Pact, Δt_cur, dh, scv, mat, ch,
             Plv_srf, Pact_srf, PlvPact_srf, wk, bufs_cpl; max_iter=max_iter, tol=tol_cpl, verbose=false)
 
+        if !converged
+            Δt_cur /= 2
+            Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t_cpl, digits=4)) s")
+            @warn @sprintf("coupling did not converge at t=%.4f s — retrying with Δt=%.3e s", t_new, Δt_cur)
+            continue   # discard trial state (u, v, a, 0D history all unchanged), retry
+        end
+
+        step += 1
+        t_cpl = t_new
+        Plv, Pa, Pv = Plv_t, Pa_t, Pv_t
+
         # commit dynamic structural state + advance 0D history
-        @. a = (u_new - ũ) / (β_hht * dt_cpl^2)
-        @. v = ṽ + (dt_cpl * γ_hht) * a
+        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
+        @. v = ṽ + (Δt_cur * γ_hht) * a
         mul!(Mv, M, v)
         @. g_old = α_damp * Mv + r_int - (Plv * F_plv + Pact * F_pact - Pact * F_plvpact)
         u .= u_new
@@ -421,7 +440,7 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
             end
         end
         d, G3 = director_field(dh, scv, u)
-        VTKGridFile("minilimo-dynamic-coupled-strong-$(vtk_step[])", dh) do vtk
+        VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
             write_solution(vtk, dh, u)
             Ferrite.write_node_data(vtk, resu, "ru")
             Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -430,25 +449,26 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
             for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
             pvd[T_sim + t_cpl] = vtk
         end
-        @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n",
-                t_cpl, Plv * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter)
+        @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %5d | %.3e\n",
+                t_cpl, Plv * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter, Δt_cur)
 
-        !converged && (@warn "coupling step $step (t=$(t_cpl)) did not converge"; break)
-
+        push!(tsav, t_cpl)             # actual (non-uniform) sample time [s]
         push!(vols, 2V₃D * m3_to_ml)   # full LV volume [ml]
         push!(pres, Plv * Pa2mmHg)     # LV pressure [mmHg]
         push!(pact, Pact_mmHg)
         push!(paos, Pa * Pa2mmHg)
         push!(pvns, Pv * Pa2mmHg)
+
+        Δt_cur = min(Δt_cur * 1.2, Δt_max)   # grow after a converged step
     end
 end
 close(pvd)
 
 using Plots
-times = collect(dt_cpl:dt_cpl:dt_cpl*length(pres))
+times = tsav   # adaptive Δt → non-uniform sample times
 p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
           label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
 p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
 plot(p1, p2)
-# savefig("minilimo-dynamic-coupled-strong-N$Np.png")
+# savefig("minilimo-coupled-dynamic-strong-N$Np.png")

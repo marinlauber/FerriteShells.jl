@@ -190,12 +190,12 @@ u = zeros(N_dof); apply!(u, ch)
 v = zeros(N_dof)
 a = zeros(N_dof)
 
-pvd = paraview_collection("minilimo-dynamic-coupled")
+pvd = paraview_collection("minilimo-coupled-static-weak")
 vtk_step = Ref(0)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
 d, G3 = director_field(dh, scv, u)
-VTKGridFile("minilimo-dynamic-coupled-0", dh) do vtk
+VTKGridFile("minilimo-coupled-static-weak-0", dh) do vtk
     write_solution(vtk, dh, u)
     Ferrite.write_node_data(vtk, resu, "ru")
     Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -241,7 +241,7 @@ un = zeros(N_dof)
 #                 end
 #             end
 #             d, G3 = director_field(dh, scv, u)
-#             VTKGridFile("minilimo-dynamic-coupled-$(vtk_step[])", dh) do vtk
+#             VTKGridFile("minilimo-coupled-static-weak-$(vtk_step[])", dh) do vtk
 #                 write_solution(vtk, dh, u)
 #                 Ferrite.write_node_data(vtk, resu, "ru")
 #                 Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -326,6 +326,7 @@ function solve_coupled_step!(u, p, Pact, V_target, dh, scv, mat, ch,
     (; K_int, r_int, K_plv, F_plv, K_pact, F_pact, K_plvpact, F_plvpact,
        K_eff, rhs1, v1, v2, dVdu, F_lu, sdofs, ke, re, u_e) = bufs
     converged = false; n_iter = 0; V₃D = 0.0
+    S = NaN; δp = NaN; S_min = Inf   # S_min tracks the worst-conditioned Schur value in this step
     for iter in 1:max_iter
         assemble_all!(K_int, r_int, dh, scv, u, mat, sdofs, ke, re, u_e)
         assemble_pressure_region!(K_plv,     F_plv,     dh, scv, u, Plv_srf,     sdofs, ke, re, u_e)
@@ -340,7 +341,6 @@ function solve_coupled_step!(u, p, Pact, V_target, dh, scv, mat, ch,
         K_eff.nzval .= K_int.nzval .- p .* K_plv.nzval .- Pact .* K_pact.nzval .+ Pact .* K_plvpact.nzval
         @. rhs1 = p * F_plv + Pact * F_pact - Pact * F_plvpact - r_int
         apply_zero!(K_eff, rhs1, ch)
-        verbose && @printf("    iter %2d | r_V=%+.3e | |rhs|=%.3e\n", iter, r_V, norm(rhs1))
         if norm(rhs1) < tol && abs(r_V) < tol * max(1.0, abs(V_target)) && iter != 1
             converged = true; n_iter = iter - 1; break
         end
@@ -348,18 +348,22 @@ function solve_coupled_step!(u, p, Pact, V_target, dh, scv, mat, ch,
         lu!(F_lu, K_eff)
         ldiv!(v1, F_lu, rhs1)
         ldiv!(v2, F_lu, F_plv)
-        # Schur complement (dVdu = ∂(compute_volume)/∂u = −∂V₃D/∂u):
+        # Schur complement S = structural chamber compliance dV₃D/dPlv
+        # (dVdu = ∂(compute_volume)/∂u = −∂V₃D/∂u). S → 0 ⇒ δp blows up (compression / snap).
         S  = -dot(dVdu, v2)
         δp = (-r_V + dot(dVdu, v1)) / S
+        abs(S) < abs(S_min) && (S_min = S)
+        verbose && @printf("    iter %2d | r_V=%+.3e | |rhs|=%.3e | S=%+.3e | δp=%+.3e\n",
+                           iter, r_V, norm(rhs1), S, δp)
         u .+= v1 .+ δp .* v2
         p  += δp
         apply!(u, ch)
     end
-    return p, n_iter, converged, V₃D
+    return p, n_iter, converged, V₃D, S_min, δp
 end
 
 println("\nPHASE 2 — 3D-0D Lie–Trotter coupling (dt_cpl=$(dt_cpl) s)")
-println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
+println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters | S_min       | δp_last")
 
 @time let u = copy(un), p = p_max
     step = 0
@@ -374,10 +378,10 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
         push!(vtarget, integrator.u[1])
 
         # actuator pressure at this time [mmHg] → Pa
-        Pact_mmHg = 400 * ϕᵢ(integrator.t; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
+        Pact_mmHg = 450 * ϕᵢ(integrator.t; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
         Pact = Pact_mmHg / Pa2mmHg
 
-        p, n_iter, converged, V₃D = solve_coupled_step!(u, p, Pact, V_target, dh, scv, mat, ch,
+        p, n_iter, converged, V₃D, S_min, δp_last = solve_coupled_step!(u, p, Pact, V_target, dh, scv, mat, ch,
                                                         Plv_srf, Pact_srf, PlvPact_srf, bufs_cpl;
                                                         max_iter=max_iter, tol=tol_cpl, verbose=false)
 
@@ -390,7 +394,7 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
             end
         end
         d, G3 = director_field(dh, scv, u)
-        VTKGridFile("minilimo-dynamic-coupled-$(vtk_step[])", dh) do vtk
+        VTKGridFile("minilimo-coupled-static-weak-$(vtk_step[])", dh) do vtk
             write_solution(vtk, dh, u)
             Ferrite.write_node_data(vtk, resu, "ru")
             Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -399,8 +403,8 @@ println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters")
             for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
             pvd[T_sim + integrator.t] = vtk
         end
-        @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %d\n",
-                integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter)
+        @printf("  %9.4f | %11.4f | %14.4f | %14.4f | %5d | %+.4e | %+.4e\n",
+                integrator.t, p * Pa2mmHg, 2V₃D * m3_to_ml, Pact_mmHg, n_iter, S_min, δp_last)
 
         !converged && (@warn "coupling step $step (t=$(integrator.t)) did not converge"; break)
 
@@ -429,7 +433,6 @@ function read_pv(path)
     return Vlv, Plv
 end
 
-
 times = collect(0:dt_cpl:integrator.t)[1:length(pres)]
 p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
           label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
@@ -444,4 +447,4 @@ end
 plot!(p2, vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
 plot(p1, p2)
-# savefig("minilimo-dynamic-coupled-Pact-400.png")
+# savefig("minilimo-coupled-static-weak-Pact-400.png")
