@@ -3,39 +3,105 @@ using Tensors
 abstract type AbstractMaterial end
 
 """
-    LinearElastic(E, ν, thickness=1.0)
+    LinearElastic(E, ν, thickness=1.0; tension_field=false, ε_tf=1e-3)
 
 Linear elastic shell material defined by Young's modulus `E`, Poisson's ratio `ν`,
 and thickness `thickness`.
+
+`tension_field=true` enables a Roddeman wrinkling relaxation of the membrane stress:
+a thin membrane cannot carry compression, so where the minor principal membrane
+stress goes negative it is relaxed (uniaxial tension along the major axis, or slack
+if both principal stresses are ≤ 0).  `ε_tf` is a small positive-definiteness floor
+kept on the relaxed tangent.  Bending/shear stiffness is unaffected.
 """
 struct LinearElastic{T} <: AbstractMaterial
     E::T
     ν::T
     thickness::T
-    function LinearElastic(E::T, ν::T, thickness::T=one(T)) where T
+    tension_field::Bool
+    ε_tf::T
+    function LinearElastic(E::T, ν::T, thickness::T=one(T);
+                           tension_field::Bool=false, ε_tf::T=T(1e-3)) where T
         @assert E > 0 "Young's modulus must be positive"
         @assert 0 ≤ ν < 0.5 "Poisson's ratio must be in [0, 0.5)"
         @assert thickness > 0 "Thickness must be positive"
-        new{typeof(E)}(E, ν, thickness)
+        @assert ε_tf ≥ 0 "tension-field floor must be non-negative"
+        new{typeof(E)}(E, ν, thickness, tension_field, ε_tf)
     end
 end
 
-# LinearElastic: frame arguments accepted but ignored.
-function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
-                                     A_metric, A₁=nothing, A₂=nothing, G₃=nothing) where T
+# Contravariant plane-stress elasticity C^{αβγδ} = λ Aup^{αβ} Aup^{γδ}
+# + μ (Aup^{αγ} Aup^{βδ} + Aup^{αδ} Aup^{βγ}).  Un-relaxed — shared by the membrane
+# stress and the bending/shear stiffness (which must NOT wrinkle-relax).
+function contravariant_elasticity(mat::LinearElastic, A_metric)
     Aup = inv(A_metric)
     μ = mat.E * mat.thickness / (2*(1 + mat.ν))
     λ = mat.ν * mat.thickness * mat.E / (1 - mat.ν^2)
-    # C^{αβγδ} = λ Aup^{αβ} Aup^{γδ} + μ (Aup^{αγ} Aup^{βδ} + Aup^{αδ} Aup^{βγ})
-    C = λ * (Aup ⊗ Aup) + μ * symmetric(otimesu(Aup, Aup) + otimesl(Aup, Aup))
-    return C ⊡ ((c_ms - A_metric) / 2), C
+    λ * (Aup ⊗ Aup) + μ * symmetric(otimesu(Aup, Aup) + otimesl(Aup, Aup))
 end
 
-# LinearElastic: frame arguments accepted but ignored.
+# Roddeman wrinkling relaxation of a contravariant membrane stress N^{αβ}.  The
+# principal stresses live in an orthonormal tangent frame, so transform with the
+# covariant basis (A₁, A₂), project, and transform back.  σ₂ ≥ 0: taut (unchanged);
+# σ₁ > 0 > σ₂: wrinkled (keep only the major tension eigenpair); else slack (→ 0).
+# The ε·Ñ floor keeps the relaxed tangent positive-definite.
+function tension_field_relax(N::SymmetricTensor{2,2}, A₁, A₂, ε)
+    e₁ = A₁ / norm(A₁)
+    e₂ = A₂ - (A₂ ⋅ e₁) * e₁;  e₂ = e₂ / norm(e₂)
+    P  = Tensor{2,2}((e₁ ⋅ A₁, e₂ ⋅ A₁, e₁ ⋅ A₂, e₂ ⋅ A₂))   # Pᵢα = eᵢ·Aα
+    Ñ  = symmetric(P ⋅ N ⋅ transpose(P))                      # physical stress
+    eg = eigen(Ñ);  σ = eg.values;  V = eg.vectors            # σ[1] ≤ σ[2]
+    Ñr = if σ[1] ≥ 0
+        Ñ
+    elseif σ[2] > 0
+        nI = V ⋅ basevec(Vec{2}, 2)                           # major eigenvector
+        σ[2] * symmetric(nI ⊗ nI) + ε * Ñ
+    else
+        ε * Ñ
+    end
+    Pi = inv(P)
+    symmetric(Pi ⋅ Ñr ⋅ transpose(Pi))                        # back to contravariant
+end
+
+# Minor (min) principal value of a contravariant stress N^{αβ} in the orthonormal
+# tangent frame — the wrinkling criterion (< 0 ⇒ relaxation active).
+function _min_principal_stress(N::SymmetricTensor{2,2}, A₁, A₂)
+    e₁ = A₁ / norm(A₁)
+    e₂ = A₂ - (A₂ ⋅ e₁) * e₁;  e₂ = e₂ / norm(e₂)
+    P  = Tensor{2,2}((e₁ ⋅ A₁, e₂ ⋅ A₁, e₁ ⋅ A₂, e₂ ⋅ A₂))
+    eigvals(symmetric(P ⋅ N ⋅ transpose(P)))[1]
+end
+
+function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2,2,T},
+                                     A_metric, A₁=nothing, A₂=nothing, G₃=nothing) where T
+    C = contravariant_elasticity(mat, A_metric)
+    N = C ⊡ ((c_ms - A_metric) / 2)
+    (mat.tension_field && A₁ !== nothing) || return N, C
+    # taut (both principal stresses ≥ 0): relaxation is the identity, tangent = C.
+    _min_principal_stress(N, A₁, A₂) ≥ 0 && return N, C
+    # wrinkled/slack: relaxed stress + consistent tangent via ForwardDiff.
+    relaxed(c) = tension_field_relax(C ⊡ ((c - A_metric) / 2), A₁, A₂, mat.ε_tf)
+    return relaxed(c_ms), 2 * Tensors.gradient(relaxed, c_ms)   # ∂N/∂E = 2·∂N/∂c_ms
+end
+
+# Membrane stress only (no tangent) — used by the residual assembly / line search
+# so the tension-field path skips the ForwardDiff tangent.  Generic fallback keeps
+# any other material correct.
+membrane_stress(mat, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing) =
+    membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)[1]
+function membrane_stress(mat::LinearElastic, c_ms::SymmetricTensor{2,2}, A_metric,
+                         A₁=nothing, A₂=nothing, G₃=nothing)
+    N = contravariant_elasticity(mat, A_metric) ⊡ ((c_ms - A_metric) / 2)
+    (mat.tension_field && A₁ !== nothing) || return N
+    tension_field_relax(N, A₁, A₂, mat.ε_tf)
+end
+
+# LinearElastic: frame arguments accepted but ignored.  Uses the UN-relaxed C so
+# bending/shear never inherits the membrane wrinkling relaxation.
 function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
                                      A_metric::SymmetricTensor{2,2,T},
                                      A₁=nothing, A₂=nothing, G₃=nothing) where T
-    _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
+    C    = contravariant_elasticity(mat, A_metric)
     D    = (mat.thickness^2 / 12) * C
     cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
     Aup  = inv(A_metric)

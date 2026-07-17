@@ -254,8 +254,7 @@ function membrane_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        N, _ = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], G₃)
+        N = membrane_stress(mat, c_ms, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], G₃)
         P₁ = N[1,1]*a₁ + N[1,2]*a₂
         P₂ = N[2,1]*a₁ + N[2,2]*a₂
         dΩ = scv.detJdV[qp]
