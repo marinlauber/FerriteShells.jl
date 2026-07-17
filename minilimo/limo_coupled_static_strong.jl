@@ -47,10 +47,17 @@ end
 mat = LinearElastic(20e6, 0.3, 0.001) # soft TPU
 @show mat
 Np = 3
+# grid = make_minilimo_grid(;
+#     nx_left=3*3, nx_act=3*10, nx_right=3*3,
+#     ny_bot=3*1, ny_act=3*14, ny_top=3*2,
+#     W=0.10118, H=0.109, x_act=0.035, y_lo=0.004, y_hi=0.09,
+#     Np=Np
+# )
+# new geometry / mesh
 grid = make_minilimo_grid(;
-    nx_left=3*3, nx_act=3*10, nx_right=3*3,
-    ny_bot=3*1, ny_act=3*14, ny_top=3*2,
-    W=0.10118, H=0.109, x_act=0.035, y_lo=0.004, y_hi=0.09,
+    nx_left=2, nx_act=33, nx_right=2,
+    ny_bot=6, ny_act=48, ny_top=2,
+    W=0.10118, H=0.109, x_act=0.048, y_lo=0.02, y_hi=0.106,
     Np=Np
 )
 
@@ -269,9 +276,9 @@ un = zeros(N_dof)
 # end
 
 using JLD2
-# jldsave("limo_dynamic_coupled_u0.jld2"; u=un)
+# jldsave("limo_dynamic_coupled_2_u0.jld2"; u=un)
 # reload if done already
-un .= load("limo_dynamic_coupled_u0.jld2")["u"]
+un .= load("limo_dynamic_coupled_2_u0.jld2")["u"]
 
 # Freeze the fully-morphed edge configuration (t·5 ≥ T_morph → ramp = 1) for the coupled
 # phase; the Dirichlet morph is held constant from here on.  Only the displacement carries over.

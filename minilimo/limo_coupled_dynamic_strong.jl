@@ -47,12 +47,25 @@ grid = make_minilimo_grid(;
     nx_left=3*3, nx_act=3*10, nx_right=3*3,
     ny_bot=3*1, ny_act=3*14, ny_top=3*2,
     W=0.10118, H=0.109, x_act=0.035, y_lo=0.004, y_hi=0.09,
-    Np=Np
+    Np=Np, order=1
 )
+# grid = make_minilimo_grid(;
+#     nx_left=3*3, nx_act=3*10, nx_right=3*3,
+#     ny_bot=3*1, ny_act=3*14, ny_top=3*2,
+#     W=0.10118, H=0.109, x_act=0.035, y_lo=0.004, y_hi=0.10,
+#     Np=Np, order=1
+# )
+# new geometry / mesh
+# grid = make_minilimo_grid(;
+#     nx_left=4, nx_act=33, nx_right=4,
+#     ny_bot=2, ny_act=48, ny_top=4,
+#     W=0.10118, H=0.109, x_act=0.044, y_lo=0.02, y_hi=0.102,
+#     Np=Np, order=1
+# )
 
-ip  = Lagrange{RefQuadrilateral, 2}()
-qr  = QuadratureRule{RefQuadrilateral}(3)
-scv = ShellCellValues(qr, ip, ip; mitc=MITC9)
+ip  = Lagrange{RefQuadrilateral, 1}()
+qr  = QuadratureRule{RefQuadrilateral}(2)
+scv = ShellCellValues(qr, ip, ip; mitc=MITC4)
 
 dh = DofHandler(grid)
 add!(dh, :u, ip^3)
@@ -70,6 +83,9 @@ T_sim   = 2.0   # Phase-1 simulation duration [s]
 Δt      = 0.001 # initial time step [s]
 ramp(t) = t < T_morph ? 0.5 * (1 - cos(π * t / T_morph)) : 1.0
 
+# corner_relief tapers the morph to zero over the first/last 3 edge nodes so the
+# edge∩sym corner carries membrane tension instead of the fold-induced compression
+# singularity that snaps in Phase 2 (see util.jl; width is mesh/material-sensitive).
 prescribed_u = generate_boundary_function(grid, "edge"; ramp=ramp)
 
 ch = ConstraintHandler(dh)
@@ -91,7 +107,7 @@ free  = ch.free_dofs
 tol      = 1e-4
 max_iter = 50
 Δt_min   = 1e-7
-Δt_max   = 0.1
+Δt_max   = 0.005 # careful with this value, can skip interesting details
 
 # Pressure ramp: same sinusoidal profile as morphing, up to p_max [Pa]
 Pa2mmHg = 0.00750062 # Pa/mmHg
@@ -194,17 +210,67 @@ u = zeros(N_dof); apply!(u, ch)
 v = zeros(N_dof)
 a = zeros(N_dof)
 
+# Compression / buckling diagnostic.  Per element, average the membrane stress
+# resultant N over quadrature points, then scatter node-averaged N₁₁, N₂₂, N₁₂ and
+# the minimum principal resultant N_min.  N_min < 0 ⇒ membrane compression ⇒
+# wrinkling/buckling risk (the singular-tangent / Schur-collapse regime).
+function membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
+    fill!(N11, 0.0); fill!(N22, 0.0); fill!(N12, 0.0); fill!(Nmin, 0.0)
+    cnt = zeros(Int, getnnodes(dh.grid))
+    n_qp = getnquadpoints(scv)
+    n_nodes_e = getnbasefunctions(scv.ip_shape)
+    for cell in CellIterator(dh)
+        reinit!(scv, cell)
+        u_e = @views u[shelldofs(cell)]
+        G₃  = scv.G₃_elem[1]
+        N_avg = zero(SymmetricTensor{2,2,Float64})
+        for qp in 1:n_qp
+            a₁, a₂ = FerriteShells.covariant_basis(scv, qp, u_e, n_nodes_e)
+            c_ms = SymmetricTensor{2,2}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
+            Nq, _ = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp],
+                        Vec{3}(Tuple(scv.A₁[qp])), Vec{3}(Tuple(scv.A₂[qp])), G₃)
+            N_avg += Nq
+        end
+        N_avg /= n_qp
+        λ = eigvals(N_avg)   # ascending → λ[1] is the minimum principal resultant
+        for nid in cell.nodes
+            N11[nid] += N_avg[1,1]; N22[nid] += N_avg[2,2]; N12[nid] += N_avg[1,2]
+            Nmin[nid] += λ[1];      cnt[nid]  += 1
+        end
+    end
+    @. N11 /= max(cnt, 1); @. N22 /= max(cnt, 1)
+    @. N12 /= max(cnt, 1); @. Nmin /= max(cnt, 1)
+end
+
+# Current (deformed) nodal coordinates x = X + u of the endocardium nodes only, packed
+# 3×length(endo_nodes) in the local (renumbered) ordering given by `node_map`.
+function endo_positions!(X, dh, u, endo_cells, node_map)
+    for cell in CellIterator(dh, endo_cells)
+        sd = shelldofs(cell)
+        for (I, nid) in enumerate(cell.nodes)
+            @views X[:, node_map[nid]] .= Ferrite.get_node_coordinate(dh.grid, nid) .+ u[sd[5I-4:5I-2]]
+        end
+    end
+    X
+end
+
 pvd = paraview_collection("minilimo-coupled-dynamic-strong")
 vtk_step = Ref(0)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
+N11 = zeros(getnnodes(dh.grid)); N22 = similar(N11); N12 = similar(N11); Nmin = similar(N11)
 d, G3 = director_field(dh, scv, u)
+membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
 VTKGridFile("minilimo-coupled-dynamic-strong-0", dh) do vtk
     write_solution(vtk, dh, u)
     Ferrite.write_node_data(vtk, resu, "ru")
     Ferrite.write_node_data(vtk, resθ, "rθ")
     Ferrite.write_node_data(vtk, d,  "director")
     Ferrite.write_node_data(vtk, G3, "G3")
+    Ferrite.write_node_data(vtk, N11,  "N11")
+    Ferrite.write_node_data(vtk, N22,  "N22")
+    Ferrite.write_node_data(vtk, N12,  "N12")
+    Ferrite.write_node_data(vtk, Nmin, "Nmin")
     for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
     pvd[0.0] = vtk
 end
@@ -213,65 +279,71 @@ end
 # @printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "λ", "p [mmHg]", "iters", "Δt")
 
 un = zeros(N_dof)
-# let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
-# @time while t < T_sim - 1e-10
-#     t_new = min(t + Δt_cur, T_sim)
-#     p_new = p_max * ramp(t_new)
+let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
+@time while t < T_sim - 1e-10
+    t_new = min(t + Δt_cur, T_sim)
+    p_new = p_max * ramp(t_new)
 
-#     @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
-#     @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
+    @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
+    @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
 
-#     u_new .= ũ
-#     Ferrite.update!(ch, t_new * 5)
-#     apply!(u_new, ch)
+    u_new .= ũ
+    Ferrite.update!(ch, t_new)
+    apply!(u_new, ch)
 
-#     converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs_morph;
-#                                          max_iter=max_iter, tol=tol)
+    converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs_morph;
+                                         max_iter=max_iter, tol=tol)
 
-#     if converged
-#         step += 1
-#         @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
-#         @. v = ṽ + (Δt_cur * γ_hht) * a
-#         mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
-#         p = p_new; u .= u_new; t = t_new
-#         Δt_cur = min(Δt_cur * 1.2, Δt_max)
-#         if step % 4 == 0
-#             vtk_step[] += 1
-#             for cell in CellIterator(dh)
-#                 sd = shelldofs(cell)
-#                 for (I, nid) in enumerate(cell.nodes)
-#                     resu[:, nid] .= res[sd[5I-4:5I-2]]
-#                     resθ[:, nid] .= res[sd[5I-1:5I  ]]
-#                 end
-#             end
-#             d, G3 = director_field(dh, scv, u)
-#             VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
-#                 write_solution(vtk, dh, u)
-#                 Ferrite.write_node_data(vtk, resu, "ru")
-#                 Ferrite.write_node_data(vtk, resθ, "rθ")
-#                 Ferrite.write_node_data(vtk, d,  "director")
-#                 Ferrite.write_node_data(vtk, G3, "G3")
-#                 for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
-#                 pvd[t] = vtk
-#             end
-#             @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
-#         end
-#     else
-#         Δt_cur /= 2
-#         Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
-#     end
-# end
-#     un .= u
-# end
+    if converged
+        step += 1
+        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
+        @. v = ṽ + (Δt_cur * γ_hht) * a
+        mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
+        p = p_new; u .= u_new; t = t_new
+        Δt_cur = min(Δt_cur * 1.2, Δt_max)
+        if step % 4 == 0
+            vtk_step[] += 1
+            for cell in CellIterator(dh)
+                sd = shelldofs(cell)
+                for (I, nid) in enumerate(cell.nodes)
+                    resu[:, nid] .= res[sd[5I-4:5I-2]]
+                    resθ[:, nid] .= res[sd[5I-1:5I  ]]
+                end
+            end
+            d, G3 = director_field(dh, scv, u)
+            membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
+            VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
+                write_solution(vtk, dh, u)
+                Ferrite.write_node_data(vtk, resu, "ru")
+                Ferrite.write_node_data(vtk, resθ, "rθ")
+                Ferrite.write_node_data(vtk, d,  "director")
+                Ferrite.write_node_data(vtk, G3, "G3")
+                Ferrite.write_node_data(vtk, N11,  "N11")
+                Ferrite.write_node_data(vtk, N22,  "N22")
+                Ferrite.write_node_data(vtk, N12,  "N12")
+                Ferrite.write_node_data(vtk, Nmin, "Nmin")
+                for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
+                pvd[t] = vtk
+            end
+            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
+        end
+    else
+        Δt_cur /= 2
+        Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
+    end
+end
+    un .= u
+end
 
 using JLD2
-# jldsave("limo_dynamic_coupled_u0.jld2"; u=un)
+jldsave("limo_dynamic_coupled_2_u0.jld2"; u=un)
 # reload if done already
-un .= load("limo_dynamic_coupled_u0.jld2")["u"]
+# un .= load("limo_dynamic_coupled_u0.jld2")["u"]
+un .= load("limo_dynamic_coupled_2_u0.jld2")["u"]
 
 # Freeze the fully-morphed edge configuration (t·5 ≥ T_morph → ramp = 1) for the coupled
 # phase; the Dirichlet morph is held constant from here on (u, v, a carried forward).
-Ferrite.update!(ch, T_sim * 5)
+Ferrite.update!(ch, T_sim)
 u .= un
 apply!(u, ch)
 
@@ -293,10 +365,21 @@ tol_cpl  = 1e-4
 max_iter = 50
 dt_cpl   = 0.001   # doubles as the HHT-α time step in the coupled phase
 T_beat   = 4.0    # total coupled duration [s]
+T_cycle  = 1.0    # actuation period (ϕᵢ is 1-periodic) [s]
+t_save   = T_beat - T_cycle   # only geometry from the last cycle is stored
 
 # storages
 vols = Float64[]; pres = Float64[]; pact = Float64[]
 paos = Float64[]; pvns = Float64[]; tsav = Float64[]
+# Endocardium (the surface `compute_volume` integrates over): cells, their nodes renumbered
+# 1:n_endo, and the local connectivity.  Fixed for the run, so gathered once.
+endo_cells = sort!(collect(Plv_srf))
+endo_nodes = sort!(unique!(reduce(vcat, collect(Ferrite.getcells(grid, c).nodes) for c in endo_cells)))
+node_map   = Dict(nid => i for (i, nid) in enumerate(endo_nodes))
+conn = reduce(hcat, [node_map[n] for n in Ferrite.getcells(grid, c).nodes] for c in endo_cells)
+posn = zeros(3, length(endo_nodes))   # scratch for endo_positions!
+poss = Matrix{Float64}[]              # one 3×n_endo snapshot per converged step, last cycle only
+tpos = Float64[]                      # sample times matching `poss`
 
 bufs_cpl = (; K_int, r_int, K_plv, F_plv, K_pact, F_pact, K_plvpact, F_plvpact, M, K_eff,
               res, rhs, v1, v2, dVdu, a_new, v_new, Ma, Mv, F_lu, free, g_old,
@@ -415,7 +498,6 @@ Pv0 = p_max
         if !converged
             Δt_cur /= 2
             Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t_cpl, digits=4)) s")
-            @warn @sprintf("coupling did not converge at t=%.4f s — retrying with Δt=%.3e s", t_new, Δt_cur)
             continue   # discard trial state (u, v, a, 0D history all unchanged), retry
         end
 
@@ -440,12 +522,17 @@ Pv0 = p_max
             end
         end
         d, G3 = director_field(dh, scv, u)
+        membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
         VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
             write_solution(vtk, dh, u)
             Ferrite.write_node_data(vtk, resu, "ru")
             Ferrite.write_node_data(vtk, resθ, "rθ")
             Ferrite.write_node_data(vtk, d,  "director")
             Ferrite.write_node_data(vtk, G3, "G3")
+            Ferrite.write_node_data(vtk, N11,  "N11")
+            Ferrite.write_node_data(vtk, N22,  "N22")
+            Ferrite.write_node_data(vtk, N12,  "N12")
+            Ferrite.write_node_data(vtk, Nmin, "Nmin")
             for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
             pvd[T_sim + t_cpl] = vtk
         end
@@ -458,16 +545,24 @@ Pv0 = p_max
         push!(pact, Pact_mmHg)
         push!(paos, Pa * Pa2mmHg)
         push!(pvns, Pv * Pa2mmHg)
+        if t_cpl ≥ t_save   # geometry of the last cycle only
+            push!(tpos, t_cpl)
+            push!(poss, copy(endo_positions!(posn, dh, u, endo_cells, node_map)))   # [m]
+        end
 
         Δt_cur = min(Δt_cur * 1.2, Δt_max)   # grow after a converged step
     end
 end
 close(pvd)
 
+jldsave("minilimo-coupled-dynamic-strong-positions.jld2";
+        positions=poss, connectivity=conn, t=tpos, t_all=tsav,
+        vols=vols, pres=pres, pact=pact, paos=paos, pvns=pvns)
+
 using Plots
 times = tsav   # adaptive Δt → non-uniform sample times
-p1 = plot(times, [vols, pres, pact, paos, pvns], xlabel="Time [s]",
-          label=["Vlv" "Plv" "Pact" "Pao" "Pv"], lw=2, legend=:right)
+p1 = plot(times, [vols, pres, paos, pvns], xlabel="Time [s]",
+          label=["Vlv" "Plv" "Pao" "Pv"], lw=2, legend=:right)
 p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-10,10), ylims=(0, 100),
           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=times./maximum(times))
 plot(p1, p2)

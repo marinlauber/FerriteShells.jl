@@ -35,67 +35,8 @@ include(joinpath(@__DIR__, "util.jl"))
 #   SRF_3: actuator exterior, Pact only (outward)
 #   F_ext(u) = Plv·F_plv + Pact·F_pact − Pact·F_plvpact
 
-# Edge morph data: sorted edge x and the prescribed displacement (Δx, Δz) plus
-# their x-derivatives (central differences), used to extrapolate into the interior.
-function morph_edge_data(grid, nodeset; Ar=80.2/55.2)
-    nodes = get_node_coordinate.(getnodes(grid, nodeset))
-    idx = sortperm(nodes)
-    ns  = nodes[idx]
-    x = getindex.(ns, 1);  y = getindex.(ns, 2)
-    x_new, y_new = map_initial(x, y, Ar)
-    Δx = x_new .- x          # x morph displacement
-    Δz = y_new               # z morph displacement (reference z = 0)
-    n = length(x)
-    dΔx = similar(Δx);  dΔz = similar(Δz)
-    for i in 1:n
-        lo = max(i-1, 1);  hi = min(i+1, n)
-        h  = x[hi] - x[lo]
-        dΔx[i] = (Δx[hi] - Δx[lo]) / h
-        dΔz[i] = (Δz[hi] - Δz[lo]) / h
-    end
-    return x, Δx, Δz, dΔx, dΔz
-end
-
-# Build a full-mesh approximate morphed configuration by the transfinite y-blend
-# of the edge morph, with directors seeded from the analytic surface normal.
-function build_morph_guess(dh, grid; Ar=80.2/55.2)
-    coords = get_node_coordinate.(getnodes(grid))
-    Hy = maximum(c[2] for c in coords)
-    xs, Δx, Δz, dΔx, dΔz = morph_edge_data(grid, "edge"; Ar=Ar)
-    blend(y)  =  0.5 * (1 + cos(π * y / Hy))
-    blendp(y) = -0.5 * (π / Hy) * sin(π * y / Hy)
-    u0 = zeros(ndofs(dh))
-    for cell in CellIterator(dh)
-        sd = shelldofs(cell)
-        X  = getcoordinates(cell)
-        for k in 1:length(X)
-            x = X[k]
-            j = argmin(abs.(xs .- x[1]))           # nearest edge column
-            φb = blend(x[2]);  φbp = blendp(x[2])
-            ux = φb * Δx[j];   uz = φb * Δz[j]
-            # deformed midsurface normal n = ∂ₓp × ∂_y p,  p=(x+φΔx, y, φΔz)
-            nx = -φb * dΔz[j]
-            ny =  φbp * (φb * dΔz[j] * Δx[j] - (1 + φb * dΔx[j]) * Δz[j])
-            nz =  1 + φb * dΔx[j]
-            nrm = sqrt(nx^2 + ny^2 + nz^2)
-            nx /= nrm;  ny /= nrm;  nz /= nrm
-            s = sqrt(nx^2 + ny^2)
-            if s < 1e-12
-                φ1 = 0.0;  φ2 = 0.0
-            else
-                α  = acos(clamp(nz, -1.0, 1.0))    # |φ| = tilt from ê_z
-                φ1 = nx * α / s;  φ2 = ny * α / s
-            end
-            b = 5 * (k - 1)
-            u0[sd[b+1]] = ux
-            u0[sd[b+2]] = 0.0
-            u0[sd[b+3]] = uz
-            u0[sd[b+4]] = φ1
-            u0[sd[b+5]] = φ2
-        end
-    end
-    return u0
-end
+# `morph_edge_data` and `build_morph_guess` (transfinite y-blend morph seed +
+# analytic Rodrigues director) now live in util.jl.
 
 # material
 ρ   = 1200.0       # density [kg/m³] — only sets the scale of the pseudo-mass M
