@@ -1,4 +1,5 @@
 using Tensors
+using ForwardDiff
 
 abstract type AbstractMaterial end
 
@@ -44,21 +45,37 @@ function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
 end
 
 """
-    Hyperelastic(W, thickness=1.0)
+    Hyperelastic(W, thickness=1.0; incompressible=true)
 
-Incompressible hyperelastic shell material defined by a full 3D strain energy density
+Hyperelastic shell material defined by a full 3D strain energy density
 `W(C::SymmetricTensor{2,3,T}) -> T`.
 
-The plane-stress + incompressibility constraint `det(C) = 1` is enforced internally.
-`C₃₃` is determined analytically from the in-plane metric `C_αβ` and transverse shear
-`C_α3 = γ_α` (no iteration):
+The through-thickness component `C₃₃` of the natural-frame right Cauchy–Green tensor is
+not a degree of freedom of the shell — it is condensed out of `W`, and `incompressible`
+selects which condition does it.
+
+`incompressible=true` (default) enforces the *kinematic* constraint `det(C) = 1`, which
+gives `C₃₃` analytically from the in-plane metric `C_αβ` and transverse shear `C_α3 = γ_α`
+(no iteration):
 
 ```math
-C_{33} = \\frac{1 - 2C_{12}\\gamma_1\\gamma_2 + C_{22}\\gamma_1^2 + C_{11}\\gamma_2^2}{\\det_2(C_{\\alpha\\beta})}
+C_{33} = \\frac{\\det A + C_{22}\\gamma_1^2 - 2C_{12}\\gamma_1\\gamma_2 + C_{11}\\gamma_2^2}{\\det_2(C_{\\alpha\\beta})}
 ```
 
-`W` can be any standard incompressible strain energy expressed in terms of the invariants
-`I₁ = tr(C)`, `I₂ = ½((tr C)² − tr C²)` with `det(C) = 1`.
+Because the reduced energy is then differentiated with `C₃₃(C_αβ)` substituted, the chain
+rule reproduces exactly the pressure multiplier that `S³³ = 0` would give, so plane stress
+holds as well.  This is the correct — and cheapest — choice for a genuinely incompressible
+`W` (Neo-Hookean, Mooney–Rivlin, …).
+
+`incompressible=false` enforces the *static* plane-stress condition `S³³ = 2 ∂W/∂C₃₃ = 0`
+instead, solved by Newton on `C₃₃` (started from the incompressible value, quadratic
+convergence; exact in one step for energies quadratic in the Green–Lagrange strain).
+Use this for any compressible `W` — Saint-Venant–Kirchhoff, compressible Neo-Hookean, or
+anything carrying a volumetric term `U(J)`, all of which are otherwise silently forced to
+`ν = 0.5`.  `W` must depend on `C₃₃` (every physical 3D energy does).
+
+Transverse shear carries the same `κ_s = 5/6` correction as [`LinearElastic`](@ref),
+applied as `γ → √κ_s·γ` before `W` is evaluated.
 
 Example — Neo-Hookean incompressible
 
@@ -75,13 +92,24 @@ c₁ = 40.0e3; c₂ = 20.0e3; t = 1.0e-3
 W_MR(C) = c₁*(tr(C) - 3) + c₂*((tr(C)^2 - C ⊡ C)/2 - 3)
 mat = Hyperelastic(W_MR, t)
 ```
+
+Example — Saint-Venant–Kirchhoff (compressible, `ν = 0.3`)
+
+```julia
+E = 0.35e8; ν = 0.3; t = 0.2e-3
+λ = E*ν/((1 + ν)*(1 - 2ν)); μ = E/(2*(1 + ν))
+W_SVK(C) = (Eg = (C - one(C))/2; λ/2 * tr(Eg)^2 + μ * (Eg ⊡ Eg))
+mat = Hyperelastic(W_SVK, t; incompressible=false)   # ≡ LinearElastic(E, ν, t)
+```
 """
 struct Hyperelastic{F, T<:AbstractFloat} <: AbstractMaterial
-    W         :: F
-    thickness :: T
-    function Hyperelastic(W::F, thickness::T=one(Float64)) where {F, T<:AbstractFloat}
+    W              :: F
+    thickness      :: T
+    incompressible :: Bool
+    function Hyperelastic(W::F, thickness::T=one(Float64);
+                          incompressible::Bool=true) where {F, T<:AbstractFloat}
         @assert thickness > 0 "Thickness must be positive"
-        new{F, T}(W, thickness)
+        new{F, T}(W, thickness, incompressible)
     end
 end
 
@@ -103,16 +131,54 @@ end
 # Transform C_nat (natural frame) → C_cart (Cartesian): C_cart = Jinv' C_nat Jinv.
 @inline _to_C_cart(C_nat::SymmetricTensor{2,3}, Jinv::Tensor{2,3}) = symmetric(Jinv' ⋅ Tensor{2,3}(C_nat) ⋅ Jinv)
 
-# Evaluate W at the physical Cartesian C, no shear (γ=0).
-@inline function _W_phys(mat::Hyperelastic, c::SymmetricTensor{2,2}, det_A, Jinv)
-    C33 = det_A / det(c)
-    mat.W(_to_C_cart(build_C3D(c, zero(eltype(c)), zero(eltype(c)), C33), Jinv))
+# Strip every layer of ForwardDiff nesting — used to branch on primal values only.
+@inline _rawvalue(x::Real) = x
+@inline _rawvalue(x::ForwardDiff.Dual) = _rawvalue(ForwardDiff.value(x))
+
+const _PS_MAXITER = 20
+const _PS_TOL     = 1e-13
+
+# Transverse shear correction κ_s = 5/6, matching LinearElastic.  Applied to the shear
+# strain as γ → √κ_s·γ rather than to a stiffness: W is quadratic in γ about γ=0, so
+# this is exactly the κ_s factor on the shear energy, and it enters through the single
+# point every path funnels into — the explicit Cs (Hessian of W at γ=0) and the
+# through-thickness energy quadrature therefore carry the same correction.
+const _SQRT_KAPPA_S = sqrt(5/6)
+
+# C₃₃ from the plane-stress condition S³³ = 2 ∂W/∂C₃₃ = 0, i.e. W stationary in C₃₃.
+# Newton from the incompressible value; derivatives w.r.t. c/γ flow through the
+# iteration, so the reduced energy stays exactly differentiable for the AD tangents.
+# Convergence is quadratic (one step for energies quadratic in E), and the branch
+# tests primal values only so nested duals are safe.  Non-convergence within
+# _PS_MAXITER returns the last iterate rather than throwing, so a line search that
+# probes a wild state still gets a (poor) value instead of an exception.
+@inline function _C33_planestress(mat::Hyperelastic, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv)
+    f(x)  = mat.W(_to_C_cart(build_C3D(c, γ₁, γ₂, x), Jinv))
+    df(x) = ForwardDiff.derivative(f, x)
+    C33 = get_C33(c, γ₁, γ₂, det_A)
+    for _ in 1:_PS_MAXITER
+        δ = df(C33) / ForwardDiff.derivative(df, C33)
+        C33 -= δ
+        abs(_rawvalue(δ)) ≤ _PS_TOL * (1 + abs(_rawvalue(C33))) && break
+    end
+    C33
 end
 
-# Evaluate W at the physical Cartesian C, with shear γ₁, γ₂.
+# Through-thickness condensation: incompressibility (analytic) or plane stress (Newton).
+@inline _C33(mat::Hyperelastic, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv) =
+    mat.incompressible ? get_C33(c, γ₁, γ₂, det_A) : _C33_planestress(mat, c, γ₁, γ₂, det_A, Jinv)
+
+# Evaluate W at the physical Cartesian C, no shear (γ=0).
+@inline function _W_phys(mat::Hyperelastic, c::SymmetricTensor{2,2}, det_A, Jinv)
+    z = zero(eltype(c))
+    _W_phys(mat, c, z, z, det_A, Jinv)
+end
+
+# Evaluate W at the physical Cartesian C, with shear γ₁, γ₂ (scaled by √κ_s).
 @inline function _W_phys(mat::Hyperelastic, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv)
-    C33 = get_C33(c, γ₁, γ₂, det_A)
-    mat.W(_to_C_cart(build_C3D(c, γ₁, γ₂, C33), Jinv))
+    g₁ = _SQRT_KAPPA_S * γ₁; g₂ = _SQRT_KAPPA_S * γ₂
+    C33 = _C33(mat, c, g₁, g₂, det_A, Jinv)
+    mat.W(_to_C_cart(build_C3D(c, g₁, g₂, C33), Jinv))
 end
 
 # Membrane stress N and consistent tangent C via nested gradient of _W_phys.
