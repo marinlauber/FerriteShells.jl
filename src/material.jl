@@ -143,6 +143,11 @@ anything carrying a volumetric term `U(J)`, all of which are otherwise silently 
 Transverse shear carries the same `κ_s = 5/6` correction as [`LinearElastic`](@ref),
 applied as `γ → √κ_s·γ` before `W` is evaluated.
 
+Note: `W` runs inside nested `ForwardDiff` (and, under `incompressible=false`, a
+Newton iteration underneath that), so it must be type-stable — closing over
+non-`const` globals allocates on every call. Prefer a callable struct, as in the
+Saint-Venant–Kirchhoff example below.
+
 Example — Neo-Hookean incompressible
 
 ```julia
@@ -159,13 +164,18 @@ W_MR(C) = c₁*(tr(C) - 3) + c₂*((tr(C)^2 - C ⊡ C)/2 - 3)
 mat = Hyperelastic(W_MR, t)
 ```
 
-Example — Saint-Venant–Kirchhoff (compressible, `ν = 0.3`)
+Example — Saint-Venant–Kirchhoff (compressible, `ν = 0.3`), type-stable functor form
 
 ```julia
+struct SVKEnergy{T}
+    λ::T
+    μ::T
+end
+(w::SVKEnergy)(C) = (Eg = (C - one(C))/2; w.λ/2 * tr(Eg)^2 + w.μ * (Eg ⊡ Eg))
+
 E = 0.35e8; ν = 0.3; t = 0.2e-3
-λ = E*ν/((1 + ν)*(1 - 2ν)); μ = E/(2*(1 + ν))
-W_SVK(C) = (Eg = (C - one(C))/2; λ/2 * tr(Eg)^2 + μ * (Eg ⊡ Eg))
-mat = Hyperelastic(W_SVK, t; incompressible=false)   # ≡ LinearElastic(E, ν, t)
+mat = Hyperelastic(SVKEnergy(E*ν/((1+ν)*(1-2ν)), E/(2*(1+ν))), t; incompressible=false)
+# ≡ LinearElastic(E, ν, t)
 ```
 """
 struct Hyperelastic{F, T<:AbstractFloat} <: AbstractMaterial

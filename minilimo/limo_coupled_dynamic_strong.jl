@@ -43,13 +43,27 @@ E = 20e6
 ν = 0.3
 thickness = 0.001
 # mat = LinearElastic(0.35e9, 0.3, 0.0002) # nylon-cpated TPU
-mat = LinearElastic(E, ν, thickness) # soft TPU
+# mat = LinearElastic(E, ν, thickness) # soft TPU
 
-# Saint-Venant-Kirchhoff material
-λ = E*ν/((1+ν)*(1-2ν))
-μ = E/(2*(1+ν))
-ψ(C) = (Eg = (C - one(C))/2; λ/2 * tr(Eg)^2 + μ * (Eg ⊡ Eg))
-mat = Hyperelastic(ψ, thickness; incompressible=false)
+# Saint-Venant-Kirchhoff material, W(C) = λ/2 tr(E)² + μ E:E, E = (C-I)/2.  λ, μ are
+# struct fields (not closed-over module-level globals) so the energy call is
+# type-stable — a non-const-global capture here breaks type inference through the
+# nested ForwardDiff Hessian and the plane-stress Newton condensation
+# (incompressible=false), turning each material call into ~17KB of garbage instead
+# of 0 (see test/test_hyperelastic_allocations.jl).
+struct SVKEnergy{T}
+    λ::T
+    μ::T
+end
+(w::SVKEnergy)(C) = (Eg = (C - one(C))/2; w.λ/2 * tr(Eg)^2 + w.μ * (Eg ⊡ Eg))
+
+# NOTE: do not add an `SVKEnergy(E, ν)` outer constructor for (E,ν) → (λ,μ) — with
+# both args the same concrete type, Julia's auto-generated default constructor
+# `SVKEnergy(λ::T, μ::T) where T` is more specific and silently wins over it,
+# so E, ν would be stored verbatim as λ, μ instead of being converted.
+λ_svk = E*ν/((1+ν)*(1-2ν))
+μ_svk = E/(2*(1+ν))
+mat = Hyperelastic(SVKEnergy(λ_svk, μ_svk), thickness; incompressible=false)
 
 @show mat
 Np = 3
@@ -289,66 +303,66 @@ end
 # @printf("%-6s  %-8s  %-8s  %-8s  %-6s  %-10s\n", "step", "t [s]", "λ", "p [mmHg]", "iters", "Δt")
 
 un = zeros(N_dof)
-# let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
-# @time while t < T_sim - 1e-10
-#     t_new = min(t + Δt_cur, T_sim)
-#     p_new = p_max * ramp(t_new)
+let t = 0.0; step = 0; Δt_cur = Δt; p = 0.0
+@time while t < T_sim - 1e-10
+    t_new = min(t + Δt_cur, T_sim)
+    p_new = p_max * ramp(t_new)
 
-#     @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
-#     @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
+    @. ũ = u + Δt_cur * v + (Δt_cur^2 * (0.5 - β_hht)) * a
+    @. ṽ = v + (Δt_cur * (1 - γ_hht)) * a
 
-#     u_new .= ũ
-#     Ferrite.update!(ch, t_new)
-#     apply!(u_new, ch)
+    u_new .= ũ
+    Ferrite.update!(ch, t_new)
+    apply!(u_new, ch)
 
-#     converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs_morph;
-#                                          max_iter=max_iter, tol=tol)
+    converged, iters = solve_morph_step!(u_new, ũ, ṽ, p_new, Δt_cur, dh, scv, mat, ch, Plv_srf, bufs_morph;
+                                         max_iter=max_iter, tol=tol)
 
-#     if converged
-#         step += 1
-#         @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
-#         @. v = ṽ + (Δt_cur * γ_hht) * a
-#         mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
-#         p = p_new; u .= u_new; t = t_new
-#         Δt_cur = min(Δt_cur * 1.2, Δt_max)
-#         if step % 4 == 0
-#             vtk_step[] += 1
-#             for cell in CellIterator(dh)
-#                 sd = shelldofs(cell)
-#                 for (I, nid) in enumerate(cell.nodes)
-#                     resu[:, nid] .= res[sd[5I-4:5I-2]]
-#                     resθ[:, nid] .= res[sd[5I-1:5I  ]]
-#                 end
-#             end
-#             d, G3 = director_field(dh, scv, u)
-#             membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
-#             VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
-#                 write_solution(vtk, dh, u)
-#                 Ferrite.write_node_data(vtk, resu, "ru")
-#                 Ferrite.write_node_data(vtk, resθ, "rθ")
-#                 Ferrite.write_node_data(vtk, d,  "director")
-#                 Ferrite.write_node_data(vtk, G3, "G3")
-#                 Ferrite.write_node_data(vtk, N11,  "N11")
-#                 Ferrite.write_node_data(vtk, N22,  "N22")
-#                 Ferrite.write_node_data(vtk, N12,  "N12")
-#                 Ferrite.write_node_data(vtk, Nmin, "Nmin")
-#                 for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
-#                 pvd[t] = vtk
-#             end
-#             @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
-#         end
-#     else
-#         Δt_cur /= 2
-#         Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
-#     end
-# end
-#     un .= u
-# end
+    if converged
+        step += 1
+        @. a = (u_new - ũ) / (β_hht * Δt_cur^2)
+        @. v = ṽ + (Δt_cur * γ_hht) * a
+        mul!(Mv, M, v); @. g_old = α_damp * Mv + r_int - p_new * F_plv
+        p = p_new; u .= u_new; t = t_new
+        Δt_cur = min(Δt_cur * 1.2, Δt_max)
+        if step % 4 == 0
+            vtk_step[] += 1
+            for cell in CellIterator(dh)
+                sd = shelldofs(cell)
+                for (I, nid) in enumerate(cell.nodes)
+                    resu[:, nid] .= res[sd[5I-4:5I-2]]
+                    resθ[:, nid] .= res[sd[5I-1:5I  ]]
+                end
+            end
+            d, G3 = director_field(dh, scv, u)
+            membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
+            VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
+                write_solution(vtk, dh, u)
+                Ferrite.write_node_data(vtk, resu, "ru")
+                Ferrite.write_node_data(vtk, resθ, "rθ")
+                Ferrite.write_node_data(vtk, d,  "director")
+                Ferrite.write_node_data(vtk, G3, "G3")
+                Ferrite.write_node_data(vtk, N11,  "N11")
+                Ferrite.write_node_data(vtk, N22,  "N22")
+                Ferrite.write_node_data(vtk, N12,  "N12")
+                Ferrite.write_node_data(vtk, Nmin, "Nmin")
+                for ID in 1:3; color(vtk, grid, "SRF_$ID"); end
+                pvd[t] = vtk
+            end
+            @printf("%-6d  %-8.3f  %-8.4f  %-8.4f  %-6d  %-10.4e\n", step, t, ramp(t), p * Pa2mmHg, iters, Δt_cur)
+        end
+    else
+        Δt_cur /= 2
+        Δt_cur < Δt_min && error("minimum Δt reached at t=$(round(t, digits=4)) s")
+    end
+end
+    un .= u
+end
 
-using JLD2
+# using JLD2
 # jldsave("limo_dynamic_coupled_2_u0.jld2"; u=un)
 # # reload if done already
-un .= load("limo_dynamic_coupled_u0.jld2")["u"]
+# un .= load("limo_dynamic_coupled_u0.jld2")["u"]
 # un .= load("limo_dynamic_coupled_2_u0.jld2")["u"]
 
 # Freeze the fully-morphed edge configuration (t·5 ≥ T_morph → ramp = 1) for the coupled
