@@ -115,13 +115,13 @@ Wrinkling of a Reissner-Mindlin thin shell with MITC4 treatment under pure later
 
 ![Membrane Shear](/docs/src/images/shear.gif)
 
-### Authors
-
-- [Marin Lauber](https://marinlauber.github.io/), Delft University of Technology, The Netherlands.
-
 ## Development
 
 This package was developed using agentic coding tools (Claude Code), guided by the main developer, with careful validation on first principles, reference results, and common sense.
+
+### Authors
+
+- [Marin Lauber](https://marinlauber.github.io/), Delft University of Technology, The Netherlands.
 
 ### Contributing
 
