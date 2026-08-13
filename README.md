@@ -5,15 +5,15 @@
 # FerriteShells.jl
 
 > [!WARNING]
-> This package is under active development, as such nothing is guaranteed and breaking changes might occur.
+> This package is under active development; as such, nothing is guaranteed and breaking changes might occur.
 
 This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff–Love linear, C⁰ Koiter (non-linear Kirchhoff–Love), Reissner–Mindlin, and Naghi (non-linear Reissner–Mindlin) shells.
-Specifically, the classical membrane, bending, and shear contributions to the residuals and the consistent tangent stiffness matrix can be integrated and used with [Ferrite.jl](https://ferrite-fem.github.io/Ferrite.jl/stable/).
+Specifically, the classical membrane, bending, and shear contributions of the residuals, the consistent tangent stiffness matrix can be integrated and used with [Ferrite.jl](https://ferrite-fem.github.io/Ferrite.jl/stable/).
 
 > [!NOTE]
-> This package assumes that the shell is defined by a 2D mesh embedded in 3D space `Grid{3, P, T}` where `P<:Union{Triangle, Quadrilateral, QuadraticTriangle, QuadraticQuadrilateral}`. To embed Ferrite's 2D `generate_grid` into 3D space, we provide a simple helper function `shell_grid(grid::Grid{2, P, T}; map) -> Grid{3, P, T}` , where the `map` can be used to map the 2D grid into 3D space.
+> This package assumes that the shell is defined by a 2D mesh embedded in 3D space `Grid{3, P, T}` where `P<:Union{Triangle, Quadrilateral, QuadraticTriangle, QuadraticQuadrilateral}`. To embed Ferrite's 2D `generate_grid` into 3D space, we provide a simple helper function `shell_grid(grid::Grid{2, P, T}; map) -> Grid{3, P, T}`, where the `map` can be used to map the 2D grid into 3D space.
 
-Some formulation that can be assembled with this package:
+Some formulations that can be assembled with this package:
 
 Function | Membrane | Kirchhoff–Love | Reissner–Mindlin
 :------------ | :-------------| :-------------| :-------------
@@ -26,10 +26,10 @@ non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 `Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 MITC |  |   | :construction_worker:
 
-We refer the reader to the documentation for the specific weak form, numerical implementation and limitation of the different shell models.
+We refer the reader to the documentation for the specific weak form, numerical implementation, and limitations of the different shell models.
 
 > [!WARNING]
-> Kirchhoff–Love shells with C⁰ continuity between elements is fundamentally wrong; it works in some cases with small deformations and specific boundary conditions. I would suggest using the Reissner–Mindlin shell instead.
+> Kirchhoff–Love shells with C⁰ continuity between elements are fundamentally wrong; some cases with small deformations and specific boundary conditions might work. I would suggest using the Reissner–Mindlin shell instead.
 
 ### `ShellCellValues`
 
@@ -56,13 +56,13 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
 end
 ```
 
-Calling `reinit!(scv::ShellCellValues)` computes the reference covariant basis vectors **A**₁ and **A**₂ from the geometry of the shell's midsurface, while the current covariant basis vectors **a**₁ and **a**₂ are computed from the current configuration of the shell. The reference and current metric tensors are then obtained as the inner products of the corresponding covariant basis vectors.
+Calling `reinit!(scv::ShellCellValues)` computes the reference covariant basis vectors **A**₁ and **A**₂ from the geometry of the shell's midsurface, while the current covariant basis vectors **a**₁ and **a**₂ are computed from the shell's current configuration. The reference and current metric tensors are then obtained as the inner products of the corresponding covariant basis vectors.
 
-From these surface measures and the contravariant elasticity tensor, the membrane, bending and shear strains can be computed, which are used in the assembly of the different terms in the different formulations.
+From these surface measures and the contravariant elasticity tensor, the membrane, bending, and shear strains can be computed, and then used to assemble the terms in the different formulations.
 
 ### Global assembly
 
-Assembling the element contributions into the global system is identical to Ferrite, but instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
+Assembling the element contributions into the global system is almost identical to Ferrite; instead of calling `CellValues`, the user needs to call `ShellCellValues` and use the corresponding assembly functions for the different terms in the different formulations. For example, for a non-linear Reissner–Mindlin shell, the assembly of the global consistent stiffness matrix and residual vector can be done as follows:
 
 ```julia
 function assemble_shell!(K_int, r_int, dh, scv, u, mat)
@@ -83,14 +83,14 @@ function assemble_shell!(K_int, r_int, dh, scv, u, mat)
 end
 ```
 
-where `shelldofs` is a helper function (similar to `celldofs`) to get the degrees of freedom of the shell element, which are ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
+where `shelldofs` is a helper function (similar to `celldofs`) that returns the degrees of freedom of the shell element, ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
 
 > [!WARNING]
-> `shelldofs` is only useful for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements, and the rotations are obtained from the displacements. In this case, `celldofs` must be used instead of `shelldofs`.
+> `shelldofs` is only useful for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements; the rotations are obtained from them. In this case, `celldofs` must be used instead of `shelldofs`.
 
 ### External loadings
 
-The package also provides helper functions to assemble external loading contributions, such as follower pressure loads or edge tractions, which are often used in shell problems. For terms that depend on the current configuration of the shell (i.e. follower pressure loads) the contribution of these loadings is included in the consistent tangent stiffness matrix, which is necessary for quadratic convergence of the non-linear solver.
+The package also provides helper functions to assemble external loading contributions, such as follower pressure loads or edge tractions, which are often used in shell problems. For terms that depend on the current shell's configuration (i.e., follower pressure loads), the contribution of these loadings is included in the consistent tangent stiffness matrix, which is necessary for quadratic convergence of the non-linear solver.
 
 Loading | residual | consistent tangent
 :------------ | :-------------| :-------------
@@ -119,6 +119,10 @@ Wrinkling of a Reissner-Mindlin thin shell with MITC4 treatment under pure later
 
 - [Marin Lauber](https://marinlauber.github.io/), Delft University of Technology, The Netherlands.
 
+## Development
+
+This package was developed using agentic coding tools (Claude Code), guided by the main developer, with careful validation on first principles, reference results, and common sense.
+
 ### Contributing
 
 We are always looking for contributions and help with FerriteShells. If you
@@ -136,3 +140,7 @@ FerriteShells is released under the MIT License. See the [LICENSE](LICENSE) file
 
 [docs-stable-img]: https://img.shields.io/badge/docs-dev-blue
 [docs-stable-url]: https://marinlauber.github.io/FerriteShells.jl/dev/
+
+### Acknowledgement
+
+I ([Marin Lauber](https://marinlauber.github.io/)) developed this software as part of the Holland Hybrid Heart project with file number NWA.1518.22.049 of the research program Onderzoek op Routes door Consortia 2022 – NWA-ORC 2022, which is financed by the Dutch Research Council (NWO), the Dutch Ministry of Education, Culture and Science (OCW), and the Hartstichting (Dutch Heart Foundation); their support is deeply appreciated.
