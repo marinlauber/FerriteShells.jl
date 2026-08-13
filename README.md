@@ -141,6 +141,6 @@ FerriteShells is released under the MIT License. See the [LICENSE](LICENSE) file
 [docs-stable-img]: https://img.shields.io/badge/docs-dev-blue
 [docs-stable-url]: https://marinlauber.github.io/FerriteShells.jl/dev/
 
-### Acknowledgement
+## Acknowledgement
 
 I ([Marin Lauber](https://marinlauber.github.io/)) developed this software as part of the Holland Hybrid Heart project with file number NWA.1518.22.049 of the research program Onderzoek op Routes door Consortia 2022 – NWA-ORC 2022, which is financed by the Dutch Research Council (NWO), the Dutch Ministry of Education, Culture and Science (OCW), and the Hartstichting (Dutch Heart Foundation); their support is deeply appreciated.
