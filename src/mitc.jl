@@ -7,65 +7,67 @@ Mixed Interpolation of Tensorial Components data for the N-node shell element (B
 Eliminates transverse shear locking by evaluating the covariant shear strains ``\\gamma_\\alpha = a_\\alpha \\cdot d`` at fixed
 tying points and interpolating back to Gauss points.
 
-Static fields (`N_tie`, `dNdξ_tie`, `h_tie`) are precomputed once at construction.
-Mutable fields (`A*_tie`, `G₃_tie`, `T*_tie`) are updated each [`reinit!`](@ref) call.
+The `M` tying entries are *component-tagged*: entry `k` ties the covariant component `α_tie[k]`
+at `ξ_tie[k]`, and both `h_tie_1` and `h_tie_2` span all entries,
+``\\gamma_\\alpha(\\xi_q) = \\sum_k h^\\alpha_{qk}\\,\\gamma_k``. Quadrilateral schemes leave the off-component
+columns zero (``\\gamma_1`` is built from ``\\gamma_1`` tying values only); triangular ones do not, since
+the hypotenuse condition couples the two components (Lee & Bathe 2004).
+
+Static fields (`N_tie`, `dN_tie`, `h_tie_*`) are precomputed once at construction.
+Mutable fields (`A_tie`, `G₃_tie`, `*_node`) are updated each [`reinit!`](@ref) call.
 """
 struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
-    N_tie_1    :: Matrix{T}          # shape functions at γ₁ tying pts  [n_shape × 6]
-    dNdξ_tie_1 :: Matrix{Vec{2,T}}   # gradients       at γ₁ tying pts  [n_shape × 6]
-    N_tie_2    :: Matrix{T}          # shape functions at γ₂ tying pts  [n_shape × 6]
-    dNdξ_tie_2 :: Matrix{Vec{2,T}}   # gradients       at γ₂ tying pts  [n_shape × 6]
-    h_tie_1    :: Matrix{T}          # MITC interp weights for γ₁  [n_qp × 6]
-    h_tie_2    :: Matrix{T}          # MITC interp weights for γ₂  [n_qp × 6]
-    A₁_tie_1 :: Vector{Vec{3,T}}; A₂_tie_1 :: Vector{Vec{3,T}}  # ref geometry at γ₁ tying pts
-    G₃_tie_1 :: Vector{Vec{3,T}}; T₁_tie_1 :: Vector{Vec{3,T}}; T₂_tie_1 :: Vector{Vec{3,T}}
-    A₁_tie_2 :: Vector{Vec{3,T}}; A₂_tie_2 :: Vector{Vec{3,T}}  # ref geometry at γ₂ tying pts
-    G₃_tie_2 :: Vector{Vec{3,T}}; T₁_tie_2 :: Vector{Vec{3,T}}; T₂_tie_2 :: Vector{Vec{3,T}}
-    ξ_tie_1::Vector{Vec{2,T}};  ξ_tie_2::Vector{Vec{2,T}} # local coorindates of the tying points
+    N_tie   :: Matrix{T}          # shape functions           at the tying points  [n_shape × M]
+    dN_tie  :: Matrix{T}          # ∂N_I/∂ξ_{α_k} of the tied component            [n_shape × M]
+    h_tie_1 :: Matrix{T}          # MITC interp weights for γ₁  [n_qp × M]
+    h_tie_2 :: Matrix{T}          # MITC interp weights for γ₂  [n_qp × M]
+    ξ_tie   :: Vector{Vec{2,T}}   # local coordinates of the tying points
+    α_tie   :: Vector{Int}        # tied covariant component (1 or 2) of each entry
+    A_tie   :: Vector{Vec{3,T}}   # reference tangent A_{α_k} at the tying points
+    G₃_tie  :: Vector{Vec{3,T}}   # reference director at the tying points
     G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
     T₁_node :: Vector{Vec{3,T}}
     T₂_node :: Vector{Vec{3,T}}
     # Reusable scratch for bending_tangent_RM! (overwritten each call; not thread-safe).
-    a₁_tie_s :: Vector{Vec{3,T}}; a₂_tie_s :: Vector{Vec{3,T}}   # length M (tying points)
-    d_tie1_s :: Vector{Vec{3,T}}; d_tie2_s :: Vector{Vec{3,T}}
-    dd1_s    :: Vector{Vec{3,T}}; dd2_s    :: Vector{Vec{3,T}}   # length N (nodes), Rodrigues ∂d/∂φ
-    Bγ₁u_s   :: Vector{Vec{3,T}}; Bγ₂u_s   :: Vector{Vec{3,T}}   # length N
-    Bγ₁φ1_s  :: Vector{T}; Bγ₁φ2_s :: Vector{T}
-    Bγ₂φ1_s  :: Vector{T}; Bγ₂φ2_s :: Vector{T}
+    a_tie_s :: Vector{Vec{3,T}}; d_tie_s :: Vector{Vec{3,T}}     # length M (tying points)
+    dd1_s   :: Vector{Vec{3,T}}; dd2_s   :: Vector{Vec{3,T}}     # length N (nodes), Rodrigues ∂d/∂φ
+    Bγ₁u_s  :: Vector{Vec{3,T}}; Bγ₂u_s  :: Vector{Vec{3,T}}     # length N
+    Bγ₁φ1_s :: Vector{T}; Bγ₁φ2_s :: Vector{T}
+    Bγ₂φ1_s :: Vector{T}; Bγ₂φ2_s :: Vector{T}
 end
-function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) where N
+function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
+                 h_tie_1::Matrix{T}, h_tie_2::Matrix{T}) where {N,T}
     n_shape = getnbasefunctions(ip_shape)
-    Nt = length(ξ_tie_1); T = eltype(ξ_tie_1[1])
-    # shape values there
-    N_tie_1 = zeros(T, n_shape, Nt);  dNdξ_tie_1 = Matrix{Vec{2,T}}(undef, n_shape, Nt)
-    N_tie_2 = zeros(T, n_shape, Nt);  dNdξ_tie_2 = Matrix{Vec{2,T}}(undef, n_shape, Nt)
-    for (k, ξ_k) in enumerate(ξ_tie_1)
-        for I in 1:n_shape
-            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
-            N_tie_1[I, k] = Nval;  dNdξ_tie_1[I, k] = dN
-        end
+    M = length(ξ_tie)
+    # shape values and the derivative along the tied direction at each tying point
+    N_tie = zeros(T, n_shape, M); dN_tie = zeros(T, n_shape, M)
+    for (k, ξ_k) in enumerate(ξ_tie), I in 1:n_shape
+        dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
+        N_tie[I, k] = Nval;  dN_tie[I, k] = dN[α_tie[k]]
     end
-    for (k, ξ_k) in enumerate(ξ_tie_2)
-        for I in 1:n_shape
-            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
-            N_tie_2[I, k] = Nval;  dNdξ_tie_2[I, k] = dN
-        end
-    end
-    MITC{N,Nt,T}(
-        N_tie_1, dNdξ_tie_1, N_tie_2, dNdξ_tie_2, h_tie_1, h_tie_2,
-        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
-        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
-        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
-        fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt), fill(zero(Vec{3,T}), Nt),
-        ξ_tie_1, ξ_tie_2,
+    MITC{N,M,T}(
+        N_tie, dN_tie, h_tie_1, h_tie_2, ξ_tie, α_tie,
+        fill(zero(Vec{3,T}), M), fill(zero(Vec{3,T}), M),
         fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N),
-        Vector{Vec{3,T}}(undef, Nt), Vector{Vec{3,T}}(undef, Nt),
-        Vector{Vec{3,T}}(undef, Nt), Vector{Vec{3,T}}(undef, Nt),
-        Vector{Vec{3,T}}(undef, N),  Vector{Vec{3,T}}(undef, N),
-        Vector{Vec{3,T}}(undef, N),  Vector{Vec{3,T}}(undef, N),
+        Vector{Vec{3,T}}(undef, M), Vector{Vec{3,T}}(undef, M),
+        Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
+        Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
         Vector{T}(undef, N), Vector{T}(undef, N),
         Vector{T}(undef, N), Vector{T}(undef, N),
     )
+end
+
+# Quadrilateral schemes: two independent per-component tying lists, concatenated into the
+# component-tagged layout. γ₁ never sees a γ₂ tying value, so `h_tie_1` gets zero columns on
+# the γ₂ entries and vice versa.
+function MITC{N}(ip_shape::Interpolation, h_tie_1::Matrix{T}, h_tie_2::Matrix{T},
+                 ξ_tie_1::Vector{<:Vec{2}}, ξ_tie_2::Vector{<:Vec{2}}) where {N,T}
+    M₁ = length(ξ_tie_1); M₂ = length(ξ_tie_2); n_qp = size(h_tie_1, 1)
+    ξ_tie = vcat(convert(Vector{Vec{2,T}}, ξ_tie_1), convert(Vector{Vec{2,T}}, ξ_tie_2))
+    α_tie = vcat(fill(1, M₁), fill(2, M₂))
+    H₁ = hcat(h_tie_1, zeros(T, n_qp, M₂))
+    H₂ = hcat(zeros(T, n_qp, M₁), h_tie_2)
+    MITC{N}(ip_shape, ξ_tie, α_tie, H₁, H₂)
 end
 
 # empty MITC is standard
@@ -90,89 +92,62 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
         mitc.T₁_node[I] = T₁_nodes[I]
         mitc.T₂_node[I] = T₂_nodes[I]
     end
-    for (k, ξ_k) in enumerate(mitc.ξ_tie_1)
-        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
+    for k in 1:M
+        ξ_k = mitc.ξ_tie[k]; α = mitc.α_tie[k]
+        A = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
         for i in 1:n_geo
-            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
-            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-            G₃_avg += Ferrite.reference_shape_value(ip_geo, ξ_k, i) * G₃_nodes[i]
+            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
+            A += x[i] * dN[α]
+            G₃_avg += Nval * G₃_nodes[i]
         end
-        G₃_k = G₃_avg / norm(G₃_avg)
-        ref = abs(G₃_k[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
-        t₁ = ref - (ref ⋅ G₃_k) * G₃_k; T₁_k = t₁ / norm(t₁); T₂_k = G₃_k × T₁_k
-        mitc.A₁_tie_1[k] = A₁; mitc.A₂_tie_1[k] = A₂
-        mitc.G₃_tie_1[k] = G₃_k; mitc.T₁_tie_1[k] = T₁_k; mitc.T₂_tie_1[k] = T₂_k
-    end
-    for (k, ξ_k) in enumerate(mitc.ξ_tie_2)
-        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
-        for i in 1:n_geo
-            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
-            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-            G₃_avg += Ferrite.reference_shape_value(ip_geo, ξ_k, i) * G₃_nodes[i]
-        end
-        G₃_k = G₃_avg / norm(G₃_avg)
-        ref = abs(G₃_k[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
-        t₁ = ref - (ref ⋅ G₃_k) * G₃_k; T₁_k = t₁ / norm(t₁); T₂_k = G₃_k × T₁_k
-        mitc.A₁_tie_2[k] = A₁; mitc.A₂_tie_2[k] = A₂
-        mitc.G₃_tie_2[k] = G₃_k; mitc.T₁_tie_2[k] = T₁_k; mitc.T₂_tie_2[k] = T₂_k
+        mitc.A_tie[k]  = A
+        mitc.G₃_tie[k] = G₃_avg / norm(G₃_avg)
     end
 end
 
 
 # default is no tying shear strain
-@inline tying_shear_strains(::NoMITC, u_e) = nothing, nothing
+@inline tying_shear_strains(::NoMITC, u_e) = nothing
 
 """
     tying_shear_strains(mitc::MITC{N,M,T}, u_e)
 
-Compute the covariant shear strains ``\\gamma_1 = a_1 \\cdot d`` and ``\\gamma_2 = a_2 \\cdot d`` at all `M` MITC tying points
+Compute the covariant shear strain ``\\gamma_k = a_{\\alpha_k} \\cdot d`` of every tying entry `k`
 from the current DOF vector `u_e` (5 DOFs/node: [``u_1``,``u_2``,``u_3``,``\\varphi_1``,``\\varphi_2``,``\\cdots``]).
-Returns (`γ₁_k`, `γ₂_k`) as two NTuples of length `M`, ForwardDiff-safe.
+Returns an NTuple of length `M`, ForwardDiff-safe. Each value subtracts its own reference
+``A_{\\alpha_k}\\cdot G_3``, so the tying strains vanish in the reference configuration.
 Call once before the quadrature-point loop and pass to `shear_strains`.
 """
 function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
-    γ₁_k = ntuple(Val(M)) do k
-        Δa₁ = zero(Vec{3,T}); d_k = zero(Vec{3,T})
+    ntuple(Val(M)) do k
+        Δa = zero(Vec{3,T}); d_k = zero(Vec{3,T})
         for I in 1:N
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-            Δa₁ += u_I * mitc.dNdξ_tie_1[I,k][1]
+            Δa += u_I * mitc.dN_tie[I,k]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
-            d_k += mitc.N_tie_1[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
+            d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
-        dot(mitc.A₁_tie_1[k] + Δa₁, d_k) - dot(mitc.A₁_tie_1[k], mitc.G₃_tie_1[k])
+        dot(mitc.A_tie[k] + Δa, d_k) - dot(mitc.A_tie[k], mitc.G₃_tie[k])
     end
-    γ₂_k = ntuple(Val(M)) do k
-        Δa₂ = zero(Vec{3,T}); d_k = zero(Vec{3,T})
-        for I in 1:N
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-            Δa₂ += u_I * mitc.dNdξ_tie_2[I,k][2]
-            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
-            cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
-            d_k += mitc.N_tie_2[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
-        end
-        dot(mitc.A₂_tie_2[k] + Δa₂, d_k) - dot(mitc.A₂_tie_2[k], mitc.G₃_tie_2[k])
-    end
-    γ₁_k, γ₂_k
 end
 
 # default shear strains
-@inline shear_strains(a₁, a₂, d, ::Int, ::Nothing, ::Nothing, ::NoMITC) = dot(a₁, d), dot(a₂, d)
+@inline shear_strains(a₁, a₂, d, ::Int, ::Nothing, ::NoMITC) = dot(a₁, d), dot(a₂, d)
 
 """
-    shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)
+    shear_strains(a₁, a₂, d, qp, γ_k, mitc)
 
 Return (`γ₁`, `γ₂`) at quadrature point `qp`.
-With MITC: weighted sum of tying-point values from `tying_shear_strains`.
+With MITC: weighted sum of the tying-entry values from `tying_shear_strains`.
 Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`.
 """
-@inline function shear_strains(a₁, a₂, d, qp::Int, γ₁_k, γ₂_k, mitc::MITC{N,M,T}) where {N,M,T}
-    γ₁ = zero(eltype(γ₁_k)); γ₂ = zero(eltype(γ₂_k))
+@inline function shear_strains(a₁, a₂, d, qp::Int, γ_k, mitc::MITC{N,M,T}) where {N,M,T}
+    γ₁ = zero(eltype(γ_k)); γ₂ = zero(eltype(γ_k))
     @inbounds for k in 1:M
-        γ₁ += mitc.h_tie_1[qp, k] * γ₁_k[k]
-        γ₂ += mitc.h_tie_2[qp, k] * γ₂_k[k]
+        γ₁ += mitc.h_tie_1[qp, k] * γ_k[k]
+        γ₂ += mitc.h_tie_2[qp, k] * γ_k[k]
     end
     γ₁, γ₂
 end
@@ -187,17 +162,72 @@ end
 @inline reference_shear_offset(A₁, A₂, d₀, ::NoMITC) = dot(A₁, d₀), dot(A₂, d₀)
 @inline reference_shear_offset(A₁, A₂, d₀, ::MITC)    = 0.0, 0.0
 
+"""
+    tying_weights(qr, conds, basis)
+
+Build the tying entries and interpolation weights of an assumed transverse-shear field
+``\\tilde\\gamma(\\xi) = \\sum_j c_j P_j(\\xi)`` from its tying conditions (Lee & Bathe 2004, §3.2).
+
+* `basis[j](ξ) -> Vec{2}` — the ``j``-th assumed field, as covariant components ``(\\gamma_1,\\gamma_2)``.
+* `conds[i] = (ξ, w)` — condition ``w \\cdot \\tilde\\gamma(\\xi) = w \\cdot \\gamma(\\xi)``, with `w` the tied
+  direction: `Ê₁`/`Ê₂` on the ``\\xi_1``/``\\xi_2`` edges, `Ê_q` on the hypotenuse.
+
+A condition needs the displacement-based ``\\gamma_\\alpha(\\xi)`` for every component with
+``w_\\alpha \\neq 0``; the union of those ``(\\xi,\\alpha)`` pairs forms the tying entries ``k = 1\\ldots M``.
+With `C[i,j] = w_i ⋅ P_j(ξ_i)` and `W[i,k] = w_i[α_k]` (entry `k` located at `ξ_i`, else 0), the
+coefficients are ``c = C^{-1} W \\gamma^\\text{tie}``, hence
+``h_\\alpha[q,k] = \\sum_j P_j(\\xi_q)_\\alpha (C^{-1}W)_{jk}``.
+"""
+function tying_weights(qr::QuadratureRule, conds, basis; atol = 1e-12)
+    T = Float64
+    length(conds) == length(basis) ||
+        throw(ArgumentError("$(length(conds)) tying conditions for $(length(basis)) basis fields"))
+    ξ_tie = Vec{2,T}[]; α_tie = Int[]
+    for (ξ, w) in conds, α in 1:2
+        abs(w[α]) ≤ atol && continue
+        any(k -> α_tie[k] == α && norm(ξ_tie[k] - ξ) ≤ atol, eachindex(ξ_tie)) && continue
+        push!(ξ_tie, ξ); push!(α_tie, α)
+    end
+    M = length(ξ_tie); n_b = length(basis)
+    C = zeros(T, n_b, n_b); W = zeros(T, n_b, M)
+    for (i, (ξ, w)) in enumerate(conds)
+        for j in 1:n_b
+            C[i,j] = w ⋅ basis[j](ξ)
+        end
+        for k in 1:M
+            norm(ξ_tie[k] - ξ) ≤ atol && (W[i,k] = w[α_tie[k]])
+        end
+    end
+    A = C \ W
+    n_qp = length(qr.weights)
+    h₁ = zeros(T, n_qp, M); h₂ = zeros(T, n_qp, M)
+    for q in 1:n_qp, j in 1:n_b
+        P = basis[j](qr.points[q])
+        for k in 1:M
+            h₁[q,k] += P[1] * A[j,k]
+            h₂[q,k] += P[2] * A[j,k]
+        end
+    end
+    return ξ_tie, α_tie, h₁, h₂
+end
+
+# Tied directions shared by the triangular elements: the two natural directions and the
+# hypotenuse of the right-angled reference triangle, γ_q = (γ₂ - γ₁)/√2 (Lee & Bathe Eq. 19).
+const Ê₁  = Vec{2}((1.0, 0.0))
+const Ê₂  = Vec{2}((0.0, 1.0))
+const Ê_q = Vec{2}((-1.0, 1.0)) / sqrt(2)
+
 # MITC3
-# include("mitc/mitc3.jl")
-# export MITC3
+include("mitc/mitc3.jl")
+export MITC3
 
 # MITC4
 include("mitc/mitc4.jl")
 export MITC4
 
 # MITC6
-# include("mitc/mitc6.jl")
-# export MITC6
+include("mitc/mitc6.jl")
+export MITC6, MITC6a
 
 # MITC9
 include("mitc/mitc9.jl")

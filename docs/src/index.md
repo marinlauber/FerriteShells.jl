@@ -23,7 +23,7 @@ non-linear | ✓ | ✓ | ✓
 `Lagrange{RefTriangle, 2}` (T6) | ✓ | ~ | ✓
 `Serendipity{RefQuadrilateral, 2}` (Q8) | ✓ | ~ | ✓
 `Lagrange{RefQuadrilateral, 2}` (Q9) | ✓ | ~ | ✓
-MITC | | | (in progress)
+MITC (transverse shear) | | | MITC3, MITC4, MITC6a, MITC9
 
 We refer the reader to the documentation for the specific weak form, numerical implementation and limitation of the different shell models.
 
