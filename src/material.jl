@@ -94,7 +94,6 @@ end
 (w::NeoHookean)(C) = w.μ/2 * (tr(C) - 3)
 
 μ = 80.0e3; t = 1.0e-3
-W_NH(C) = μ/2 * (tr(C) - 3)
 mat = Hyperelastic(NeoHookean(μ), t)
 ```
 
