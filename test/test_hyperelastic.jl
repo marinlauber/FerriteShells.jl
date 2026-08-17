@@ -187,9 +187,9 @@ end
         C33 = FerriteShells.get_C33(a_metric, 0.0, 0.0, det_A)
         A₁q = Vec{3}(Tuple(scv.A₁[qp])); A₂q = Vec{3}(Tuple(scv.A₂[qp]))
         G₃q = scv.G₃_elem[1]
-        Jinv = inv(FerriteShells._J_ref(A₁q, A₂q, G₃q))
+        Jinv = inv(FerriteShells.J_ref(A₁q, A₂q, G₃q))
         C_nat  = FerriteShells.build_C3D(a_metric, 0.0, 0.0, C33)
-        C_cart = FerriteShells._to_C_cart(C_nat, Jinv)
+        C_cart = FerriteShells.to_C_cart(C_nat, Jinv)
         @test det(C_cart) ≈ 1.0 atol=1e-12   # det(C_cart)=1: incompressible
         @test mat_NH.W(C_cart) > 0.0           # energy positive for non-trivial deformation
     end
@@ -314,13 +314,9 @@ end
     @test W_mitc > 0.0
     @test W_mitc ≈ W_nomitc rtol=0.05   # should be close for smooth KL mode
 
-    # Plane-stress (Newton) condensation
-    @test mat_NH.incompressible                      # default unchanged
-    @test !mat_SVK_ps.incompressible
-
     e₁ = Vec{3}((1.,0.,0.)); e₂ = Vec{3}((0.,1.,0.)); e₃ = Vec{3}((0.,0.,1.))
     A_I  = SymmetricTensor{2,2}((1.,0.,1.))
-    Jinv_I = inv(FerriteShells._J_ref(e₁, e₂, e₃))   # natural frame ≡ Cartesian
+    Jinv_I = inv(FerriteShells.J_ref(e₁, e₂, e₃))   # natural frame ≡ Cartesian
 
     # SVK through the plane-stress condensation reproduces LinearElastic exactly
     N_ps, C_ps = membrane_stress_and_tangent(mat_SVK_ps, A_I, A_I, e₁, e₂, e₃)
@@ -351,7 +347,7 @@ end
 
     # the condensed C₃₃ satisfies S³³ = 0, the incompressible one does not
     S33(x) = 2*Tensors.gradient(W_SVK, FerriteShells.build_C3D(c_def, 0.0, 0.0, x))[3,3]
-    C33_ps  = FerriteShells._C33_planestress(mat_SVK_ps, c_def, 0.0, 0.0, 1.0, Jinv_I)
+    C33_ps  = FerriteShells.get_C33(mat_SVK_ps, c_def, 0.0, 0.0, 1.0, Jinv_I)
     C33_inc = FerriteShells.get_C33(c_def, 0.0, 0.0, 1.0)
     @test abs(S33(C33_ps)) < 1e-10 * E_SVK
     @test abs(S33(C33_inc)) > 1e-3 * E_SVK
@@ -359,7 +355,7 @@ end
     E11 = (c_def[1,1] - 1)/2; E22 = (c_def[2,2] - 1)/2
     @test isapprox(C33_ps, 1 - 2ν_SVK/(1 - ν_SVK)*(E11 + E22), rtol=1e-10)
     # with shear the condensation is unchanged for SVK (no E_α3 coupling)
-    @test isapprox(FerriteShells._C33_planestress(mat_SVK_ps, c_def, 0.02, -0.01, 1.0, Jinv_I),
+    @test isapprox(FerriteShells.get_C33(mat_SVK_ps, c_def, 0.02, -0.01, 1.0, Jinv_I),
                    C33_ps, rtol=1e-10)
 
     # derivatives propagate through the Newton iteration: element tangent vs FD
