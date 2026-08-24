@@ -41,7 +41,7 @@ end
 ρ   = 1200.0       # density [kg/m³]
 E = 20e6
 ν = 0.3
-thickness = 0.001
+thickness = 0.0005
 # mat = LinearElastic(0.35e9, 0.3, 0.0002) # nylon-cpated TPU
 # mat = LinearElastic(E, ν, thickness) # soft TPU
 
@@ -67,12 +67,12 @@ mat = Hyperelastic(SVKEnergy(λ_svk, μ_svk), thickness; incompressible=false)
 
 @show mat
 Np = 3
-grid = make_minilimo_grid(;
-    nx_left=3*3, nx_act=3*10, nx_right=3*3,
-    ny_bot=3*1, ny_act=3*14, ny_top=3*2,
-    W=0.10118, H=0.109, x_act=0.035, y_lo=0.004, y_hi=0.09,
-    Np=Np, order=1
-)
+# grid = make_minilimo_grid(;
+#     nx_left=3*3, nx_act=3*10, nx_right=3*3,
+#     ny_bot=3*1, ny_act=3*14, ny_top=3*2,
+#     W=0.10118, H=0.109, x_act=0.035, y_lo=0.004, y_hi=0.09,
+#     Np=Np, order=1
+# )
 # grid = make_minilimo_grid(;
 #     nx_left=3*3, nx_act=3*10, nx_right=3*3,
 #     ny_bot=3*1, ny_act=3*14, ny_top=3*2,
@@ -80,12 +80,12 @@ grid = make_minilimo_grid(;
 #     Np=Np, order=1
 # )
 # new geometry / mesh
-# grid = make_minilimo_grid(;
-#     nx_left=4, nx_act=33, nx_right=4,
-#     ny_bot=2, ny_act=48, ny_top=4,
-#     W=0.10118, H=0.109, x_act=0.044, y_lo=0.02, y_hi=0.102,
-#     Np=Np, order=1
-# )
+grid = make_minilimo_grid(;
+    nx_left=4, nx_act=33, nx_right=4,
+    ny_bot=10, ny_act=48, ny_top=4,
+    W=0.10118, H=0.109, x_act=0.044, y_lo=0.02, y_hi=0.102,
+    Np=Np, order=1
+)
 
 ip  = Lagrange{RefQuadrilateral, 1}()
 qr  = QuadratureRule{RefQuadrilateral}(2)
