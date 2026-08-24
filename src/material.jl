@@ -30,7 +30,7 @@ struct LinearElastic{T} <: AbstractMaterial
     β::T
     tension_field::Bool
     ε_tf::T
-    function LinearElastic(E::T, ν::T, thickness::T=one(T); β::T=one(T);
+    function LinearElastic(E::T, ν::T, thickness::T=one(T); β::T=one(T),
                            tension_field::Bool=false, ε_tf::T=T(1e-3)) where T
         @assert E > 0 "Young's modulus must be positive"
         @assert 0 ≤ ν < 0.5 "Poisson's ratio must be in [0, 0.5)"
