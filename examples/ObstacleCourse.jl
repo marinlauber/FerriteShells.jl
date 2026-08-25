@@ -9,12 +9,10 @@ configs = [
     (QuadraticQuadrilateral, 2, RefQuadrilateral, "Lagrange{RefQuadrilateral, 2}"),
 ]
 
-# RM/MITC shear treatment (used by the bending problems below) only supports the
-# quadrilateral family — MITC4 (linear) / MITC9 (quadratic). MITC3/MITC6 for triangles
-# are not implemented yet (src/mitc/mitc3.jl, mitc6.jl are stubs), so triangle configs
-# are excluded from those sweeps.
-quad_configs = filter(c -> c[3] == RefQuadrilateral, configs)
-mitc_for(order) = order == 1 ? MITC4 : MITC9
+# RM/MITC shear treatment: MITC4/MITC9 for the quadrilateral family, MITC3/MITC6a for
+# the triangle family (Lee & Bathe assumed-shear tying), selected by (element, order).
+mitc_for(::Type{RefQuadrilateral}, order) = order == 1 ? MITC4 : MITC9
+mitc_for(::Type{RefTriangle},      order) = order == 1 ? MITC3 : MITC6a
 
 function cooks_membrane()
     function create_cook_grid(nx, ny; primitive=Quadrilateral)
@@ -123,7 +121,7 @@ function scordelis_lo_roof()
     function scordelis_lo_solve(ns; primitive=Quadrilateral, order=1, element=RefQuadrilateral)
         ip  = Lagrange{element, order}()
         qr  = QuadratureRule{element}(order + 1)
-        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(order))
+        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(element, order))
         mat = LinearElastic(4.32e8, 0.0, 0.25)
 
         grid = scordelis_lo_grid(ns; primitive=primitive)
@@ -180,7 +178,7 @@ function scordelis_lo_roof()
     ax1 = Axis(fig[1, 2], xlabel="Number of elements", ylabel="vertical displacement u₂",
                title="Convergence of vertical tip displacement")
     hlines!(ax1, 0.3024, 0, 32, color=:black, linestyle=:dash, label="Reference", linewidth=2)
-    for (prim, order, elem, label) in quad_configs
+    for (prim, order, elem, label) in configs
         res = [scordelis_lo_solve(n; primitive=prim, order=order, element=elem) for n in N]
         lines!(ax1, N, res, label=label, linewidth=2)
     end
@@ -212,7 +210,7 @@ function pinched_cylinder()
         # interplation space
         ip  = Lagrange{element, order}()
         qr  = QuadratureRule{element}(order + 1)
-        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(order))
+        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(element, order))
 
         # material
         mat = LinearElastic(3.0e6, 0.3, 3.0)
@@ -270,7 +268,7 @@ function pinched_cylinder()
     ax0 = Axis(fig[1, 1], aspect = DataAspect(), title="Deformed mesh Lagrange{RefQuadrilateral, 2}")
     ax1 = Axis(fig[1, 2], xlabel="Number of elements", ylabel="vertical displacement u₂", title="Convergence of vertical tip displacement")
     hlines!(ax1, 1.8248e-5, 0, 32, color=:black, linestyle=:dash, label="Reference", linewidth=2)
-    for (prim, order, elem, label) in quad_configs
+    for (prim, order, elem, label) in configs
         res = [solver_pinched_cylinder(n; primitive=prim, order=order, element=elem) for n in N]
         lines!(ax1, N, res, label=label, linewidth=2)
     end
@@ -308,7 +306,7 @@ function pinched_hemisphere()
         # interplation space
         ip  = Lagrange{element, order}()
         qr  = QuadratureRule{element}(order + 1)
-        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(order))
+        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(element, order))
 
         # material
         mat = LinearElastic(6.825e7, 0.3, 0.04)
@@ -368,7 +366,7 @@ function pinched_hemisphere()
     ax1 = Axis(fig[1, 2], xlabel="Number of elements", ylabel="horizontal displacement u₁ at A",
                title="Convergence of horizontal tip displacement")
     hlines!(ax1, 0.0924, 0, 32, color=:black, linestyle=:dash, label="Reference", linewidth=2)
-    for (prim, order, elem, label) in quad_configs
+    for (prim, order, elem, label) in configs
         res = [solve_pinched_hemisphere(n; primitive=prim, order=order, element=elem) for n in N]
         @show res, N
         # lines!(ax1, N, res, label=label, linewidth=2)
@@ -385,6 +383,6 @@ function pinched_hemisphere()
 end
 
 # cooks_membrane()
-scordelis_lo_roof()
-# pinched_cylinder()
+# scordelis_lo_roof()
+pinched_cylinder()
 # pinched_hemisphere()
