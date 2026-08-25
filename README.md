@@ -24,7 +24,7 @@ non-linear | :white_check_mark: |  :white_check_mark: | :white_check_mark:
 `Lagrange{RefTriangle, 2}` (T6) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 `Serendipity{RefQuadrilateral, 2}` (Q8) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
 `Lagrange{RefQuadrilateral, 2}` (Q9) | :white_check_mark: |  :ballot_box_with_check: | :white_check_mark:
-MITC |  |   | :construction_worker:
+MITC (transverse shear) |  |   | MITC3, MITC4, MITC6a, MITC9
 
 We refer the reader to the documentation for the specific weak form, numerical implementation, and limitations of the different shell models.
 

@@ -10,13 +10,23 @@ For Q4 (bilinear displacement), the shear strain polynomial spaces follow direct
 
 MITC Type
 
+On a triangle the two natural directions are not enough: the shear along the hypotenuse,
+``\\gamma_q = (\\gamma_2-\\gamma_1)/\\sqrt{2}``, must be tied as well, so the assumed ``\\tilde\\gamma_1`` also
+depends on tied ``\\gamma_2`` values. The triangular elements are therefore built from an assumed
+strain space and a list of tying conditions by [`tying_weights`](@ref), following Lee & Bathe (2004).
+
+MITC Type
+
 ```@docs
 MITC
 MITC9
 MITC4
+MITC6a
+MITC3
 ```
 
 ```@docs
 tying_shear_strains
 shear_strains
+tying_weights
 ```

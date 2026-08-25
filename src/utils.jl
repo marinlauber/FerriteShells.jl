@@ -315,8 +315,8 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
 
-    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
-    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+    γ_k = tying_shear_strains(scv.mitc, u_e)
+    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ_k, scv.mitc)
     d₀  = reference_director(scv, qp, n_nodes)
     γ₁ -= dot(scv.A₁[qp], d₀)
     γ₂ -= dot(scv.A₂[qp], d₀)
