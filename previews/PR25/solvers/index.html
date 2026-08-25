@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Linear and non-linear solvers · FerriteShells.jl</title><meta name="title" content="Linear and non-linear solvers · FerriteShells.jl"/><meta property="og:title" content="Linear and non-linear solvers · FerriteShells.jl"/><meta property="twitter:title" content="Linear and non-linear solvers · FerriteShells.jl"/><meta name="description" content="Documentation for FerriteShells.jl."/><meta property="og:description" content="Documentation for FerriteShells.jl."/><meta property="twitter:description" content="Documentation for FerriteShells.jl."/><meta property="og:url" content="https://marinlauber.github.io/FerriteShells.jl/solvers/"/><meta property="twitter:url" content="https://marinlauber.github.io/FerriteShells.jl/solvers/"/><link rel="canonical" href="https://marinlauber.github.io/FerriteShells.jl/solvers/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script><link href="../assets/documentercitations/citations-hover.css" rel="stylesheet" type="text/css"/><link href="../assets/documentercitations/citations.css" rel="stylesheet" type="text/css"/><script src="../assets/documentercitations/citations-data.js"></script><script src="../assets/documentercitations/citations-hover.js"></script><script src="../assets/documentercitations/citations-backlinks.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FerriteShells.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Introduction</a></li><li><span class="tocitem">Formulations</span><ul><li><a class="tocitem" href="../shell/">Curvilinear elasticity</a></li><li><a class="tocitem" href="../KirchhoffLove/">Kirchhoff-Love / Koiter shell</a></li><li><a class="tocitem" href="../ReissnerMindlin/">Reissner-Mindlin / Naghdi shell</a></li><li><a class="tocitem" href="../shell_models/">Shell theory comparison</a></li><li class="is-active"><a class="tocitem" href>Linear and non-linear solvers</a><ul class="internal"><li><a class="tocitem" href="#1.0-Common-setup"><span>1.0 Common setup</span></a></li><li><a class="tocitem" href="#1.1-Linear-analysis"><span>1.1 Linear analysis</span></a></li><li><a class="tocitem" href="#1.2-Nonlinear-analysis"><span>1.2 Nonlinear analysis</span></a></li><li><a class="tocitem" href="#1.3-Time-varying-analysis"><span>1.3 Time-varying analysis</span></a></li><li><a class="tocitem" href="#1.4-Tip-for-solving-non-convergence-issues"><span>1.4 Tip for solving non-convergence issues</span></a></li></ul></li><li><a class="tocitem" href="../References/">References</a></li></ul></li><li><a class="tocitem" href="../reference/">API reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Formulations</a></li><li class="is-active"><a href>Linear and non-linear solvers</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Linear and non-linear solvers</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/marinlauber/FerriteShells.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/marinlauber/FerriteShells.jl/blob/master/docs/src/solvers.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Linear-and-non-linear-solvers"><a class="docs-heading-anchor" href="#Linear-and-non-linear-solvers">Linear and non-linear solvers</a><a id="Linear-and-non-linear-solvers-1"></a><a class="docs-heading-anchor-permalink" href="#Linear-and-non-linear-solvers" title="Permalink"></a></h1><p>The snippets below show the <strong>structure</strong> of each solver — boundary conditions, the load/time loop, the Newton update and the state update. The element assembly is hidden behind a single <code>assemble_global!</code> helper so the focus stays on the solver. Fully runnable versions of every method live under <a href="https://github.com/marinlauber/FerriteShells.jl/tree/master/examples"><code>examples/</code></a>.</p><h2 id="1.0-Common-setup"><a class="docs-heading-anchor" href="#1.0-Common-setup">1.0 Common setup</a><a id="1.0-Common-setup-1"></a><a class="docs-heading-anchor-permalink" href="#1.0-Common-setup" title="Permalink"></a></h2><p>Every solver shares the same problem definition: a grid, a <code>DofHandler</code> with the displacement field <code>:u</code> (dim 3) and rotation field <code>:θ</code> (dim 2), a <code>ConstraintHandler</code> for the Dirichlet BCs, and a preallocated sparse tangent and residual.</p><pre><code class="language-julia hljs">using FerriteShells, LinearAlgebra
+
+# grid, material and shell values (see any example for the details)
+mat = LinearElastic(1.2e6, 0.0, 0.1)          # E, ν, thickness
+ip  = Lagrange{RefQuadrilateral, 2}()
+scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip, ip; mitc=MITC9)
+
+# degrees of freedom: 3 displacements + 2 rotations per node
+dh = DofHandler(grid)
+add!(dh, :u, ip^3)
+add!(dh, :θ, ip^2)
+close!(dh)
+
+# Dirichlet BCs — clamp one edge (u and θ fixed)
+ch = ConstraintHandler(dh)
+add!(ch, Dirichlet(:u, getfacetset(grid, &quot;clamped&quot;), x -&gt; zeros(3), [1,2,3]))
+add!(ch, Dirichlet(:θ, getfacetset(grid, &quot;clamped&quot;), x -&gt; zeros(2), [1,2]))
+close!(ch); Ferrite.update!(ch, 0.0)
+
+# preallocate the system
+K = allocate_matrix(dh)
+r = zeros(ndofs(dh))
+u = zeros(ndofs(dh))
+
+# fills K (tangent) and r (internal residual) for the current guess `u`
+function assemble_global!(K, r, dh, scv, u, mat)
+    asm = start_assemble(K, r)
+    for cell in CellIterator(dh)
+        reinit!(scv, cell)
+        u_e = u[shelldofs(cell)]                 # node-major element DOFs
+        # ke, re ← membrane_*_RM!(…) + bending_*_RM!(…)   (see examples)
+        assemble!(asm, shelldofs(cell), ke, re)
+    end
+end</code></pre><div class="admonition is-info" id="Note-583844039404f980"><header class="admonition-header">Note<a class="admonition-anchor" href="#Note-583844039404f980" title="Permalink"></a></header><div class="admonition-body"><p><code>apply_zero!(K, r, ch)</code> enforces the BCs on the Newton <em>increment</em> (zero on prescribed DOFs), while <code>apply!(u, ch)</code> writes the prescribed values into the solution. Convergence is measured on the free DOFs, <code>norm(r[ch.free_dofs])</code>.</p></div></div><h2 id="1.1-Linear-analysis"><a class="docs-heading-anchor" href="#1.1-Linear-analysis">1.1 Linear analysis</a><a id="1.1-Linear-analysis-1"></a><a class="docs-heading-anchor-permalink" href="#1.1-Linear-analysis" title="Permalink"></a></h2><p>For a linear problem the tangent is constant and one solve suffices:</p><pre><code class="language-julia hljs">u = K \ r</code></pre><p>or, when solving several load cases against the same operator, factor once and reuse:</p><pre><code class="language-julia hljs">K_factor = factorize(K)
+u = K_factor \ r</code></pre><h2 id="1.2-Nonlinear-analysis"><a class="docs-heading-anchor" href="#1.2-Nonlinear-analysis">1.2 Nonlinear analysis</a><a id="1.2-Nonlinear-analysis-1"></a><a class="docs-heading-anchor-permalink" href="#1.2-Nonlinear-analysis" title="Permalink"></a></h2><h3 id="1.2.1-Newton–Raphson-method"><a class="docs-heading-anchor" href="#1.2.1-Newton–Raphson-method">1.2.1 Newton–Raphson method</a><a id="1.2.1-Newton–Raphson-method-1"></a><a class="docs-heading-anchor-permalink" href="#1.2.1-Newton–Raphson-method" title="Permalink"></a></h3><p>The plain Newton loop reassembles the tangent and residual at each iteration and updates until the out-of-balance force vanishes:</p><pre><code class="language-julia hljs">while true
+    assemble_global!(K, r, dh, scv, u, mat)   # r = r_int(u)
+    r .-= f_ext                                # out-of-balance = r_int − f_ext
+    apply_zero!(K, r, ch)                      # BCs on the increment
+    norm(r[ch.free_dofs]) &lt; tol &amp;&amp; break
+    u .-= K \ r                                # Newton update
+    apply!(u, ch)                              # keep prescribed DOFs satisfied
+end</code></pre><h3 id="1.2.2-Load-controlled-Newton-Raphson"><a class="docs-heading-anchor" href="#1.2.2-Load-controlled-Newton-Raphson">1.2.2 Load-controlled Newton-Raphson</a><a id="1.2.2-Load-controlled-Newton-Raphson-1"></a><a class="docs-heading-anchor-permalink" href="#1.2.2-Load-controlled-Newton-Raphson" title="Permalink"></a></h3><p>For large deformations the external load is ramped through a load factor <span>$\lambda \in [0,1]$</span>, using the converged solution of one step as the initial guess for the next:</p><pre><code class="language-julia hljs">for λ in 0.2:0.2:1.0                            # ramp the load 0 → 1
+    for iter in 1:max_iter
+        assemble_global!(K, r, dh, scv, u, mat)
+        r .-= λ .* f_ext                        # scaled external load
+        apply_zero!(K, r, ch)
+        norm(r[ch.free_dofs]) &lt; tol &amp;&amp; break
+        u .-= K \ r
+        apply!(u, ch)
+    end
+    save_step(u, λ)                             # write VTK / record tip deflection
+end</code></pre><div class="admonition is-success" id="Tip-ffa3b5b8d664a4f3"><header class="admonition-header">Tip<a class="admonition-anchor" href="#Tip-ffa3b5b8d664a4f3" title="Permalink"></a></header><div class="admonition-body"><p>Near limit points a full Newton step can overshoot. Scaling the increment with an energy-based Armijo line search (accept the largest <span>$\alpha\le 1$</span> for which the total potential <span>$\Pi = E_\text{int} - \mathbf{f}\cdot\mathbf{u}$</span> decreases sufficiently) makes the load-controlled solver far more robust, see <code>examples/RollupCantilever.jl</code>.</p></div></div><h3 id="1.2.3-Displacement-controlled-Newton-Raphson"><a class="docs-heading-anchor" href="#1.2.3-Displacement-controlled-Newton-Raphson">1.2.3 Displacement-controlled Newton-Raphson</a><a id="1.2.3-Displacement-controlled-Newton-Raphson-1"></a><a class="docs-heading-anchor-permalink" href="#1.2.3-Displacement-controlled-Newton-Raphson" title="Permalink"></a></h3><p>&lt;!– https://doi.org/10.1016/j.compstruc.2021.106674 –&gt;</p><p>The displacement-controlled Newton-Raphson method uses a bordering technique to enforce prescribed displacements at a selected node in the mesh. The pressure is then treated as an additional constrain on the system. The equilibrium is given by</p><p class="math-container">\[\begin{split}
+\mathbf{r}(\mathbf{u},p) &amp;= \mathbf{r}_\text{int}(\mathbf{u},p) - \lambda_p \mathbf{f}_\text{ext}(\mathbf{u}) = \mathbf{0}\\
+u(\mathbf{x}_\text{T}) &amp;= u_\text{target}
+\end{split}\]</p><p>where <span>$\lambda_p$</span> is the load factor associated with the prescribed displacement target <span>$u_\text{target}$</span> at node <span>$\mathbf{x}_\text{T}$</span>. <span>$K_\text{eff}=K_\text{int}-K_\text{pres}$</span>is the effective stiffness matrix, where the unit-pressure stiffness is given by <span>$K_\text{pres}=\partial\ f_\text{int}(u)/\partial\mathbf{u}$</span>.</p><p>The Newton-Raphson solution to this problem is then obtained in two steps</p><p class="math-container">\[\begin{split}
+\mathbf{v}_1 &amp;= K_\text{eff} \backslash (\lambda_p \mathbf{f}_\text{ext}-\mathbf{r}_\text{int})\\
+\mathbf{v}_2 &amp;= K_\text{eff} \backslash \mathbf{f}_\text{ext}
+\end{split}\]</p><p>where the intermediat vector <span>$\mathbf{v}_1$</span> and <span>$\mathbf{v}_2$</span> are the equilibrium correction and the load direction vectors. From those, the pressure increment can be found</p><p class="math-container">\[\delta \lambda_p = \frac{u_\text{target} - u(\mathbf{x}_\text{T}) - \mathbf{v}_1(\mathbf{x}_\text{T})}{\mathbf{v}_2(\mathbf{x}_\text{T})}.\]</p><p>Here <span>$\lambda_p$</span> plays the role of a Lagrange multiplier — it&#39;s the unknown force that enforces the displacement constraint. The bordered <span>$2×2$</span> system:</p><p class="math-container">\[\begin{bmatrix}K_\text{eff} &amp; -\mathbf{f}_\text{ext} \\ \mathbf{e}^{\top}_{wc} &amp; 0\end{bmatrix}
+\begin{bmatrix}\delta\mathbf{u}\\ \delta \lambda_p\end{bmatrix} =
+\begin{bmatrix}\lambda_p \mathbf{f}_\text{ext} - \mathbf{r}_\text{int} \\ u_\text{target} - u(\mathbf{x}_\text{T})\end{bmatrix}=
+\begin{bmatrix}\mathbf{r}\\ r_c\end{bmatrix}\]</p><p>is structurally identical to an augmented Lagrangian system. We can solve this system using Schur complement approach, which we can write explicitly since we have only one unknown. The Schur complement of the (2,2) block (which is 0) with respect to <span>$K_\text{eff}$</span> gives:</p><p class="math-container">\[  S = 0 - \mathbf{e}^{\top}_{wc} \cdot K_\text{eff}^{-1} \cdot (-\mathbf{f}_\text{ext}) = \mathbf{e}^{\top}_{wc} \cdot K_\text{eff}^{-1} \cdot \mathbf{f}_\text{ext} = u(\mathbf{x}_\text{T})\]</p><p>which then gives</p><p class="math-container">\[\begin{split}
+\delta \lambda_p &amp;= S^{-1} \cdot (r_c - \mathbf{e}^{\top}_{wc} \cdot K_\text{eff}^{-1} \cdot \mathbf{r}) = (r_c - \mathbf{v}_1(\mathbf{x}_\text{T})) / \mathbf{v}_2(\mathbf{x}_\text{T})\\
+\delta \mathbf{u} &amp;= K_\text{eff}^{-1} \cdot (\mathbf{r} + \mathbf{f}_\text{ext} \cdot \delta \lambda_p) = \mathbf{v}_1 + \delta \lambda_p \cdot \mathbf{v}_2
+\end{split}\]</p><p>The Schur complement reduction costs exactly two triangular solves against the same factorisation —  which is optimal for a rank-1 augmentation.</p><p>In code, the two triangular solves reuse a single factorization (<code>ldiv!</code> against <code>F_lu</code>), and the load factor <code>p</code> is updated alongside the displacement:</p><pre><code class="language-julia hljs">u = zeros(ndofs(dh)); p = 0.0                   # p = λ_p (unknown load factor)
+ctrl = control_dof                              # DOF whose value is prescribed
+F_lu = lu(K)                                    # symbolic factorization (pattern)
+
+for step in 1:n_steps
+    u_target = step / n_steps * u_max           # prescribed value at `ctrl`
+    for iter in 1:max_iter
+        assemble_global!(K, r, dh, scv, u, mat)             # K_int, r_int
+        assemble_pressure_tangent!(K_p, f_ext, scv, u, dh)  # follower-load stiffness
+        K_eff.nzval .= K.nzval .- p .* K_p.nzval            # effective tangent
+        rhs = p .* f_ext .- r                               # out-of-balance
+        apply_zero!(K_eff, rhs, ch)
+        (norm(rhs[ch.free_dofs]) &lt; tol &amp;&amp; abs(u[ctrl]-u_target) &lt; tol) &amp;&amp; break
+        lu!(F_lu, K_eff)                        # refactorize in place
+        ldiv!(v1, F_lu, rhs)                    # v₁: equilibrium correction
+        ldiv!(v2, F_lu, f_ext)                  # v₂: load direction
+        δp = (u_target - u[ctrl] - v1[ctrl]) / v2[ctrl]     # Schur complement
+        u .+= v1 .+ δp .* v2
+        p  += δp
+        apply!(u, ch)
+    end
+end</code></pre><h3 id="1.2.4-Arc-length-method"><a class="docs-heading-anchor" href="#1.2.4-Arc-length-method">1.2.4 Arc-length method</a><a id="1.2.4-Arc-length-method-1"></a><a class="docs-heading-anchor-permalink" href="#1.2.4-Arc-length-method" title="Permalink"></a></h3><p>&lt;!– https://img1.wsimg.com/blobby/go/e35e0087-c3c0-4b15-a0c5-d8b4ee6b719d/downloads/ArcLength.pdf?ver=1748029264278#page=13.64 –&gt;</p><p>The arc-length (Riks/Crisfield) method treats the load factor <span>$\lambda$</span> as an unknown and constrains the combined step <span>$(\Delta\mathbf{u},\Delta\lambda)$</span> to lie on a sphere of radius <span>$\Delta l$</span>, so the solver can traverse limit points and snap-through where load control fails. Each iteration splits the update into an equilibrium part and a load-direction part, then picks <span>$\delta\lambda$</span> to satisfy the constraint:</p><pre><code class="language-julia hljs">u = zeros(ndofs(dh)); λ = 0.0
+for step in 1:n_steps
+    Δu = zero(u); Δλ = 0.0                       # incremental unknowns for this step
+    for iter in 1:max_iter
+        assemble_global!(K, r, dh, scv, u .+ Δu, mat)
+        g = r .- (λ + Δλ) .* f_ext               # residual at trial state
+        apply_zero!(K, g, ch)
+        norm(g[ch.free_dofs]) &lt; tol &amp;&amp; break
+        F = lu(K)
+        δu_g = F \ (-g)                           # equilibrium correction
+        δu_t = F \ f_ext                          # tangent to the load path
+        # spherical constraint ‖Δu+δu‖² + ψ²‖f‖²(Δλ+δλ)² = Δl²  → quadratic in δλ
+        δλ = arclength_root(Δu, Δλ, δu_g, δu_t, Δl, ψ)
+        Δu .+= δu_g .+ δλ .* δu_t
+        Δλ += δλ
+    end
+    u .+= Δu; λ += Δλ                             # commit the converged increment
+end</code></pre><h3 id="1.2.5-Dynamic-Relaxation"><a class="docs-heading-anchor" href="#1.2.5-Dynamic-Relaxation">1.2.5 Dynamic Relaxation</a><a id="1.2.5-Dynamic-Relaxation-1"></a><a class="docs-heading-anchor-permalink" href="#1.2.5-Dynamic-Relaxation" title="Permalink"></a></h3><p>&lt;!– https://www.sciencedirect.com/science/article/pii/S0263823111001777 –&gt; &lt;!– https://www.sciencedirect.com/science/article/pii/0045794988903045 –&gt;</p><p>Dynamic relaxation drives the static solution by integrating a fictitious damped dynamics with a row-lumped (diagonal) mass. The <em>kinematic damping</em> variant carries no viscous term: the velocity is reset to zero whenever the kinetic energy peaks, which bleeds energy out of the system and converges to the static equilibrium. A scaling parameter <span>$\alpha$</span> tunes the fictitious time step / mass and hence the convergence speed. Only the residual is needed — no tangent factorization:</p><pre><code class="language-julia hljs">u = zeros(ndofs(dh)); v = zero(u)
+Mlump = lumped_mass(dh, scv, ρ, mat)             # diagonal, row-summed mass
+KE_prev = Inf
+for it in 1:max_iter
+    assemble_residual!(r, dh, scv, u, mat)       # residual only
+    r .-= f_ext
+    apply_zero!(r, ch)
+    norm(r[ch.free_dofs]) &lt; tol &amp;&amp; break
+    v .+= α .* Δt .* (-r) ./ Mlump               # explicit velocity update (a = −r/M)
+    KE = 0.5 * dot(v .* Mlump, v)                 # kinetic energy
+    KE &lt; KE_prev &amp;&amp; (v .= 0.0)                    # peak passed → kinetic damping
+    u .+= Δt .* v
+    apply!(u, ch)
+    KE_prev = KE
+end</code></pre><h2 id="1.3-Time-varying-analysis"><a class="docs-heading-anchor" href="#1.3-Time-varying-analysis">1.3 Time-varying analysis</a><a id="1.3-Time-varying-analysis-1"></a><a class="docs-heading-anchor-permalink" href="#1.3-Time-varying-analysis" title="Permalink"></a></h2><h3 id="1.3.1-HHT-α-method"><a class="docs-heading-anchor" href="#1.3.1-HHT-α-method">1.3.1 HHT-α method</a><a id="1.3.1-HHT-α-method-1"></a><a class="docs-heading-anchor-permalink" href="#1.3.1-HHT-α-method" title="Permalink"></a></h3><p>Adding inertia <span>$M·ü$</span> regularizes the problem — the structure accelerates dynamically through the unstable branch rather than Newton stalling at the limit point. The tangent matrix becomes <span>$K_eff + (4/Δ t^2)\cdot M$</span> (Newmark), which is better conditioned near the snap-through because the   mass term prevents the stiffness singularity from being reached.</p><p>The HHT-α scheme applies a Newmark predictor, then Newton-corrects the α-weighted residual <span>$R = M\ddot{u} + (1-\alpha)\,r_\text{int}(u_{n+1}) + \alpha\,r_\text{int}(u_n) - f_\text{ext}$</span>. The mass is assembled once; the effective tangent combines mass and stiffness:</p><pre><code class="language-julia hljs">α = -0.05; γ = 0.5 - α; β = (1 - α)^2 / 4         # HHT-α parameters (α ∈ [−1/3, 0])
+u = zeros(ndofs(dh)); v = zero(u); a = zero(u); r_old = zero(u)
+assemble_mass!(M, dh, scv, ρ, mat)                # constant → assemble once
+
+for step in 1:n_steps
+    # Newmark predictor (advance kinematics without equilibrium)
+    ũ = u .+ Δt .* v .+ (Δt^2 * (0.5 - β)) .* a
+    ṽ = v .+ (Δt * (1 - γ)) .* a
+    u_new = copy(ũ); apply!(u_new, ch)
+    for iter in 1:max_iter
+        assemble_global!(K, r_int, dh, scv, u_new, mat)
+        a_new = (u_new .- ũ) ./ (β * Δt^2)                       # Newmark acceleration
+        R = M * a_new .+ (1-α) .* r_int .+ α .* r_old .- f_ext   # HHT residual
+        apply_zero!(R, ch)
+        norm(R[ch.free_dofs]) &lt; tol &amp;&amp; break
+        K_eff.nzval .= M.nzval ./ (β * Δt^2) .+ (1-α) .* K.nzval # effective tangent
+        apply_zero!(K_eff, R, ch)
+        u_new .-= K_eff \ R
+        apply!(u_new, ch)
+    end
+    # commit state: acceleration, velocity, and r_int(u_n) for the next α-weight
+    a .= (u_new .- ũ) ./ (β * Δt^2)
+    v .= ṽ .+ (Δt * γ) .* a
+    r_old .= r_int
+    u .= u_new
+end</code></pre><div class="admonition is-info" id="Why-implicit?-9e8dd0de7042fa70"><header class="admonition-header">Why implicit?<a class="admonition-anchor" href="#Why-implicit?-9e8dd0de7042fa70" title="Permalink"></a></header><div class="admonition-body"><p>The scheme above is <strong>implicit</strong> — each step factorizes <span>$K_\text{eff}$</span> and Newton-iterates, so it is unconditionally stable and the time step is chosen for accuracy, not stability. This matters for thin shells because the elastic wave speed <span>$c \propto \sqrt{E/\rho}/t$</span> is very high: an <em>explicit</em> scheme (central differences, no tangent solve) would be limited by the CFL condition to a critical step <span>$\Delta t_\text{crit} \sim (h\,t/L)/c$</span> — potentially microseconds for a 2 mm shell. Implicit HHT-α lets you take physiologically relevant steps (<span>$\sim$</span>1 ms) instead.</p></div></div><h2 id="1.4-Tip-for-solving-non-convergence-issues"><a class="docs-heading-anchor" href="#1.4-Tip-for-solving-non-convergence-issues">1.4 Tip for solving non-convergence issues</a><a id="1.4-Tip-for-solving-non-convergence-issues-1"></a><a class="docs-heading-anchor-permalink" href="#1.4-Tip-for-solving-non-convergence-issues" title="Permalink"></a></h2><p>The key diagnostic is whether the residual is:</p><ul><li>Growing → wrong tangent (sign error, missing term)</li><li>Oscillating → conditioning or over-shooting</li><li>Slowly decreasing → step size issue (but you&#39;ve ruled that out)</li><li>Blowing up on step 1 → issue at reference state</li></ul><p>If you have isolated the residual diverging, then check:</p><ul><li>If the residual is large, figure out which term dominates.</li><li>Check the tangent at the diverging state.</li><li>If the error is large at large deformations but small at <span>$u=0$</span>, the geometric <span>$\phi\phi$</span> term (second derivative of Rodrigues director) is the suspect. Its effect is proportional to <span>$|\phi|$</span> and <span>$|f_\text{int}|$</span>, both of which grow with deformation.</li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../shell_models/">« Shell theory comparison</a><a class="docs-footer-nextpage" href="../References/">References »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 25 August 2026 06:10">Tuesday 25 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
