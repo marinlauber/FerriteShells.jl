@@ -37,7 +37,7 @@ Shells specialize the classical weak form obtained in continuum mechanics to a c
 To help assemble these specific surface metrics, this package uses a new `ShellCellValues<:AbstractCellValues`, which behaves identically to Ferrite's `CellValues`, but additionally holds covariant basis vectors, metric tensors, and surface Jacobian at the integration points, which are used in the assembly of the different terms of the different formulations.
 
 ```julia
-struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
+struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M, F} <: AbstractCellValues
     # quadrature and interpolation spaces
     qr       :: QR
     ip_geo   :: IPG
@@ -50,8 +50,11 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
     # shell measures
     A_metric :: Vector{SymmetricTensor{2, 2, T, 3}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
+    B₀       :: Vector{SymmetricTensor{2, 2, T, 3}}   # reference director-gradient curvature
     # shear-locking treatment
     mitc     :: AbstractMITC
+    # optional NodeFrames used by the cell-based reinit! entry points
+    frames   :: F
 end
 ```
 

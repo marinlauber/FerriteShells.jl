@@ -7,6 +7,7 @@ DocTestSetup = :(using FerriteShells)
 
 ```@docs
 mass_matrix!
+lumped_mass!
 ```
 
 ## Kirchhoff-Love functions

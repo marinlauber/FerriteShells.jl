@@ -127,46 +127,58 @@ println("Roll-up cantilever M_ref=$(round(M_ref;digits=4))")
 println("  step |  λ     |  u_x_tip  |  u_z_tip  | ux_an   | uz_an   | iters")
 
 u = zeros(N_dofs); tip = []
-for step in 1:n_steps
-    λ = step / n_steps
-    F = λ .* F_ext
-    u_prev = copy(u)
-    converged = false; n_iter = 0
-    for iter in 1:max_iter
-        assemble_global!(K, r, dh, scv, u, mat)
-        @. rhs = F - r; apply_zero!(K, rhs, ch)
-        rhs_norm = norm(rhs)
-        rhs_norm < tol && (converged = true; n_iter = iter - 1; break)
-        n_iter = iter
-        du     = K \ rhs
-        slope  = dot(rhs, du)    # = du'Kdu > 0  (descent slope for Π)
-        Π0     = potential(dh, scv, u, mat, F)
-        α_ls   = 1.0
-        for ks in 1:15
-            u_trial = u .+ α_ls .* du
-            Π_trial = potential(dh, scv, u_trial, mat, F)
-            Π_trial ≤ Π0 - armijo_c * α_ls * slope && break
-            α_ls /= 2
+# Load stepping with cutback: past λ ≈ 0.7 (tip tilt beyond ~250°) the Newton
+# radius shrinks and a fixed Δλ = 1/n_steps silently truncates the roll-up.
+# Halving the increment on non-convergence and re-growing it on success reaches
+# λ = 1 from the same base step count instead of stopping at ~0.7.
+let λ = 0.0, Δλ = 1 / n_steps, Δλ_min = 1 / (64 * n_steps), step = 0
+    while λ < 1.0 - 1e-12
+        λ_trial = min(λ + Δλ, 1.0)
+        F = λ_trial .* F_ext
+        u_prev = copy(u)
+        converged = false; n_iter = 0
+        for iter in 1:max_iter
+            assemble_global!(K, r, dh, scv, u, mat)
+            @. rhs = F - r; apply_zero!(K, rhs, ch)
+            rhs_norm = norm(rhs)
+            rhs_norm < tol && (converged = true; n_iter = iter - 1; break)
+            n_iter = iter
+            du     = K \ rhs
+            slope  = dot(rhs, du)    # = du'Kdu > 0  (descent slope for Π)
+            Π0     = potential(dh, scv, u, mat, F)
+            α_ls   = 1.0
+            for ks in 1:15
+                u_trial = u .+ α_ls .* du
+                Π_trial = potential(dh, scv, u_trial, mat, F)
+                Π_trial ≤ Π0 - armijo_c * α_ls * slope && break
+                α_ls /= 2
+            end
+            u .+= α_ls .* du
         end
-        u .+= α_ls .* du
-    end
-    # check convergence
-    !converged && (u .= u_prev; @warn "step $step (λ=$λ) did not converge; rolled back" break)
-    # extract solution
-    tip_ux, tip_uz = 0.0, 0.0
-    for cell in CellIterator(dh), (I, gid) in enumerate(getnodes(cell))
-        if gid == tip_node
-            cd = celldofs(cell); tip_ux = u[cd[3I-2]]; tip_uz = u[cd[3I]]; break
+        if !converged
+            u .= u_prev
+            Δλ /= 2
+            Δλ < Δλ_min && error("roll-up: no convergence even at Δλ = $Δλ (λ = $λ)")
+            continue
         end
-    end
-    push!(tip, [λ, tip_ux, tip_uz])
-    ux_an, uz_an = analytical_tip(λ)
-    step %10==0 && @printf("  %4d | %.4f | %9.4f | %9.4f | %7.4f | %7.4f | %d\n",
-                           step, λ, tip_ux, tip_uz, ux_an, uz_an, n_iter)
+        λ = λ_trial; step += 1
+        Δλ = min(2Δλ, 1 / n_steps)
+        # extract solution
+        tip_ux, tip_uz = 0.0, 0.0
+        for cell in CellIterator(dh), (I, gid) in enumerate(getnodes(cell))
+            if gid == tip_node
+                cd = celldofs(cell); tip_ux = u[cd[3I-2]]; tip_uz = u[cd[3I]]; break
+            end
+        end
+        push!(tip, [λ, tip_ux, tip_uz])
+        ux_an, uz_an = analytical_tip(λ)
+        (step % 10 == 0 || λ ≥ 1.0 - 1e-12) && @printf("  %4d | %.4f | %9.4f | %9.4f | %7.4f | %7.4f | %d\n",
+                               step, λ, tip_ux, tip_uz, ux_an, uz_an, n_iter)
 
-    # write to vtk
-    VTKGridFile("cantilever_rollup", dh) do vtk
-        write_solution(vtk, dh, u)
+        # write to vtk
+        VTKGridFile("cantilever_rollup", dh) do vtk
+            write_solution(vtk, dh, u)
+        end
     end
 end
 
