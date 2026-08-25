@@ -22,5 +22,3 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 UniversalMaterialModel = "451d549b-da3a-4afd-9dba-1924b1a1c089"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
-[sources]
-FerriteShells = {path = "/home/marin/Workspace/FerriteShells.jl/"}

@@ -65,9 +65,10 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
         # Follower-pressure kernels
         @test alloc_of(() -> assemble_pressure!(re, scv_mitc, u_e, 1.0))         == 0
         @test alloc_of(() -> assemble_pressure_tangent!(ke, scv_mitc, u_e, 1.0)) == 0
-        # test other external loading function TODO fix these two
-        @test alloc_of(() ->assemble_traction!(f_ext, dh, getfacetset(grid, "left"), ip, fqr, Vec{3}((0.,0.,1.)))) != 0
-        @test alloc_of(() -> apply_pointload!(f_ext, dh, "all", Vec{3}((0.,0.,1.)))) != 0
+        # These two still allocate (per-facet/per-cell temporaries); the target
+        # is zero, so mark them broken rather than pinning the defect as a pass.
+        @test_broken alloc_of(() ->assemble_traction!(f_ext, dh, getfacetset(grid, "left"), ip, fqr, Vec{3}((0.,0.,1.)))) == 0
+        @test_broken alloc_of(() -> apply_pointload!(f_ext, dh, "all", Vec{3}((0.,0.,1.)))) == 0
         # mass matrix, although it's usually used once...
         @test alloc_of(() -> mass_matrix!(ke, scv_mitc, 1.0, mat)) == 0
         # Residual/tangent kernels

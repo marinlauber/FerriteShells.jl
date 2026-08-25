@@ -1,6 +1,23 @@
 using Tensors
 
+"""
+    AbstractMaterial
+
+Supertype of shell materials. A concrete material provides
+`membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)` and
+`bending_and_shear_stiffness(mat, ...)` for the stress response, and
+[`thickness`](@ref) for the mass kernels.
+"""
 abstract type AbstractMaterial end
+
+"""
+    thickness(mat::AbstractMaterial) -> Real
+
+Shell thickness of the material. This is the accessor the mass kernels
+([`mass_matrix!`](@ref), [`lumped_mass!`](@ref)) use — a custom
+`AbstractMaterial` either stores a `thickness` field or overloads this method.
+"""
+thickness(mat::AbstractMaterial) = mat.thickness
 
 """
     LinearElastic(E, ν, thickness=1.0)

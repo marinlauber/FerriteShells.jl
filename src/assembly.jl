@@ -75,7 +75,10 @@ end
     d₀
 end
 
-# Bending curvature change κ_αβ = ½(a_α·d,β + a_β·d,α) - B_αβ.
+# Bending curvature change κ_αβ = ½(a_α·d,β + a_β·d,α) − B₀_αβ, with B₀ the
+# reference director-gradient curvature (see _reference_director_curvature!) —
+# NOT the patch curvature B, which would leave a mesh-persistent reference
+# bending strain on curved or warped elements.
 @inline function curvature_tensor(a₁, a₂, d₁, d₂, B)
     κ₁₁ = dot(a₁, d₁) - B[1,1]
     κ₁₂ = 0.5*(dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
@@ -315,7 +318,7 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
@@ -413,7 +416,7 @@ function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T},
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
@@ -479,7 +482,7 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, NN)
         d, d₁, d₂ = director_field(scv, qp, u_e, NN)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, NN)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
@@ -593,7 +596,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, n_nodes)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
@@ -710,7 +713,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
@@ -780,11 +783,14 @@ end
 """
     mass_matrix!(me, scv::ShellCellValues, ρ::T, mat)
 
-Mass matrix for embedded shell elements (2D mesh in 3D). Only translational DOFs contribute to kinetic energy.
+Consistent mass matrix for embedded shell elements (2D mesh in 3D). Only translational
+DOFs contribute to kinetic energy — the rotational rows are zero, so `me` is singular
+and an explicit integrator must use [`lumped_mass!`](@ref) instead. Material access
+goes through [`thickness`](@ref); that is the only requirement on `mat`.
 """
 function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    ρt = ρ * mat.thickness
+    ρt = ρ * thickness(mat)
     for qp in 1:getnquadpoints(scv)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes, J in 1:n_nodes
@@ -796,10 +802,68 @@ function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     end
 end
 
+"""
+    lumped_mass!(m, scv::ShellCellValues, ρ, mat; rotary = :floor)
+
+Diagonal (lumped) mass for one embedded shell element, accumulated into the length-`5n`
+vector `m` (node-major `[u₁,u₂,u₃,φ₁,φ₂]` layout, matching [`shelldofs`](@ref)).
+
+Translational entries use HRZ diagonal scaling (Hinton, Rock & Zienkiewicz 1976): the
+diagonal `∫N_I² dA` of the consistent matrix, scaled so the element mass `ρ·t·A` is
+conserved. Unlike row-sum lumping this stays positive for every interpolation
+(row sums vanish on T6 corner nodes and turn negative on serendipity Q8 corners).
+
+The consistent matrix has zero rotational rows ([`mass_matrix!`](@ref)), which an
+explicit integrator cannot invert; `rotary` selects the rotational inertia per node:
+* `:consistent` — the thin-plate share `m_I·t²/12`.
+* `:floor` (default) — `m_I·max(t, h)²/12` with `h = √A` the element size. For thin
+  shells (`t ≪ h`) the consistent value drives the rotational eigenfrequencies — and
+  with them the explicit Δt bound — to collapse like `t`; the floor pins them at the
+  membrane scale. Measured on FerriteContact's extruded-valve explicit driver
+  (Q4 + MITC4, `h ≈ 0.076`): the floor holds `Δt_crit = 2/ω_max` at the membrane
+  bound independent of thickness (`3.8e-4` at `t = 0.04` and `t = 0.004` alike),
+  while `:consistent` collapses with `t` (`3.3e-4 → 3.6e-5`). At `t ≈ h/2` both
+  options settle a full contact schedule at 0.7 of the membrane CFL onto the same
+  state — the rotary choice never moves equilibria, only the transient and the
+  `Δt` bound.
+* `:zero` — leave the rotational entries untouched (implicit or quasi-static use).
+
+Material access goes through [`thickness`](@ref); that is the only requirement on `mat`.
+"""
+function lumped_mass!(m::AbstractVector, scv::ShellCellValues, ρ, mat; rotary::Symbol = :floor)
+    rotary in (:consistent, :floor, :zero) ||
+        throw(ArgumentError("rotary must be :consistent, :floor or :zero; got :$rotary"))
+    n_nodes = getnbasefunctions(scv.ip_shape)
+    length(m) == 5n_nodes || throw(ArgumentError("m has length $(length(m)); expected 5·$n_nodes"))
+    t  = thickness(mat)
+    md = zeros(typeof(ρ * t), n_nodes)   # unscaled HRZ diagonals ∫N_I² dA
+    A  = zero(eltype(md))
+    for qp in 1:getnquadpoints(scv)
+        dΩ = scv.detJdV[qp]
+        A += dΩ
+        for I in 1:n_nodes
+            md[I] += scv.N[I, qp]^2 * dΩ
+        end
+    end
+    s     = ρ * t * A / sum(md)
+    r_fac = rotary === :zero       ? zero(t) :
+            rotary === :consistent ? t^2 / 12 :
+                                     max(t, sqrt(A))^2 / 12
+    for I in 1:n_nodes
+        mI = s * md[I]
+        m[5I-4] += mI; m[5I-3] += mI; m[5I-2] += mI
+        m[5I-1] += mI * r_fac
+        m[5I]   += mI * r_fac
+    end
+    return m
+end
+
 # ∂ξ/∂t for the mapping t ∈ [-1,1] → 2D cell reference coord along each facet.
 # Derived from ξ(t) = 0.5*(1-t)*A + 0.5*(1+t)*B (vertices A, B of facet in ref space).
 # RefQuadrilateral vertices: (-1,-1),(1,-1),(1,1),(-1,1); all facets are axis-aligned.
 # RefTriangle vertices: (0,0),(1,0),(0,1); facet 2 (hypotenuse) has mixed direction.
+facet_dxi(ip::Interpolation, ::Int) =
+    error("assemble_traction! supports Lagrange interpolations on RefQuadrilateral/RefTriangle; got $(typeof(ip))")
 @inline facet_dxi(::Lagrange{RefQuadrilateral}, f::Int) = f ∈ (1,3) ? Vec{2}((1.0, 0.0)) : Vec{2}((0.0, 1.0))
 @inline facet_dxi(::Lagrange{RefTriangle},      f::Int) =
     f == 1 ? Vec{2}(( 0.5,  0.0)) :
@@ -819,9 +883,14 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
     n_base = getnbasefunctions(ip)
     fe     = zeros(ndofs_per_cell(dh))
-    ndofs_per_node = ndofs_per_cell(dh) ÷ n_base
-    is_interleaved = ndofs_per_node == 5 && length(Ferrite.getfieldnames(dh)) == 1
-    @inline block(I) = is_interleaved ? (5I-4:5I-2) : (3I-2:3I)
+    # Locate the displacement dofs by name instead of assuming :u is the first
+    # (or only) field: correct for the two-field layout, the interleaved
+    # 5-component one, and any DofHandler that carries additional fields.
+    sdh   = only(dh.subdofhandlers)
+    ru    = Ferrite.dof_range(sdh, :u)
+    ncomp = length(ru) ÷ n_base
+    ncomp in (3, 5) || throw(ArgumentError(":u carries $ncomp components per node; expected 3 (two-field layout) or 5 (interleaved)"))
+    @inline block(I) = ru[(ncomp * (I - 1) + 1):(ncomp * (I - 1) + 3)]
     for fc in FacetIterator(dh, facetset)
         fill!(fe, 0.0)
         x        = getcoordinates(fc)
@@ -850,7 +919,12 @@ end
 """
     assemble_pressure!(re, scv, u_e, p)
 
-Follower pressure residual for embedded shell elements.
+Follower-pressure EXTERNAL FORCE for embedded shell elements — note the sign
+convention: unlike the `*_residuals_*!` kernels (which accumulate the internal
+force), this accumulates `+p ∫ N_I (a₁×a₂) dξ`, the external load. A driver
+subtracts it from the residual, `r = r_int − p·F_p`, and subtracts the matching
+[`assemble_pressure_tangent!`](@ref) from the tangent, `K_eff = K_int − p·K_p`
+(see the SquareAirbagDynamic example).
 ``\\mathrm{detJdV}[q] = \\|A_1 \\times A_2\\| \\cdot w`` (reference area times quadrature weight).
 ``\\mathrm{cross}(a_1, a_2)`` has magnitude ``\\|a_1 \\times a_2\\|`` (current area per parametric area).
 """
@@ -906,19 +980,24 @@ end
     apply_pointload!(f, dh, nodeset_name, load)
 
 Add a concentrated force `load::Vec{3}` to the displacement DOFs of all nodes in `nodeset_name`.
-Works for both single-field (`:u` only) and two-field (`:u`, `:θ`) DofHandlers; in both cases the
-`:u` DOFs for node I in a cell occupy local positions `3I-2:3I`.
+The `:u` dofs are located by name through the SubDofHandler's `dof_range`, so any field order
+and additional fields are handled.
 """
 function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
     node_set  = getnodeset(dh.grid, nodeset_name)
     processed = Set{Int}()
+    sdh = only(dh.subdofhandlers)
+    ru  = Ferrite.dof_range(sdh, :u)
     for cell in CellIterator(dh)
         nodes = getnodes(cell)
         cd    = celldofs(cell)
+        ncomp = length(ru) ÷ length(nodes)
         for (I, gid) in enumerate(nodes)
             if gid ∈ node_set && gid ∉ processed
                 push!(processed, gid)
-                @views f[cd[3I-2:3I]] .+= load
+                for r in 1:3
+                    f[cd[ru[ncomp * (I - 1) + r]]] += load[r]
+                end
             end
         end
     end

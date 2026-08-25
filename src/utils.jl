@@ -1,4 +1,4 @@
-import Ferrite: Grid,Triangle,Quadrilateral,Nodes
+import Ferrite: Grid, Triangle, Quadrilateral
 using LinearAlgebra: cross
 using ForwardDiff
 
@@ -34,7 +34,14 @@ Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_
 """
 function shelldofs(cell::CellCache)
     dofs = cell.dofs
-    n = length(dofs) ÷ 5
+    n = length(cell.nodes)
+    length(dofs) == 5n || throw(
+        ArgumentError(
+            "shelldofs expects exactly the two-field layout `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)` " *
+                "($(5n) dofs for $n nodes, got $(length(dofs))). With additional fields, or fields in " *
+                "another order, use `shelldofs!(sd, sdh, cell)`, which reads the dof ranges by name."
+        )
+    )
     perm = similar(dofs)
     for I in 1:n
         @views perm[5I-4:5I-2] .= dofs[3I-2:3I]
@@ -42,6 +49,30 @@ function shelldofs(cell::CellCache)
         perm[5I  ] = dofs[3n + 2I]
     end
     return perm
+end
+
+"""
+    shelldofs!(sd::Vector{Int}, sdh::SubDofHandler, cell) -> sd
+
+Layout-safe, allocation-free form of [`shelldofs`](@ref): the interleaved
+5-dof order built from the SubDofHandler's own `dof_range`s for `:u` and `:θ`,
+so it stays correct whatever other fields the `DofHandler` carries and in
+whatever order they were added. `sd` is resized and overwritten.
+"""
+function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
+    dofs = celldofs(cell)
+    ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
+    n = length(ru) ÷ 3
+    length(rθ) == 2n || throw(ArgumentError(":u carries $n nodes but :θ carries $(length(rθ) ÷ 2)"))
+    resize!(sd, 5n)
+    for I in 1:n
+        sd[5I-4] = dofs[ru[3I-2]]
+        sd[5I-3] = dofs[ru[3I-1]]
+        sd[5I-2] = dofs[ru[3I]]
+        sd[5I-1] = dofs[rθ[2I-1]]
+        sd[5I]   = dofs[rθ[2I]]
+    end
+    return sd
 end
 
 using OrderedCollections
@@ -254,25 +285,28 @@ VTKGridFile("output", dh) do vtk
 end
 ```
 """
-function director_field(dh::DofHandler, scv::ShellCellValues, u)
+function director_field(dh::DofHandler, scv::ShellCellValues, u; frames = nothing)
+    # (frames :: Union{Nothing, NodeFrames}; untyped because NodeFrames is defined below.)
     n_nodes = getnnodes(dh.grid)
     d_sum  = zeros(3, n_nodes)
     G3_sum = zeros(3, n_nodes)
     count  = zeros(Int, n_nodes)
     for cell in CellIterator(dh)
-        reinit!(scv, cell)
+        # The element kernels rotate the Rodrigues director about the frame
+        # `reinit!` stores in G₃_elem/T₁_elem/T₂_elem — the centroid frame, or
+        # the per-node one when `NodeFrames` are used. Post-processing must use
+        # exactly that frame; averaging the quadrature-point geometric frames
+        # (A₁/‖A₁‖ …) is a different frame on any non-rectangular element and
+        # tilts the reported director.
+        frames === nothing ? reinit!(scv, cell) : reinit!(scv, cell, frames)
         sd  = shelldofs(cell)
         u_e = @views u[sd]
-        nq  = getnquadpoints(scv)
-        G3_avg = sum(scv.G₃[q] for q in 1:nq) / nq
-        T1_avg = sum(scv.T₁[q] for q in 1:nq) / nq
-        T2_avg = sum(scv.T₂[q] for q in 1:nq) / nq
         for (I, nid) in enumerate(cell.nodes)
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = cos_sinc_sq(φ₁^2 + φ₂^2)
-            d_I = cosθ * G3_avg + sincθ * (φ₁ * T1_avg + φ₂ * T2_avg)
+            d_I = cosθ * scv.G₃_elem[I] + sincθ * (φ₁ * scv.T₁_elem[I] + φ₂ * scv.T₂_elem[I])
             @views d_sum[:, nid]  .+= d_I
-            @views G3_sum[:, nid] .+= G3_avg
+            @views G3_sum[:, nid] .+= scv.G₃_elem[I]
             count[nid] += 1
         end
     end
@@ -313,13 +347,18 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
 
-    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+    # The MITC tying strains already carry their own reference subtraction;
+    # subtracting the QP-direct Aα·d₀ again adds a spurious reference shear on
+    # curved elements. `reference_shear_offset` dispatches to zero for MITC —
+    # the same rule `energy_RM` follows.
     d₀  = reference_director(scv, qp, n_nodes)
-    γ₁ -= dot(scv.A₁[qp], d₀)
-    γ₂ -= dot(scv.A₂[qp], d₀)
+    r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+    γ₁ -= r₁
+    γ₂ -= r₂
 
     return E, κ, Vec{2,T}((γ₁, γ₂))
 end
@@ -380,7 +419,10 @@ function NodeFrames(grid::Grid, ip_geo::Interpolation)
     for i in 1:n_nodes
         g      = G₃_sum[i]
         g_norm = norm(g)
-        g_norm < 1e-14 && continue
+        # A cancelled area-weighted normal would leave this node's frame as
+        # uninitialized memory; no admissible shell mesh produces it (opposite
+        # folds would have to cancel exactly), so it is an error, not a skip.
+        g_norm < 1e-14 && error("NodeFrames: the area-weighted normal at node $i cancels — degenerate or exactly folded patch")
         G₃[i] = g / g_norm
         ref    = abs(G₃[i][1]) < 0.9 ? Vec{3}((1.,0.,0.)) : Vec{3}((0.,1.,0.))
         t₁     = ref - (ref ⋅ G₃[i]) * G₃[i]
@@ -403,7 +445,7 @@ pre-computed initially from `nf = NodeFrames(grid, ip_geo)`.
 **Note:**
 For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
 """
-reinit!
+reinit!(::ShellCellValues, x::AbstractVector{<:Vec{3}}, ::NodeFrames, node_ids)
 
 reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinates(cell), nf, getnodes(cell))
 reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
@@ -415,5 +457,30 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFram
         scv.T₁_elem[I] = nf.T₁[node_ids[I]]
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
     end
+    _reference_director_curvature!(scv)   # B₀ follows the frames actually in use
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
+end
+"""
+    max_director_tilt(dh::DofHandler, u::AbstractVector) -> Float64
+
+Largest nodal rotation magnitude ‖φ‖ in the solution `u`, over all cells of every
+subdofhandler carrying a `:θ` field. The Rodrigues director parametrization is
+total-Lagrangian with a singularity at ‖φ‖ = π; drivers should guard
+`max_director_tilt(dh, u) ≲ 2` and, if a simulation approaches that, restart from a
+reference configuration chosen mid-swing (see the rotation-envelope notes in the
+Reissner–Mindlin docs).
+"""
+function max_director_tilt(dh::DofHandler, u::AbstractVector)
+    tilt = 0.0
+    for sdh in dh.subdofhandlers
+        :θ in Ferrite.getfieldnames(sdh) || continue
+        rθ = Ferrite.dof_range(sdh, :θ)
+        for cell in CellIterator(sdh)
+            dofs = celldofs(cell)
+            for k in 1:2:length(rθ)
+                tilt = max(tilt, hypot(u[dofs[rθ[k]]], u[dofs[rθ[k + 1]]]))
+            end
+        end
+    end
+    return tilt
 end

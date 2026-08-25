@@ -18,13 +18,18 @@ functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
 
 **Keyword arguments:** The following keyword arguments are experimental and may change in future minor releases
 * `mitc`:  an instant of [`MITC`](@ref) to specify the shear treatment used in the element (default `NoMITC`)
+* `frames`: a [`NodeFrames`](@ref) object (default `nothing`). When given, the cell-based
+    `reinit!(scv, cell)`/`reinit!(scv, cc)` entry points use the stored per-node frames
+    automatically, so a kernel loop cannot silently fall back to centroid frames on a
+    curved shell. The raw coordinate method `reinit!(scv, x)` has no node ids and always
+    uses centroid frames.
 
 **Common methods:**
 * [`reinit!`](@ref) computes the reference geometry (``A_1``, ``A_2``, ``G_3``, ``B``, ``\\cdots``) by differentiating the coordinate map using `ip_geo`.
 """
 ShellCellValues
 
-struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
+struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M, F} <: AbstractCellValues
     qr       :: QR
     ip_geo   :: IPG
     ip_shape :: IPS
@@ -42,10 +47,12 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
     T₁       :: Vector{Vec{3, T}}
     T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
+    B₀       :: Vector{SymmetricTensor{2, 2, T, 3}}  # reference director-gradient curvature, see _reference_director_curvature!
     G₃_elem  :: Vector{Vec{3, T}}   # per-node frame (length n_shape) — updated each reinit!
     T₁_elem  :: Vector{Vec{3, T}}
     T₂_elem  :: Vector{Vec{3, T}}
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
+    frames   :: F  # Nothing, or a NodeFrames used by the cell-based reinit! entry points
 end
 
 Ferrite.getnormal(scv::ShellCellValues, q::Int) = scv.G₃[q]
@@ -54,7 +61,7 @@ Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 @propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_geo)
 
-function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing)
+function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing, frames=nothing)
     n_qp    = length(qr.weights)
     n_shape = getnbasefunctions(ip_shape)
     T       = Float64
@@ -73,7 +80,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
     end
 
     m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
-    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m)}(
+    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m), typeof(frames)}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2, zeros(T, n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
@@ -81,8 +88,27 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
+        fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_shape), fill(zero(Vec{3, T}), n_shape),
-        fill(zero(Vec{3, T}), n_shape), m
+        fill(zero(Vec{3, T}), n_shape), m, frames
+    )
+end
+
+"""
+    Base.copy(scv::ShellCellValues)
+
+An independent `ShellCellValues` sharing the immutable rule/interpolations/frames but
+with its own reinit! buffers (including the MITC data): the threaded-assembly idiom is
+one `copy(scv)` per task.
+"""
+function Base.copy(scv::ShellCellValues)
+    typeof(scv)(
+        scv.qr, scv.ip_geo, scv.ip_shape,
+        copy(scv.N), copy(scv.dNdξ), copy(scv.d2Ndξ2), copy(scv.detJdV),
+        copy(scv.A₁), copy(scv.A₂), copy(scv.A₁₁), copy(scv.A₁₂), copy(scv.A₂₂),
+        copy(scv.A_metric), copy(scv.G₃), copy(scv.T₁), copy(scv.T₂), copy(scv.B),
+        copy(scv.B₀), copy(scv.G₃_elem), copy(scv.T₁_elem), copy(scv.T₂_elem),
+        copy(scv.mitc), scv.frames
     )
 end
 
@@ -143,10 +169,15 @@ quadrature point.
 **Note:**
 For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
 """
-reinit!
+reinit!(::ShellCellValues, x::AbstractVector{<:Vec{3}})
 
-reinit!(scv::ShellCellValues, cell) = reinit!(scv, getcoordinates(cell))
-reinit!(scv::ShellCellValues, cc::CellCache) = reinit!(scv, getcoordinates(cc))
+# Cell-based entry points route through the frames stored at construction (if any),
+# so kernels written as `reinit!(scv, cell)` cannot silently drop NodeFrames.
+reinit!(scv::ShellCellValues, cell) = _reinit_cell!(scv, scv.frames, cell)
+reinit!(scv::ShellCellValues, cc::CellCache) = _reinit_cell!(scv, scv.frames, cc)
+_reinit_cell!(scv::ShellCellValues, ::Nothing, cell) = reinit!(scv, getcoordinates(cell))
+# frames::NodeFrames — untyped because NodeFrames is defined in utils.jl.
+_reinit_cell!(scv::ShellCellValues, frames, cell) = reinit!(scv, getcoordinates(cell), frames, getnodes(cell))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     n_geo = getnbasefunctions(scv.ip_geo)
     for q in eachindex(scv.qr.weights)
@@ -192,7 +223,34 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     for I in 1:n_shape
         scv.G₃_elem[I] = G₃_c; scv.T₁_elem[I] = T₁_c; scv.T₂_elem[I] = T₂_c
     end
+    _reference_director_curvature!(scv)
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
+end
+
+# Reference director-gradient curvature B₀_αβ = ½(A_α·d₀,β + A_β·d₀,α), with
+# d₀ = Σ N_I G₃_elem[I] the initial director field interpolated from the frames the
+# element actually rotates about. The bending measure of the RM kernels is the
+# *change* κ = ½(a_α·d,β + a_β·d,α) − B₀, which vanishes identically at u = 0 for
+# any geometry and any frame choice. Subtracting the patch curvature B instead — the
+# earlier behaviour — leaves a spurious reference bending strain κ(0) = B₀ − B on
+# curved or warped elements: on bilinear panels of a doubly-curved surface the
+# twist part of B persists under refinement, so the error does not converge away.
+# On flat elements with centroid frames B₀ = B = 0 and nothing changes.
+function _reference_director_curvature!(scv::ShellCellValues)
+    n_shape = getnbasefunctions(scv.ip_shape)
+    for q in 1:getnquadpoints(scv)
+        d0_1 = zero(Vec{3, Float64}); d0_2 = zero(Vec{3, Float64})
+        for I in 1:n_shape
+            dN = scv.dNdξ[I, q]
+            d0_1 += dN[1] * scv.G₃_elem[I]
+            d0_2 += dN[2] * scv.G₃_elem[I]
+        end
+        A₁, A₂ = scv.A₁[q], scv.A₂[q]
+        scv.B₀[q] = SymmetricTensor{2, 2, Float64}(
+            (dot(A₁, d0_1), 0.5 * (dot(A₁, d0_2) + dot(A₂, d0_1)), dot(A₂, d0_2))
+        )
+    end
+    return scv
 end
 
 # compute the centroid coordinates for different element topologies

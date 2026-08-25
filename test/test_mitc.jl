@@ -14,9 +14,9 @@
     @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
     @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
 
-    # 2. Explicit residual matches ForwardDiff gradient (no-MITC path, exact to rounding).
-    #    The no-MITC explicit formula is exact; MITC introduces a ~0.03% approximation
-    #    in the shear-force variation (QP-direct δγ instead of MITC-interpolated δγ).
+    # 2. Explicit residual matches the ForwardDiff gradient to rounding on BOTH
+    #    paths: the MITC dispatch varies the tying-interpolated strain and is the
+    #    exact gradient of the energy (measured ≤ 2e-16 relative).
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
@@ -34,7 +34,7 @@
     re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
     re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
     re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
-    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-2
+    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
 
     # Zero state.
     re_ex0 = zeros(n_dof); bending_residuals_RM!(re_ex0, scv_mitc, zeros(n_dof), mat)
@@ -219,8 +219,9 @@ end
     @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
     @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
 
-    # 2. No-MITC explicit residual matches ForwardDiff gradient exactly.
-    #    MITC4 explicit residual agrees to within the MITC-δγ approximation (~1%).
+    # 2. Both explicit residuals match the ForwardDiff gradient to rounding —
+    #    the MITC4 dispatch varies the tying-interpolated strain and is the
+    #    exact gradient of the energy.
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:4
@@ -236,7 +237,7 @@ end
     re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
     re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
     re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
-    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-2
+    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
 
     # Zero state: residual is exactly zero.
     re_ex0 = zeros(n_dof); bending_residuals_RM!(re_ex0, scv_mitc, zeros(n_dof), mat)
@@ -250,7 +251,7 @@ end
         bending_residuals_RM!(re, scv_mitc, u, mat)
         re
     end, u_pert)
-    @test norm(ke_ex4 .- ke_jac4) / norm(ke_jac4) < 1e-3
+    @test norm(ke_ex4 .- ke_jac4) / norm(ke_jac4) < 1e-8
 
     ke_ex40  = zeros(n_dof, n_dof)
     bending_tangent_RM!(ke_ex40, scv_mitc, zeros(n_dof), mat)
@@ -429,4 +430,32 @@ end
             @test errs_mitc[end] < errs_nomitc[end] / 5   # MITC4 at least 5× more accurate at finest mesh
         end
     end
+end
+
+@testset "MITC4 curved (non-planar) element consistency" begin
+    # A non-planar bilinear quad is the curved case MITC4 meets in practice.
+    # Residual and consistent tangent must match the energy gradient/Jacobian
+    # to rounding there too — the tying reference offsets are nonzero on this
+    # geometry, which the flat unit element never exercises.
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ip  = Lagrange{RefQuadrilateral, 1}()
+    qr  = QuadratureRule{RefQuadrilateral}(2)
+    scv = ShellCellValues(qr, ip, ip; mitc=MITC4)
+    Xc  = [Vec{3}((0.0,0.0,0.0)), Vec{3}((1.0,0.0,0.12)), Vec{3}((1.0,1.0,0.0)), Vec{3}((0.0,1.0,0.12))]
+    reinit!(scv, Xc)
+    n_dof = 20
+    Random.seed!(7)
+    u_pert = 1e-2 .* randn(n_dof)
+    re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv, u_pert, mat)
+    re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv, u_pert, mat)
+    re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv, u_pert, mat)
+    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
+    ke_ex = zeros(n_dof, n_dof)
+    bending_tangent_RM!(ke_ex, scv, u_pert, mat)
+    ke_jac = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), n_dof)
+        bending_residuals_RM!(re, scv, u, mat)
+        re
+    end, u_pert)
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-8
 end

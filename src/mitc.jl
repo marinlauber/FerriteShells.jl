@@ -25,7 +25,8 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
     T₁_node :: Vector{Vec{3,T}}
     T₂_node :: Vector{Vec{3,T}}
-    # Reusable scratch for bending_tangent_RM! (overwritten each call; not thread-safe).
+    # Reusable scratch for bending_tangent_RM! (overwritten each call — when threading,
+    # use one `copy(scv)` per task, which also copies this MITC data).
     a₁_tie_s :: Vector{Vec{3,T}}; a₂_tie_s :: Vector{Vec{3,T}}   # length M (tying points)
     d_tie1_s :: Vector{Vec{3,T}}; d_tie2_s :: Vector{Vec{3,T}}
     dd1_s    :: Vector{Vec{3,T}}; dd2_s    :: Vector{Vec{3,T}}   # length N (nodes), Rodrigues ∂d/∂φ
@@ -68,8 +69,12 @@ function MITC{N}(ip_shape::Interpolation, h_tie_1, h_tie_2, ξ_tie_1, ξ_tie_2) 
     )
 end
 
+Base.copy(m::MITC{N,M,T}) where {N,M,T} =
+    MITC{N,M,T}(ntuple(i -> copy(getfield(m, i)), fieldcount(MITC{N,M,T}))...)
+
 # empty MITC is standard
 struct NoMITC <: AbstractMITC end
+Base.copy(m::NoMITC) = m
 
 import Ferrite: reinit!
 
@@ -79,7 +84,7 @@ import Ferrite: reinit!
 Update the MITC data for a cell with cell coordinates `x`.
 The reference geometry at the tying points is recomputed and stored.
 """
-reinit!
+reinit!(::AbstractMITC, ::Interpolation, x, G3, T1, T2)
 
 reinit!(::NoMITC, args...) = nothing
 function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}},

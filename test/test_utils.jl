@@ -354,7 +354,7 @@ end
         # try reinit
         qr  = QuadratureRule{E}(O+1)
         scv = ShellCellValues(qr, ip, ip)
-        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^3); close!(dh)
+        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
         cell = first(CellIterator(dh))
         reinit!(scv, cell, nf)
         node_ids = getnodes(cell)
@@ -367,3 +367,204 @@ end
     end
 end
 
+
+@testset "shell_strains: zero strain at u = 0 on curved MITC elements" begin
+    # The MITC tying strains carry their own reference subtraction; subtracting
+    # the QP-direct Aα·d₀ again produced a spurious reference shear (γ ≈ 0.11)
+    # on curved elements. All three strain measures must vanish identically in
+    # the undeformed configuration, for every element/MITC combination.
+    ref9 = [Vec{2}((x, y)) for (x, y) in
+        ((0.0,0.0),(1.0,0.0),(1.0,1.0),(0.0,1.0),(0.5,0.0),(1.0,0.5),(0.5,1.0),(0.0,0.5),(0.5,0.5))]
+    curved9 = [Vec{3}((p[1], p[2], 0.3 * (p[1]^2 - p[2]^2 / 2))) for p in ref9]
+    nonplanar4 = [Vec{3}((0.0,0.0,0.0)), Vec{3}((1.0,0.0,0.1)), Vec{3}((1.0,1.0,0.0)), Vec{3}((0.0,1.0,0.1))]
+    cases = (
+        (Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3), MITC9, curved9),
+        (Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3), nothing, curved9),
+        (Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2), MITC4, nonplanar4),
+        (Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2), nothing, nonplanar4),
+    )
+    for (ip, qr, mitc, x) in cases
+        scv = ShellCellValues(qr, ip, ip; mitc)
+        reinit!(scv, x)
+        u0 = zeros(5 * getnbasefunctions(ip))
+        for qp in 1:getnquadpoints(scv)
+            E, κ, γ = shell_strains(scv, qp, u0)
+            @test norm(E) ≤ 1.0e-14
+            @test norm(γ) ≤ 1.0e-14
+            # κ is measured against the reference director gradient B₀
+            # (the flip condition of the formulation question this testset
+            # used to pin): the reference configuration of ANY element —
+            # curved, warped or flat, whatever the frame choice — is free of
+            # bending strain. Subtracting the patch curvature B instead left
+            # κ(0) = −B, a reference pre-moment whose twist part persists
+            # under refinement on bilinear panels of doubly-curved surfaces.
+            @test norm(κ) ≤ 1.0e-13
+        end
+    end
+end
+
+@testset "director_field uses the kernel frame" begin
+    # The element kernels rotate about G₃_elem/T₁_elem/T₂_elem; the exported
+    # director_field must reproduce exactly that rotation. On a skewed element
+    # the quadrature-point geometric frame (A₁/‖A₁‖) is a different frame and
+    # was measured to tilt the reported director by ~7°.
+    nodes3 = [Vec{3}((0.0,0.0,0.0)), Vec{3}((1.0,0.4,0.0)), Vec{3}((1.3,1.2,0.0)), Vec{3}((0.2,1.0,0.0))]
+    grid = Grid([Quadrilateral((1,2,3,4))], Node.(nodes3))
+    ip = Lagrange{RefQuadrilateral,1}()
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip)
+    dh = DofHandler(grid)
+    add!(dh, :u, ip^3)
+    add!(dh, :θ, ip^2)
+    close!(dh)
+    φ = (0.3, 0.1)
+    u = zeros(ndofs(dh))
+    for cell in CellIterator(dh)
+        sd = shelldofs(cell)
+        for I in 1:4
+            u[sd[5I-1]] = φ[1]
+            u[sd[5I]] = φ[2]
+        end
+    end
+    d, G3 = director_field(dh, scv, u)
+    # Expected: the kernel's own Rodrigues rotation about the element frame.
+    reinit!(scv, nodes3)
+    θ = sqrt(φ[1]^2 + φ[2]^2)
+    for I in 1:4
+        d_exp = cos(θ) * scv.G₃_elem[I] + sin(θ)/θ * (φ[1] * scv.T₁_elem[I] + φ[2] * scv.T₂_elem[I])
+        @test maximum(abs, Vec{3}(ntuple(r -> d[r, I], 3)) - d_exp) ≤ 1.0e-14
+        @test Vec{3}(ntuple(r -> G3[r, I], 3)) ≈ scv.G₃_elem[I]
+    end
+    # With NodeFrames the same statement holds per node frame.
+    grid2 = shell_grid(generate_grid(Quadrilateral, (2, 1)); map = n -> (n.x[1], n.x[2], 0.2 * n.x[1]^2))
+    nf = NodeFrames(grid2, ip)
+    scv2 = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip)
+    dh2 = DofHandler(grid2)
+    add!(dh2, :u, ip^3)
+    add!(dh2, :θ, ip^2)
+    close!(dh2)
+    u2 = zeros(ndofs(dh2))
+    for cell in CellIterator(dh2)
+        sd = shelldofs(cell)
+        for I in 1:4
+            u2[sd[5I-1]] = φ[1]
+            u2[sd[5I]] = φ[2]
+        end
+    end
+    d2, _ = director_field(dh2, scv2, u2; frames = nf)
+    for nid in 1:Ferrite.getnnodes(grid2)
+        d_exp = cos(θ) * nf.G₃[nid] + sin(θ)/θ * (φ[1] * nf.T₁[nid] + φ[2] * nf.T₂[nid])
+        @test maximum(abs, Vec{3}(ntuple(r -> d2[r, nid], 3)) - d_exp) ≤ 1.0e-13
+    end
+end
+
+@testset "shelldofs hardening and shelldofs!" begin
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)))
+    ip = Lagrange{RefQuadrilateral,1}()
+    # Two-field layout: shelldofs! reproduces shelldofs exactly.
+    dh = DofHandler(grid)
+    add!(dh, :u, ip^3)
+    add!(dh, :θ, ip^2)
+    close!(dh)
+    sd = Int[]
+    for cell in CellIterator(dh)
+        @test shelldofs!(sd, only(dh.subdofhandlers), cell) == shelldofs(cell)
+    end
+    # A third field: shelldofs throws instead of returning uninitialized
+    # memory; shelldofs! keeps working, and its :u/:θ dofs match dof_range.
+    dh3 = DofHandler(grid)
+    add!(dh3, :u, ip^3)
+    add!(dh3, :θ, ip^2)
+    add!(dh3, :p, ip)
+    close!(dh3)
+    sdh3 = only(dh3.subdofhandlers)
+    ru, rθ = Ferrite.dof_range(sdh3, :u), Ferrite.dof_range(sdh3, :θ)
+    for cell in CellIterator(dh3)
+        @test_throws ArgumentError shelldofs(cell)
+        shelldofs!(sd, sdh3, cell)
+        cd = celldofs(cell)
+        for I in 1:4
+            @test sd[5I-4:5I-2] == cd[ru[3I-2:3I]]
+            @test sd[5I-1:5I] == cd[rθ[2I-1:2I]]
+        end
+    end
+    # Field order reversed: the by-name lookup stays correct where positional
+    # assumptions would scatter into :θ.
+    dhr = DofHandler(grid)
+    add!(dhr, :θ, ip^2)
+    add!(dhr, :u, ip^3)
+    close!(dhr)
+    f = zeros(ndofs(dhr))
+    addnodeset!(grid, "corner_pl", x -> norm(x) < 1e-10)
+    apply_pointload!(f, dhr, "corner_pl", Vec{3}((1.0, 2.0, 3.0)))
+    sdhr = only(dhr.subdofhandlers)
+    rθr = Ferrite.dof_range(sdhr, :θ)
+    for cell in CellIterator(dhr)
+        cd = celldofs(cell)
+        @test all(iszero, f[cd[rθr]])   # nothing leaked into the rotations
+    end
+    @test sum(abs, f) ≈ 6.0             # exactly one node loaded with (1,2,3)
+end
+
+@testset "ShellCellValues carries frames" begin
+    # Folded two-quad strip: the shared-edge node frames (area-weighted averages)
+    # differ from either element's centroid frame, so frame routing is observable.
+    nodes = [Node(Vec((0.0, 0.0, 0.0))), Node(Vec((1.0, 0.0, 0.0))),
+             Node(Vec((1.0, 1.0, 0.0))), Node(Vec((0.0, 1.0, 0.0))),
+             Node(Vec((2.0, 0.0, 0.5))), Node(Vec((2.0, 1.0, 0.5)))]
+    cells = [Quadrilateral((1, 2, 3, 4)), Quadrilateral((2, 5, 6, 3))]
+    grid  = Grid(cells, nodes)
+    ip    = Lagrange{RefQuadrilateral, 1}()
+    nf    = NodeFrames(grid, ip)
+    qr    = QuadratureRule{RefQuadrilateral}(2)
+    scv_plain  = ShellCellValues(qr, ip, ip)
+    scv_frames = ShellCellValues(qr, ip, ip; frames = nf)
+    @test scv_frames.frames === nf
+
+    dh = DofHandler(grid)
+    add!(dh, :u, ip^3); add!(dh, :θ, ip^2)
+    close!(dh)
+    for cell in CellIterator(dh)
+        reinit!(scv_frames, cell)          # stored frames applied automatically
+        G3_auto = copy(scv_frames.G₃_elem)
+        reinit!(scv_plain, cell, nf)       # explicit-frames path
+        @test G3_auto == scv_plain.G₃_elem
+        reinit!(scv_plain, cell)           # frameless: centroid frame
+        @test G3_auto != scv_plain.G₃_elem # differs at the shared fold edge
+    end
+end
+
+@testset "copy(::ShellCellValues) independence" begin
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(3),
+                          Lagrange{RefQuadrilateral, 2}(), Lagrange{RefQuadrilateral, 2}();
+                          mitc = MITC9)
+    reinit!(scv, X_Q9_UNIT)
+    scv2 = copy(scv)
+    @test scv2.detJdV == scv.detJdV && scv2.G₃ == scv.G₃
+    @test scv2.mitc.A₁_tie_1 == scv.mitc.A₁_tie_1
+    @test scv2.qr === scv.qr && scv2.N !== scv.N   # shares immutables, owns buffers
+
+    # reinit! on the copy must not touch the original (incl. the MITC tie data)
+    orig_detJ = copy(scv.detJdV)
+    orig_tie  = copy(scv.mitc.A₁_tie_1)
+    reinit!(scv2, [2v for v in X_Q9_UNIT])
+    @test scv.detJdV == orig_detJ && scv.mitc.A₁_tie_1 == orig_tie
+    @test scv2.detJdV ≈ 4 .* orig_detJ
+
+    @test copy(NoMITC()) isa NoMITC
+end
+
+@testset "max_director_tilt" begin
+    grid = generate_grid(Quadrilateral, (2, 1))
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    dh   = DofHandler(grid)
+    add!(dh, :u, ip^3); add!(dh, :θ, ip^2)
+    close!(dh)
+    u = zeros(ndofs(dh))
+    @test max_director_tilt(dh, u) == 0.0
+    sdh  = only(dh.subdofhandlers)
+    rθ   = Ferrite.dof_range(sdh, :θ)
+    dofs = celldofs(dh, 1)
+    u[dofs[rθ[1]]] = 0.3
+    u[dofs[rθ[2]]] = 0.4
+    @test max_director_tilt(dh, u) ≈ 0.5
+end
