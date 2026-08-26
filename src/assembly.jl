@@ -796,15 +796,20 @@ function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     end
 end
 
-# ∂ξ/∂t for the mapping t ∈ [-1,1] → 2D cell reference coord along each facet.
-# Derived from ξ(t) = 0.5*(1-t)*A + 0.5*(1+t)*B (vertices A, B of facet in ref space).
-# RefQuadrilateral vertices: (-1,-1),(1,-1),(1,1),(-1,1); all facets are axis-aligned.
-# RefTriangle vertices: (0,0),(1,0),(0,1); facet 2 (hypotenuse) has mixed direction.
-@inline facet_dxi(::Lagrange{RefQuadrilateral}, f::Int) = f ∈ (1,3) ? Vec{2}((1.0, 0.0)) : Vec{2}((0.0, 1.0))
-@inline facet_dxi(::Lagrange{RefTriangle},      f::Int) =
-    f == 1 ? Vec{2}(( 0.5,  0.0)) :
-    f == 2 ? Vec{2}((-0.5,  0.5)) :
-             Vec{2}(( 0.0, -0.5))
+# ∂ξ/∂t for the mapping t → 2D cell reference coord along facet `f`, where t is the
+# parametrization implicit in `FacetQuadratureRule`: ξ(t) = A + t·(B-A) for the facet's
+# vertex pair (A, B), with t ranging over an interval of length `weight_sum` (any valid
+# quadrature rule integrates a constant exactly, so the rule's own weights sum to that
+# length). Reads (A, B) from Ferrite's `reference_facets`/`reference_coordinates` rather
+# than hardcoding per-shape vertex order — RefQuadrilateral's facets are parametrized
+# over t∈[-1,1] (weight_sum=2) and RefTriangle's over t∈[0,1] (weight_sum=1); dividing
+# by the measured weight_sum makes both cases (and any future RefShape) correct without
+# needing to special-case the convention.
+@inline function facet_dxi(::Interpolation{RefShape}, f::Int, weight_sum::Float64) where RefShape
+    a, b = Ferrite.reference_facets(RefShape)[f]
+    coords = Ferrite.reference_coordinates(Lagrange{RefShape,1}())
+    return (coords[b] - coords[a]) / weight_sum
+end
 
 """
     assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
@@ -827,7 +832,7 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
         x        = getcoordinates(fc)
         facet_nr = fc.current_facet_id
         qr_f     = fqr.facet_rules[facet_nr]
-        dxi      = facet_dxi(ip, facet_nr)   # ∂ξ/∂t in reference coords
+        dxi      = facet_dxi(ip, facet_nr, sum(qr_f.weights))   # ∂ξ/∂t in reference coords
         for (ξ, w) in zip(qr_f.points, qr_f.weights)
             xp = zero(Vec{3,Float64})
             Jt = zero(Vec{3,Float64})  # physical tangent: J * dxi

@@ -334,6 +334,33 @@ end
     @test u_tip3[3] > 0.0   # positive z-deflection under +z traction
 end
 
+@testset "assemble_traction! regression: RefTriangle facets" begin
+    # Regression for a bug where `facet_dxi` for RefTriangle hardcoded the wrong vertex
+    # order and the wrong facet parametrization scale (t∈[-1,1], like RefQuadrilateral,
+    # instead of Ferrite's actual t∈[0,1] for triangle facets). This silently under-
+    # integrated boundary tractions on any Triangle/QuadraticTriangle mesh (Cook's
+    # membrane tip deflection converged to ~76% of the correct value). Check that the
+    # total applied force always equals traction × boundary length, regardless of how
+    # the boundary is triangulated or which local facet number lands on the boundary.
+    corners = [Vec{2}((0.0, 0.0)), Vec{2}((4.0, 1.0)), Vec{2}((4.0, 3.0)), Vec{2}((0.0, 2.0))]
+    t_y = Vec{3}((0.0, 1.0, 0.0))   # right edge (from (4,1) to (4,3)) has length 2
+
+    for (primitive, order, refshape) in ((Triangle, 1, RefTriangle), (QuadraticTriangle, 2, RefTriangle))
+        for n in (1, 2, 3)
+            grid = shell_grid(generate_grid(primitive, (2n, n), corners))
+            addfacetset!(grid, "traction", x -> isapprox(x[1], 4.0, atol=1e-10))
+
+            ip  = Lagrange{refshape, order}()
+            fqr = FacetQuadratureRule{refshape}(order + 1)
+            dh  = DofHandler(grid); add!(dh, :u, ip^3); close!(dh)
+            f   = zeros(ndofs(dh))
+            assemble_traction!(f, dh, getfacetset(grid, "traction"), ip, fqr, t_y)
+
+            @test sum(f) ≈ 2.0 atol=1e-10
+        end
+    end
+end
+
 @testset "utils.jl" begin
     # test embeding
     Cαβ = SymmetricTensor{2,2}(rand(3))
