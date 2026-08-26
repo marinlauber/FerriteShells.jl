@@ -418,3 +418,81 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFram
     reference_director_curvature!(scv)   # B₀ follows the frames actually in use
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
+
+"""
+    add_director_symmetry!(ch::ConstraintHandler, dh::DofHandler, nf::NodeFrames,
+                           nodeset_name::String, n::Vec{3}; atol=0.25)
+
+Constrain the director to stay in the symmetry plane with unit normal `n` at every node
+of `nodeset_name`, i.e. ``\\mathbf{d}\\cdot\\mathbf{n} = 0``.
+
+With the Rodrigues director ``\\mathbf{d} = \\cos\\theta\\,\\mathbf{G}_3 +
+\\mathrm{sinc}\\,\\theta\\,(\\varphi_1\\mathbf{T}_1 + \\varphi_2\\mathbf{T}_2)`` and
+``\\mathbf{G}_3\\cdot\\mathbf{n} = 0`` — which holds exactly on a symmetry plane — this is
+the *exact* linear constraint
+
+```math
+\\varphi_1 (\\mathbf{T}_1\\cdot\\mathbf{n}) + \\varphi_2 (\\mathbf{T}_2\\cdot\\mathbf{n}) = 0
+```
+
+added as a Ferrite `AffineConstraint` on the better-conditioned of the two components.
+
+**Why not just fix ``\\varphi_2``:** ``\\varphi_1,\\varphi_2`` are components in the nodal
+frame, and that frame is built from `G₃` by a heuristic (`ref = |G₃_x| < 0.9 ? ê_x : ê_y`)
+that *flips* as the normal sweeps past the threshold. `Dirichlet(:θ, set, x -> 0.0, [2])`
+therefore means different physical constraints on different parts of the same boundary —
+on a hemisphere the frame flips right at the equator and the constraint silently becomes
+a spurious clamp. No continuous tangent frame exists on a closed curved surface, so this
+cannot be fixed by a better heuristic; the constraint has to be written frame-independently,
+which is what this function does.
+
+`nf` **must be the same `NodeFrames` the assembly `reinit!`s with** — the constraint is
+expressed in the nodal frame, so with per-element (centroid) frames the `φ` DOFs at a node
+have no single meaning and the constraint is ill-posed.
+
+A node lying on two symmetry planes needs ``\\mathbf{d} = \\mathbf{G}_3``, i.e.
+``\\varphi_1 = \\varphi_2 = 0``; add that as an ordinary `Dirichlet` on `:θ` and keep the
+node out of the sets passed here.
+"""
+function add_director_symmetry!(ch::ConstraintHandler, dh::DofHandler, nf::NodeFrames,
+                                nodeset_name::String, n::Vec{3}; atol = 0.25)
+    n̂ = n / norm(n)
+    dofmap = _theta_dofmap(dh)
+    for nid in sort!(collect(getnodeset(dh.grid, nodeset_name)))
+        haskey(dofmap, nid) ||
+            throw(ArgumentError("node $nid carries no :θ field; is it in the shell subdomain?"))
+        G₃ = nf.G₃[nid]
+        abs(G₃ ⋅ n̂) ≤ atol || throw(ArgumentError(
+            "node $nid: G₃·n = $(round(G₃ ⋅ n̂; digits=4)) exceeds atol = $atol, so `n` is not a " *
+            "symmetry-plane normal there (a symmetry plane contains the shell normal). Note the " *
+            "nodal normal is a one-sided area average on a boundary and tilts O(h) out of the " *
+            "plane, so a modest tilt is expected here; raise `atol` to accept more."))
+        a = nf.T₁[nid] ⋅ n̂
+        b = nf.T₂[nid] ⋅ n̂
+        d₁, d₂ = dofmap[nid]
+        # (T₁,T₂,G₃) is orthonormal and n̂ ⊥ G₃, so a² + b² = 1: never both small.
+        if abs(a) ≥ abs(b)
+            add!(ch, Ferrite.AffineConstraint(d₁, [d₂ => -b / a], 0.0))
+        else
+            add!(ch, Ferrite.AffineConstraint(d₂, [d₁ => -a / b], 0.0))
+        end
+    end
+    return ch
+end
+
+# node id -> (φ₁ dof, φ₂ dof), read by name so any field order/extra fields are fine
+function _theta_dofmap(dh::DofHandler)
+    dofmap = Dict{Int, Tuple{Int, Int}}()
+    for sdh in dh.subdofhandlers
+        :θ in Ferrite.getfieldnames(sdh) || continue
+        rθ = Ferrite.dof_range(sdh, :θ)
+        for cell in CellIterator(sdh)
+            cd = celldofs(cell)
+            for (I, nid) in enumerate(getnodes(cell))
+                dofmap[nid] = (cd[rθ[2I-1]], cd[rθ[2I]])
+            end
+        end
+    end
+    dofmap
+end
+
