@@ -75,7 +75,10 @@ end
     d₀
 end
 
-# Bending curvature change κ_αβ = ½(a_α·d,β + a_β·d,α) - B_αβ.
+# Bending curvature change κ_αβ = ½(a_α·d,β + a_β·d,α) − B₀_αβ, with B₀ the
+# reference director-gradient curvature (see reference_director_curvature!) —
+# NOT the patch curvature B, which would leave a mesh-persistent reference
+# bending strain on curved or warped elements.
 @inline function curvature_tensor(a₁, a₂, d₁, d₂, B)
     κ₁₁ = dot(a₁, d₁) - B[1,1]
     κ₁₂ = 0.5*(dot(a₁, d₂) + dot(a₂, d₁)) - B[1,2]
@@ -315,7 +318,7 @@ function energy_RM(u_flat, scv::ShellCellValues, mat)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
@@ -413,7 +416,7 @@ function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T},
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)
@@ -479,7 +482,7 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, NN)
         d, d₁, d₂ = director_field(scv, qp, u_e, NN)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, NN)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
@@ -593,7 +596,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, mitc)  # already referenced (MITC)
         d₀  = reference_director(scv, qp, n_nodes)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
@@ -710,7 +713,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+        κ   = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
         γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
         d₀  = reference_director(scv, qp, n_nodes)
         γ₁ -= dot(scv.A₁[qp], d₀); γ₂ -= dot(scv.A₂[qp], d₀)

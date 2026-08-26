@@ -350,7 +350,7 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
 
-    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
@@ -452,5 +452,6 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFram
         scv.T₁_elem[I] = nf.T₁[node_ids[I]]
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
     end
+    reference_director_curvature!(scv)   # B₀ follows the frames actually in use
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end

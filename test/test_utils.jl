@@ -465,3 +465,72 @@ end
     @test_throws ArgumentError shelldofs(first(CellIterator(dh_bad)))
     @test_throws ArgumentError shelldofs!(Int[], only(dh_bad.subdofhandlers), first(CellIterator(dh_bad)))
 end
+
+@testset "reference director curvature B₀" begin
+    # The bending measure is κ = ½(a_α·d,β + a_β·d,α) − B₀, with B₀ built from the
+    # *interpolated initial director* d₀ = Σ N_I G₃_elem[I] — the field the kernels
+    # rotate — not from the geometric patch curvature B = A_{α,β}·G₃. The two coincide
+    # in the continuum but not discretely, so subtracting B leaves a reference bending
+    # strain κ(0) = B₀ − B ≠ 0 on curved or warped elements: a pre-moment in the
+    # undeformed configuration. On bilinear panels of a doubly-curved surface the twist
+    # part of that error persists under refinement, so it never converges away.
+    ref9 = [Vec{2}((x, y)) for (x, y) in
+        ((0.0,0.0),(1.0,0.0),(1.0,1.0),(0.0,1.0),(0.5,0.0),(1.0,0.5),(0.5,1.0),(0.0,0.5),(0.5,0.5))]
+    curved9    = [Vec{3}((p[1], p[2], 0.3 * (p[1]^2 - p[2]^2 / 2))) for p in ref9]
+    nonplanar4 = [Vec{3}((0.0,0.0,0.0)), Vec{3}((1.0,0.0,0.1)), Vec{3}((1.0,1.0,0.0)), Vec{3}((0.0,1.0,0.1))]
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+
+    cases = ((Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3), MITC9,   curved9),
+             (Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3), nothing, curved9),
+             (Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2), MITC4,   nonplanar4),
+             (Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2), nothing, nonplanar4))
+    for (ip, qr, mitc, x) in cases
+        scv = ShellCellValues(qr, ip, ip; mitc)
+        reinit!(scv, x)
+        n_dof = 5 * getnbasefunctions(ip)
+        u0 = zeros(n_dof)
+        for qp in 1:getnquadpoints(scv)
+            E, κ, _ = shell_strains(scv, qp, u0)
+            @test norm(E) ≤ 1.0e-14
+            @test norm(κ) ≤ 1.0e-13      # was ‖B₀ − B‖ ≠ 0 when B was subtracted
+        end
+        # ... and the user-visible consequence: no internal bending force at u = 0
+        re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+        @test norm(re) ≤ 1.0e-11      # was O(0.1) on these geometries
+        ke = zeros(n_dof, n_dof); bending_tangent_RM!(ke, scv, u0, mat)
+        @test norm(ke - ke') ≤ 1.0e-10 * norm(ke)
+    end
+
+    # The same holds through the NodeFrames entry point, on a mesh where the per-node
+    # frames genuinely differ from each element's centroid frame.
+    grid = shell_grid(generate_grid(Quadrilateral, (3, 3)); map = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2))
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    nf   = NodeFrames(grid, ip)
+    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    u0   = zeros(20)
+    for mitc in (MITC4, nothing)
+        scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip; mitc)
+        for cell in CellIterator(dh)
+            reinit!(scv, cell, nf)
+            for qp in 1:getnquadpoints(scv)
+                _, κ, _ = shell_strains(scv, qp, u0)
+                @test norm(κ) ≤ 1.0e-13
+            end
+            # The bending force vanishes with the frameless kernels; the MITC tying
+            # strains carry a *separate*, pre-existing reference defect with per-node
+            # frames (the tying reference normalizes Σ N_I G₃_I while the director at
+            # u = 0 does not), so only the non-MITC residual is asserted here.
+            if mitc === nothing
+                re = zeros(20); bending_residuals_RM!(re, scv, u0, mat)
+                @test norm(re) ≤ 1.0e-11
+            end
+        end
+    end
+
+    # Flat elements with centroid frames are untouched: B₀ = B = 0 exactly.
+    scv_flat = ShellCellValues(QuadratureRule{RefQuadrilateral}(3),
+                               Lagrange{RefQuadrilateral,2}(), Lagrange{RefQuadrilateral,2}())
+    reinit!(scv_flat, [Vec{3}((p[1], p[2], 0.0)) for p in ref9])
+    @test all(iszero, scv_flat.B₀)
+    @test all(iszero, scv_flat.B)
+end

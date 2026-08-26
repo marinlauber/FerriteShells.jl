@@ -46,13 +46,16 @@ g_{33} &= 1.
 The Green-Lagrange strain components follow from ``e_{ij}=\tfrac{1}{2}(g_{ij}-G_{ij})``:
 ```math
 \begin{split}
-e_{\alpha\beta} &= \underbrace{\frac{1}{2}(a_{\alpha\beta} - A_{\alpha\beta})}_{\gamma_{\alpha\beta}} + \xi^3\underbrace{\frac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) - B_{\alpha\beta}}_{\kappa_{\alpha\beta}}\\
+e_{\alpha\beta} &= \underbrace{\frac{1}{2}(a_{\alpha\beta} - A_{\alpha\beta})}_{\gamma_{\alpha\beta}} + \xi^3\underbrace{\frac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) - B^0_{\alpha\beta}}_{\kappa_{\alpha\beta}}\\
 e_{\alpha3} &= e_{3\alpha} = \frac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d} - \mathbf{A}_\alpha\cdot\mathbf{G}_3) = \frac{1}{2}\gamma_\alpha\\
 e_{33} &= 0.
 \end{split}
 ```
 
 where ``\gamma_{\alpha\beta}`` is the membrane (in-plane) strain, ``\kappa_{\alpha\beta}`` the bending curvature change, and ``\gamma_\alpha = \mathbf{a}_\alpha\cdot\mathbf{d} - \mathbf{A}_\alpha\cdot\mathbf{G}_3`` the transverse shear strain. In the reference configuration (``\mathbf{d}=\mathbf{G}_3``, ``\mathbf{a}_\alpha=\mathbf{A}_\alpha``), all strains vanish identically.
+
+!!! note "The reference curvature is the *director-gradient* curvature"
+    ``B^0_{\alpha\beta} = \tfrac{1}{2}(\mathbf{A}_\alpha\cdot\mathbf{d}^0_{,\beta} + \mathbf{A}_\beta\cdot\mathbf{d}^0_{,\alpha})`` is built from the *interpolated initial director* ``\mathbf{d}^0 = \sum_I N_I \mathbf{G}_3^I`` — the same field the kernels rotate — not from the geometric patch curvature ``B_{\alpha\beta} = \mathbf{A}_{\alpha,\beta}\cdot\mathbf{G}_3``. In the continuum the two coincide (``\mathbf{d}^0 = \mathbf{G}_3``); discretely they do not, and subtracting ``B`` would leave a spurious reference bending strain ``\kappa(0) = B^0 - B`` on curved or warped elements. That error *does not converge away*: with per-node frames ([`NodeFrames`](@ref)) the Scordelis-Lo roof stalls at 9.3% error under refinement, and with centroid frames the answer drifts past the reference rather than settling on it. With ``B^0`` the reference configuration of every element is exactly bending-free, for the centroid frames and for `NodeFrames` alike.
 
 !!! note
     Because ``g_{\alpha3}`` is independent of ``\xi^3``, the shear strain ``e_{3\alpha}`` is **constant through the thickness**. This is the Reissner-Mindlin assumption: the director rotates rigidly, so shear does not vary. In 3D elasticity the shear stress is parabolic; the shear correction factor ``\kappa_s=5/6`` compensates by matching the constant-strain energy to the parabolic-distribution energy of a rectangular cross-section. The Kirchhoff constraint ``e_{3\alpha}=0`` is recovered in the limit ``\mathbf{d}\to\hat{\mathbf{a}}_3``.
@@ -92,7 +95,7 @@ Q^\alpha = \kappa_s\, G\, t\, A^{\alpha\beta}\gamma_\beta,
 with ``\mathbb{C}^{\alpha\beta\gamma\delta}`` the (thickness-independent) contravariant plane-stress elasticity tensor, ``G = E/(2(1+\nu))`` the shear modulus, and ``\kappa_s = 5/6`` the shear correction factor. The membrane, bending, and shear resultants carry the through-thickness factors ``t``, ``t^3/12``, and ``t`` respectively, and the transverse shear index is raised with the **reference** contravariant metric ``A^{\alpha\beta} = (A_{\alpha\beta})^{-1}``. The strain measures are (using the Naghdi form with current base vectors ``\mathbf{a}_\alpha``)
 ```math
 \gamma_{\alpha\beta} = \tfrac{1}{2}(a_{\alpha\beta} - A_{\alpha\beta}), \quad
-\kappa_{\alpha\beta} = \tfrac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) - B_{\alpha\beta}, \quad
+\kappa_{\alpha\beta} = \tfrac{1}{2}(\mathbf{a}_\alpha\cdot\mathbf{d}_{,\beta} + \mathbf{a}_\beta\cdot\mathbf{d}_{,\alpha}) - B^0_{\alpha\beta}, \quad
 \gamma_\alpha = \mathbf{a}_\alpha\cdot\mathbf{d} - \mathbf{A}_\alpha\cdot\mathbf{G}_3.
 ```
 
