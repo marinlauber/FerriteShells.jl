@@ -8,7 +8,7 @@ Eliminates transverse shear locking by evaluating the covariant shear strains ``
 tying points and interpolating back to Gauss points.
 
 Static fields (`N_tie`, `dNdξ_tie`, `h_tie`) are precomputed once at construction.
-Mutable fields (`A*_tie`, `G₃_tie`, `T*_tie`) are updated each [`reinit!`](@ref) call.
+Mutable fields (`A*_tie`, `d₀_tie`, `T*_tie`) are updated each [`reinit!`](@ref) call.
 """
 struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     N_tie_1    :: Matrix{T}          # shape functions at γ₁ tying pts  [n_shape × 6]
@@ -18,9 +18,11 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     h_tie_1    :: Matrix{T}          # MITC interp weights for γ₁  [n_qp × 6]
     h_tie_2    :: Matrix{T}          # MITC interp weights for γ₂  [n_qp × 6]
     A₁_tie_1 :: Vector{Vec{3,T}}; A₂_tie_1 :: Vector{Vec{3,T}}  # ref geometry at γ₁ tying pts
-    G₃_tie_1 :: Vector{Vec{3,T}}; T₁_tie_1 :: Vector{Vec{3,T}}; T₂_tie_1 :: Vector{Vec{3,T}}
+    d₀_tie_1 :: Vector{Vec{3,T}}   # reference director Σ N_I(ξ_k) G₃_node[I] — NOT normalized
+    T₁_tie_1 :: Vector{Vec{3,T}}; T₂_tie_1 :: Vector{Vec{3,T}}
     A₁_tie_2 :: Vector{Vec{3,T}}; A₂_tie_2 :: Vector{Vec{3,T}}  # ref geometry at γ₂ tying pts
-    G₃_tie_2 :: Vector{Vec{3,T}}; T₁_tie_2 :: Vector{Vec{3,T}}; T₂_tie_2 :: Vector{Vec{3,T}}
+    d₀_tie_2 :: Vector{Vec{3,T}}
+    T₁_tie_2 :: Vector{Vec{3,T}}; T₂_tie_2 :: Vector{Vec{3,T}}
     ξ_tie_1::Vector{Vec{2,T}};  ξ_tie_2::Vector{Vec{2,T}} # local coorindates of the tying points
     G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
     T₁_node :: Vector{Vec{3,T}}
@@ -91,31 +93,49 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
         mitc.T₂_node[I] = T₂_nodes[I]
     end
     for (k, ξ_k) in enumerate(mitc.ξ_tie_1)
-        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
+        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
         for i in 1:n_geo
             dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-            G₃_avg += Ferrite.reference_shape_value(ip_geo, ξ_k, i) * G₃_nodes[i]
         end
-        G₃_k = G₃_avg / norm(G₃_avg)
-        ref = abs(G₃_k[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
-        t₁ = ref - (ref ⋅ G₃_k) * G₃_k; T₁_k = t₁ / norm(t₁); T₂_k = G₃_k × T₁_k
+        d₀_k = _tying_reference_director(mitc.N_tie_1, k, G₃_nodes, Val(N), T)
+        T₁_k, T₂_k = _tying_tangent_frame(d₀_k, T)
         mitc.A₁_tie_1[k] = A₁; mitc.A₂_tie_1[k] = A₂
-        mitc.G₃_tie_1[k] = G₃_k; mitc.T₁_tie_1[k] = T₁_k; mitc.T₂_tie_1[k] = T₂_k
+        mitc.d₀_tie_1[k] = d₀_k; mitc.T₁_tie_1[k] = T₁_k; mitc.T₂_tie_1[k] = T₂_k
     end
     for (k, ξ_k) in enumerate(mitc.ξ_tie_2)
-        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
+        A₁ = zero(Vec{3,T}); A₂ = zero(Vec{3,T})
         for i in 1:n_geo
             dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-            G₃_avg += Ferrite.reference_shape_value(ip_geo, ξ_k, i) * G₃_nodes[i]
         end
-        G₃_k = G₃_avg / norm(G₃_avg)
-        ref = abs(G₃_k[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
-        t₁ = ref - (ref ⋅ G₃_k) * G₃_k; T₁_k = t₁ / norm(t₁); T₂_k = G₃_k × T₁_k
+        d₀_k = _tying_reference_director(mitc.N_tie_2, k, G₃_nodes, Val(N), T)
+        T₁_k, T₂_k = _tying_tangent_frame(d₀_k, T)
         mitc.A₁_tie_2[k] = A₁; mitc.A₂_tie_2[k] = A₂
-        mitc.G₃_tie_2[k] = G₃_k; mitc.T₁_tie_2[k] = T₁_k; mitc.T₂_tie_2[k] = T₂_k
+        mitc.d₀_tie_2[k] = d₀_k; mitc.T₁_tie_2[k] = T₁_k; mitc.T₂_tie_2[k] = T₂_k
     end
+end
+
+# Reference director at tying point k: the *shape* interpolation of the nodal frames,
+# left un-normalized — exactly the field `tying_shear_strains` builds at u = 0. Using
+# the normalized director here (the earlier behaviour) leaves a reference shear
+# γ_α(0) = (A_α·d₀)(1 − 1/‖d₀‖) at every tying point, nonzero whenever the nodal frames
+# are not all parallel, i.e. on any curved element driven with `NodeFrames`. This is the
+# same rule `reference_director` follows for the QP-direct (NoMITC) path.
+@inline function _tying_reference_director(N_tie, k, G₃_nodes, ::Val{N}, ::Type{T}) where {N,T}
+    d₀ = zero(Vec{3,T})
+    for I in 1:N
+        d₀ += N_tie[I, k] * G₃_nodes[I]
+    end
+    d₀
+end
+
+@inline function _tying_tangent_frame(d₀, ::Type{T}) where T
+    G₃ = d₀ / norm(d₀)
+    ref = abs(G₃[1]) < T(0.9) ? Vec{3,T}((1.,0.,0.)) : Vec{3,T}((0.,1.,0.))
+    t₁ = ref - (ref ⋅ G₃) * G₃
+    T₁ = t₁ / norm(t₁)
+    T₁, G₃ × T₁
 end
 
 
@@ -141,7 +161,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie_1[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
-        dot(mitc.A₁_tie_1[k] + Δa₁, d_k) - dot(mitc.A₁_tie_1[k], mitc.G₃_tie_1[k])
+        dot(mitc.A₁_tie_1[k] + Δa₁, d_k) - dot(mitc.A₁_tie_1[k], mitc.d₀_tie_1[k])
     end
     γ₂_k = ntuple(Val(M)) do k
         Δa₂ = zero(Vec{3,T}); d_k = zero(Vec{3,T})
@@ -153,7 +173,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie_2[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
-        dot(mitc.A₂_tie_2[k] + Δa₂, d_k) - dot(mitc.A₂_tie_2[k], mitc.G₃_tie_2[k])
+        dot(mitc.A₂_tie_2[k] + Δa₂, d_k) - dot(mitc.A₂_tie_2[k], mitc.d₀_tie_2[k])
     end
     γ₁_k, γ₂_k
 end

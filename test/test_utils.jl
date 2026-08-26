@@ -445,14 +445,8 @@ end
                 _, κ, _ = shell_strains(scv, qp, u0)
                 @test norm(κ) ≤ 1.0e-13
             end
-            # The bending force vanishes with the frameless kernels; the MITC tying
-            # strains carry a *separate*, pre-existing reference defect with per-node
-            # frames (the tying reference normalizes Σ N_I G₃_I while the director at
-            # u = 0 does not), so only the non-MITC residual is asserted here.
-            if mitc === nothing
-                re = zeros(20); bending_residuals_RM!(re, scv, u0, mat)
-                @test norm(re) ≤ 1.0e-11
-            end
+            re = zeros(20); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
         end
     end
 
