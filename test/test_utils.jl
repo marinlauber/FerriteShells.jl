@@ -472,8 +472,7 @@ end
     # rotate — not from the geometric patch curvature B = A_{α,β}·G₃. The two coincide
     # in the continuum but not discretely, so subtracting B leaves a reference bending
     # strain κ(0) = B₀ − B ≠ 0 on curved or warped elements: a pre-moment in the
-    # undeformed configuration. On bilinear panels of a doubly-curved surface the twist
-    # part of that error persists under refinement, so it never converges away.
+    # undeformed configuration.
     ref9 = [Vec{2}((x, y)) for (x, y) in
         ((0.0,0.0),(1.0,0.0),(1.0,1.0),(0.0,1.0),(0.5,0.0),(1.0,0.5),(0.5,1.0),(0.0,0.5),(0.5,0.5))]
     curved9    = [Vec{3}((p[1], p[2], 0.3 * (p[1]^2 - p[2]^2 / 2))) for p in ref9]
@@ -527,4 +526,30 @@ end
     reinit!(scv_flat, [Vec{3}((p[1], p[2], 0.0)) for p in ref9])
     @test all(iszero, scv_flat.B₀)
     @test all(iszero, scv_flat.B)
+end
+
+@testset "shell_strains shear reference" begin
+    # The MITC tying strains already subtract their own per-tying-point reference, so
+    # the interpolated γ is measured from the reference state; subtracting dot(A_α, d₀)
+    # on top of that double-counts. Zero on flat elements (A_α ⟂ d₀), a spurious O(0.1)
+    # reference shear on curved ones. The assembly kernels dispatch through
+    # `reference_shear_offset`; shell_strains must do the same or it reports strains
+    # that disagree with the ones the residual is built from.
+    ip   = Lagrange{RefQuadrilateral, 2}()
+    qr   = QuadratureRule{RefQuadrilateral}(3)
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2));
+                      map = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2))
+    dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    nf = NodeFrames(grid, ip)
+    u0 = zeros(5 * getnbasefunctions(ip))
+    for mitc in (MITC9, nothing), use_nf in (false, true)
+        scv = ShellCellValues(qr, ip, ip; mitc)
+        for cell in CellIterator(dh)
+            use_nf ? reinit!(scv, cell, nf) : reinit!(scv, cell)
+            for qp in 1:getnquadpoints(scv)
+                _, _, γ = shell_strains(scv, qp, u0)
+                @test norm(γ) ≤ 1.0e-13   # was ≈ 0.09 for MITC9 on this geometry
+            end
+        end
+    end
 end
