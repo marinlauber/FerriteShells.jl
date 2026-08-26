@@ -350,13 +350,13 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
 
-    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
     d₀  = reference_director(scv, qp, n_nodes)
-    γ₁ -= dot(scv.A₁[qp], d₀)
-    γ₂ -= dot(scv.A₂[qp], d₀)
+    r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+    γ₁ -= r₁; γ₂ -= r₂
 
     return E, κ, Vec{2,T}((γ₁, γ₂))
 end
@@ -446,11 +446,19 @@ reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinate
 reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
     reinit!(scv, x)
-    n_geo = getnbasefunctions(scv.ip_geo)
-    for I in 1:n_geo
+    # The frames live on `ip_shape` nodes (that is how `G₃_elem` is sized and how
+    # `reference_director_curvature!` reads them), but `nf` is indexed by grid node id.
+    # The two only line up when every shape node is a grid node.
+    n_shape = getnbasefunctions(scv.ip_shape)
+    length(node_ids) ≥ n_shape || throw(ArgumentError(
+        "NodeFrames needs one frame per shape node, but the cell carries $(length(node_ids)) " *
+        "nodes for $n_shape shape functions. Use an `ip_shape` whose nodes are grid nodes " *
+        "(e.g. `ip_geo == ip_shape`), or call `reinit!(scv, x)` for centroid frames."))
+    for I in 1:n_shape
         scv.G₃_elem[I] = nf.G₃[node_ids[I]]
         scv.T₁_elem[I] = nf.T₁[node_ids[I]]
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
     end
+    reference_director_curvature!(scv)   # B₀ follows the frames actually in use
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
