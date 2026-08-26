@@ -183,12 +183,12 @@ end
 @inline function bending_kl_qp_energy(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
                                        κ, A_metric, A₁, A₂, G₃) where T
     det_A = det(A_metric)
-    Jinv  = inv(_J_ref(A₁, A₂, G₃))
-    ξ3s, w3s = _gauss3_thickness(mat.thickness)
-    W_ms = _W_phys(mat, c_ms, det_A, Jinv)
+    Jinv  = inv(J_ref(A₁, A₂, G₃))
+    ξ3s, w3s = gauss3_thickness(mat.thickness)
+    W_ms = W_phys(mat, c_ms, det_A, Jinv)
     W = zero(T)
     for (ξ3, w3) in zip(ξ3s, w3s)
-        W += _W_phys(mat, c_ms + 2*ξ3*κ, det_A, Jinv) * w3
+        W += W_phys(mat, c_ms + 2*ξ3*κ, det_A, Jinv) * w3
     end
     return W - mat.thickness * W_ms
 end
@@ -290,12 +290,12 @@ end
 @inline function rm_qp_energy(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
                               κ, γ₁, γ₂, A_metric, A₁, A₂, G₃) where T
     det_A = det(A_metric)
-    Jinv  = inv(_J_ref(A₁, A₂, G₃))
-    ξ3s, w3s = _gauss3_thickness(mat.thickness)
+    Jinv  = inv(J_ref(A₁, A₂, G₃))
+    ξ3s, w3s = gauss3_thickness(mat.thickness)
     W = zero(T)
     for (ξ3, w3) in zip(ξ3s, w3s)
         c_ξ = c_ms + 2*ξ3*κ
-        W  += _W_phys(mat, c_ξ, γ₁, γ₂, det_A, Jinv) * w3
+        W  += W_phys(mat, c_ξ, γ₁, γ₂, det_A, Jinv) * w3
     end
     return W
 end
@@ -388,7 +388,7 @@ function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
 end # 19.969 μs (0 allocations: 0 bytes) on a 45x45 matrix (50x speedup)
 
 # 3-point Gauss-Legendre on [-t/2, t/2]: exact for polynomials up to degree 5 in ξ₃.
-@inline function _gauss3_thickness(t)
+@inline function gauss3_thickness(t)
     h = t / 2; r = sqrt(3.0/5.0)
     return (-h*r, 0.0, h*r), (5.0/9.0*h, 8.0/9.0*h, 5.0/9.0*h)
 end
