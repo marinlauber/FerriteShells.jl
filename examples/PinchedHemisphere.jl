@@ -89,7 +89,8 @@ apply!(u_sol, ch)   # recover the affine-constrained φ DOFs
 # extract solution at point
 ph     = PointEvalHandler(grid, [grid.nodes[first(grid.nodesets["load_A"])].x])
 u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
-@show u_eval
+println("FerriteShell.jl: ", round(u_eval[1],digits=4))
+println("reference      : -0.0924")
 # save
 VTKGridFile("pinched_hemisphere", dh) do vtk
     write_solution(vtk, dh, u_sol)
