@@ -553,3 +553,24 @@ end
         end
     end
 end
+
+@testset "NodeFrames reinit! requires a frame per shape node" begin
+    # `nf` is indexed by grid node id but the frames are consumed on `ip_shape` nodes,
+    # so the two only line up when every shape node is a grid node. Driving the copy
+    # loop by `ip_geo` instead either overran `G₃_elem` or silently left the tail of it
+    # at the centroid frame.
+    ip1  = Lagrange{RefQuadrilateral, 1}()
+    ip2  = Lagrange{RefQuadrilateral, 2}()
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)); map = n -> (n.x[1], n.x[2], 0.2 * n.x[1]^2))
+    nf   = NodeFrames(grid, ip1)
+    cell = first(CellIterator(grid))
+    x, ids = getcoordinates(cell), collect(getnodes(cell))
+
+    scv_mixed = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip2)
+    @test_throws ArgumentError reinit!(scv_mixed, x, nf, ids)
+
+    # the matching case still works and writes every frame
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip1)
+    reinit!(scv, x, nf, ids)
+    @test all(I -> scv.G₃_elem[I] ≈ nf.G₃[ids[I]], 1:getnbasefunctions(ip1))
+end

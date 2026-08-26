@@ -446,8 +446,15 @@ reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinate
 reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
     reinit!(scv, x)
-    n_geo = getnbasefunctions(scv.ip_geo)
-    for I in 1:n_geo
+    # The frames live on `ip_shape` nodes (that is how `G₃_elem` is sized and how
+    # `reference_director_curvature!` reads them), but `nf` is indexed by grid node id.
+    # The two only line up when every shape node is a grid node.
+    n_shape = getnbasefunctions(scv.ip_shape)
+    length(node_ids) ≥ n_shape || throw(ArgumentError(
+        "NodeFrames needs one frame per shape node, but the cell carries $(length(node_ids)) " *
+        "nodes for $n_shape shape functions. Use an `ip_shape` whose nodes are grid nodes " *
+        "(e.g. `ip_geo == ip_shape`), or call `reinit!(scv, x)` for centroid frames."))
+    for I in 1:n_shape
         scv.G₃_elem[I] = nf.G₃[node_ids[I]]
         scv.T₁_elem[I] = nf.T₁[node_ids[I]]
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
