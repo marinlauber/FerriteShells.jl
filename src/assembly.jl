@@ -796,6 +796,26 @@ function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     end
 end
 
+# Local positions of the three displacement components of node `I` within a cell's dof
+# vector, read from the SubDofHandler's own `dof_range(:u)` rather than assumed to sit at
+# `3I-2:3I`. That assumption holds only when `:u` is the first field; it silently writes
+# into the wrong dofs when the fields are added in another order, when the DofHandler
+# carries an extra field, or for the single-field interleaved `:u` as `ip^5` layout.
+@inline function _u_dofs(ru, ncomp::Int, I::Int)
+    o = ncomp * (I - 1)
+    (ru[o+1], ru[o+2], ru[o+3])
+end
+
+# Components per node in the `:u` field: 3 for the two-field layout (`:u` as ip^3,
+# `:θ` as ip^2), 5 for the single-field interleaved one.
+@inline function _u_ncomp(ru, n_base::Int)
+    ncomp, r = divrem(length(ru), n_base)
+    (r == 0 && ncomp in (3, 5)) || throw(ArgumentError(
+        ":u carries $(length(ru)) dofs over $n_base base functions; expected 3 per node " *
+        "(two-field `:u` as ip^3) or 5 (single-field interleaved `:u` as ip^5)"))
+    ncomp
+end
+
 # ∂ξ/∂t for the mapping t → 2D cell reference coord along facet `f`, where t is the
 # parametrization implicit in `FacetQuadratureRule`: ξ(t) = A + t·(B-A) for the facet's
 # vertex pair (A, B), with t ranging over an interval of length `weight_sum` (any valid
@@ -819,16 +839,20 @@ Assemble external traction into force vector f for embedded shell elements (2D m
 Uses a `FacetQuadratureRule` and computes the edge length element directly from 3D node positions,
 bypassing the sdim mismatch that prevents standard `FacetValues` from working on embedded meshes.
 Works for RefQuadrilateral and RefTriangle of any interpolation order.
+The `:u` dofs are located through each cell's SubDofHandler `dof_range`, so the two-field
+(`:u` as ip³, `:θ` as ip²) layout, the single-field interleaved (`:u` as ip⁵) one, any field
+order and any additional fields are all handled.
 """
 function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
     n_base = getnbasefunctions(ip)
-    fe     = zeros(ndofs_per_cell(dh))
-    ndofs_per_node = ndofs_per_cell(dh) ÷ n_base
-    is_interleaved = ndofs_per_node == 5 && length(Ferrite.getfieldnames(dh)) == 1
-    @inline block(I) = is_interleaved ? (5I-4:5I-2) : (3I-2:3I)
+    fe     = Float64[]
     for fc in FacetIterator(dh, facetset)
-        fill!(fe, 0.0)
+        cd    = celldofs(fc)
+        sdh   = dh.subdofhandlers[dh.cell_to_subdofhandler[Ferrite.cellid(fc)]]
+        ru    = Ferrite.dof_range(sdh, :u)
+        ncomp = _u_ncomp(ru, n_base)
+        resize!(fe, length(cd)); fill!(fe, 0.0)
         x        = getcoordinates(fc)
         facet_nr = fc.current_facet_id
         qr_f     = fqr.facet_rules[facet_nr]
@@ -844,11 +868,13 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
             dΓ = norm(Jt) * w
             t  = t_func(xp)
             for I in 1:n_base
-                N = Ferrite.reference_shape_value(ip, ξ, I)
-                fe[block(I)] .+= N * t * dΓ
+                N   = Ferrite.reference_shape_value(ip, ξ, I)
+                Ndg = N * dΓ
+                d1, d2, d3 = _u_dofs(ru, ncomp, I)
+                fe[d1] += Ndg * t[1]; fe[d2] += Ndg * t[2]; fe[d3] += Ndg * t[3]
             end
         end
-        f[celldofs(fc)] .+= fe
+        f[cd] .+= fe
     end
 end
 
@@ -911,19 +937,25 @@ end
     apply_pointload!(f, dh, nodeset_name, load)
 
 Add a concentrated force `load::Vec{3}` to the displacement DOFs of all nodes in `nodeset_name`.
-Works for both single-field (`:u` only) and two-field (`:u`, `:θ`) DofHandlers; in both cases the
-`:u` DOFs for node I in a cell occupy local positions `3I-2:3I`.
+The `:u` dofs are located through the SubDofHandler's `dof_range`, so the two-field
+(`:u` as ip³, `:θ` as ip²) layout, the single-field interleaved (`:u` as ip⁵) one, any
+field order and any additional fields are all handled.
 """
 function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
     node_set  = getnodeset(dh.grid, nodeset_name)
     processed = Set{Int}()
     for cell in CellIterator(dh)
         nodes = getnodes(cell)
+        any(gid -> gid ∈ node_set && gid ∉ processed, nodes) || continue
         cd    = celldofs(cell)
+        sdh   = dh.subdofhandlers[dh.cell_to_subdofhandler[Ferrite.cellid(cell)]]
+        ru    = Ferrite.dof_range(sdh, :u)
+        ncomp = _u_ncomp(ru, length(nodes))
         for (I, gid) in enumerate(nodes)
             if gid ∈ node_set && gid ∉ processed
                 push!(processed, gid)
-                @views f[cd[3I-2:3I]] .+= load
+                d1, d2, d3 = _u_dofs(ru, ncomp, I)
+                f[cd[d1]] += load[1]; f[cd[d2]] += load[2]; f[cd[d3]] += load[3]
             end
         end
     end

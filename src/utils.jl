@@ -31,9 +31,18 @@ to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
 Input layout: ``[u_{1x},u_{1y},u_{1z},\\, u_{2x},\\ldots,u_{nz} \\mid \\theta_{1,1},\\theta_{1,2},\\, \\theta_{2,1},\\ldots,\\theta_{n,2}]``
 
 Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_{2y},u_{2z},\\theta_{2,1},\\theta_{2,2},\\ldots]``
+
+This method reads the layout off the dof count alone, so it is correct only for a
+`DofHandler` carrying exactly `:u` then `:θ` and nothing else. Pass the `SubDofHandler`
+— `shelldofs(sdh, cell)` or [`shelldofs!`](@ref) — to have the ranges read by name
+instead, which stays correct for any field order and any extra fields.
 """
 function shelldofs(cell::CellCache)
     dofs = cell.dofs
+    rem(length(dofs), 5) == 0 || throw(ArgumentError(
+        "shelldofs expects the two-field layout `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, " *
+        "whose cells carry a multiple of 5 dofs; this cell has $(length(dofs)). " *
+        "Use `shelldofs(sdh, cell)` to read the dof ranges by name."))
     n = length(dofs) ÷ 5
     perm = similar(dofs)
     for I in 1:n
@@ -42,6 +51,34 @@ function shelldofs(cell::CellCache)
         perm[5I  ] = dofs[3n + 2I]
     end
     return perm
+end
+
+"""
+    shelldofs(sdh::SubDofHandler, cell) -> Vector{Int}
+    shelldofs!(sd::AbstractVector{Int}, sdh::SubDofHandler, cell) -> sd
+
+Layout-safe form of [`shelldofs`](@ref): the same interleaved 5-dof-per-node order,
+but built from the `SubDofHandler`'s own `dof_range`s for `:u` and `:θ`, so it stays
+correct whatever else the `DofHandler` carries and in whatever order the fields were
+added. The in-place form resizes and overwrites `sd` and allocates nothing.
+"""
+shelldofs(sdh::Ferrite.SubDofHandler, cell) = shelldofs!(Int[], sdh, cell)
+
+function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
+    dofs = celldofs(cell)
+    ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
+    n = length(ru) ÷ 3
+    length(ru) == 3n || throw(ArgumentError(":u carries $(length(ru)) dofs per cell, not a multiple of 3"))
+    length(rθ) == 2n || throw(ArgumentError(":u spans $n nodes but :θ spans $(length(rθ) / 2)"))
+    resize!(sd, 5n)
+    @inbounds for I in 1:n
+        sd[5I-4] = dofs[ru[3I-2]]
+        sd[5I-3] = dofs[ru[3I-1]]
+        sd[5I-2] = dofs[ru[3I]]
+        sd[5I-1] = dofs[rθ[2I-1]]
+        sd[5I  ] = dofs[rθ[2I]]
+    end
+    sd
 end
 
 using OrderedCollections
