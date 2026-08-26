@@ -15,7 +15,6 @@ On a triangle the two natural directions are not enough: the shear along the hyp
 depends on tied ``\\gamma_2`` values. The triangular elements are therefore built from an assumed
 strain space and a list of tying conditions by [`tying_weights`](@ref), following Lee & Bathe (2004).
 
-MITC Type
 
 ```@docs
 MITC
