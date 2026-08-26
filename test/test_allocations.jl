@@ -32,8 +32,10 @@ function loop_covariant(scv, u_e, n_nodes, n_qp)
 end
 
 # elements
-elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
-            (QuadraticQuadrilateral, RefQuadrilateral, 2, MITC9))
+elements = ((Triangle, RefTriangle, 1, MITC3, "MITC3"),
+            (Quadrilateral, RefQuadrilateral, 1, MITC4, "MITC4"),
+            (QuadraticTriangle, RefTriangle, 2, MITC6a, "MITC6a"),
+            (QuadraticQuadrilateral, RefQuadrilateral, 2, MITC9, "MITC9"))
 
 @testset "Element kernel allocations" begin
    for elem in elements
