@@ -14,7 +14,7 @@ columns zero (``\\gamma_1`` is built from ``\\gamma_1`` tying values only); tria
 the hypotenuse condition couples the two components (Lee & Bathe 2004).
 
 Static fields (`N_tie`, `dN_tie`, `h_tie_*`) are precomputed once at construction.
-Mutable fields (`A_tie`, `G₃_tie`, `*_node`) are updated each [`reinit!`](@ref) call.
+Mutable fields (`A_tie`, `d₀_tie`, `*_node`) are updated each [`reinit!`](@ref) call.
 """
 struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     N_tie   :: Matrix{T}          # shape functions           at the tying points  [n_shape × M]
@@ -24,7 +24,7 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     ξ_tie   :: Vector{Vec{2,T}}   # local coordinates of the tying points
     α_tie   :: Vector{Int}        # tied covariant component (1 or 2) of each entry
     A_tie   :: Vector{Vec{3,T}}   # reference tangent A_{α_k} at the tying points
-    G₃_tie  :: Vector{Vec{3,T}}   # reference director at the tying points
+    d₀_tie  :: Vector{Vec{3,T}}   # reference director Σ N_I(ξ_k) G₃_node[I] at the tying points — NOT normalized
     G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
     T₁_node :: Vector{Vec{3,T}}
     T₂_node :: Vector{Vec{3,T}}
@@ -92,16 +92,22 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
         mitc.T₁_node[I] = T₁_nodes[I]
         mitc.T₂_node[I] = T₂_nodes[I]
     end
+    # d₀_tie is left un-normalized — exactly the field `d_k` builds at u = 0 in
+    # `tying_shear_strains` below. Normalizing it here (the earlier behaviour) leaves a
+    # reference shear γ_α(0) = (A_α·d₀)(1 − 1/‖d₀‖) at every tying point, nonzero whenever
+    # the nodal frames are not all parallel, i.e. on any curved element driven with
+    # `NodeFrames`. This is the same rule `reference_director` follows for the QP-direct
+    # (NoMITC) path.
     for k in 1:M
         ξ_k = mitc.ξ_tie[k]; α = mitc.α_tie[k]
-        A = zero(Vec{3,T}); G₃_avg = zero(Vec{3,T})
+        A = zero(Vec{3,T}); d₀ = zero(Vec{3,T})
         for i in 1:n_geo
             dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A += x[i] * dN[α]
-            G₃_avg += Nval * G₃_nodes[i]
+            d₀ += Nval * G₃_nodes[i]
         end
         mitc.A_tie[k]  = A
-        mitc.G₃_tie[k] = G₃_avg / norm(G₃_avg)
+        mitc.d₀_tie[k] = d₀
     end
 end
 
@@ -129,7 +135,7 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
-        dot(mitc.A_tie[k] + Δa, d_k) - dot(mitc.A_tie[k], mitc.G₃_tie[k])
+        dot(mitc.A_tie[k] + Δa, d_k) - dot(mitc.A_tie[k], mitc.d₀_tie[k])
     end
 end
 

@@ -428,3 +428,62 @@ end
         end
     end
 end
+
+@testset "MITC tying reference director on curved elements" begin
+    # The tying strain builds the current director at ξ_k by interpolating the nodal
+    # Rodrigues directors, Σ N_I(ξ_k) d_I — which is not a unit vector. Its reference
+    # must be the same field at u = 0, Σ N_I(ξ_k) G₃_I. Subtracting the *normalized*
+    # director instead left γ_α(0) = (A_α·d₀)(1 − 1/‖d₀‖) at every tying point, nonzero
+    # whenever the nodal frames are not all parallel — so centroid frames hid it and
+    # `NodeFrames` on any curved mesh exposed it (measured ‖re(0)‖ ≈ 0.54).
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    surf = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2)
+    cases = ((Quadrilateral,          RefQuadrilateral, 1, MITC4),
+             (QuadraticQuadrilateral, RefQuadrilateral, 2, MITC9))
+    for (primitive, refshape, order, mitc) in cases
+        grid = shell_grid(generate_grid(primitive, (3, 3)); map = surf)
+        ip   = Lagrange{refshape, order}()
+        nf   = NodeFrames(grid, ip)
+        scv  = ShellCellValues(QuadratureRule{refshape}(order + 1), ip, ip; mitc)
+        dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+        n_dof = 5 * getnbasefunctions(ip)
+        u0    = zeros(n_dof)
+        for cell in CellIterator(dh)
+            # Per-node frames: the case the normalization error showed up in.
+            reinit!(scv, cell, nf)
+            γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
+            @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+            re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
+            # Centroid frames stay zero too (all nodal frames parallel ⇒ ‖d₀‖ = 1).
+            reinit!(scv, cell)
+            γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
+            @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+        end
+    end
+
+    # The corrected reference is still the exact gradient of the energy: residual and
+    # consistent tangent must match ForwardDiff on a curved element with node frames.
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)); map = surf)
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    nf   = NodeFrames(grid, ip)
+    scv  = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip; mitc = MITC4)
+    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    mat  = LinearElastic(1.0e6, 0.3, 0.01)
+    Random.seed!(11)
+    u_pert = 1e-2 .* randn(20)
+    reinit!(scv, first(CellIterator(dh)), nf)
+    re_ex  = zeros(20); bending_residuals_RM!(re_ex, scv, u_pert, mat)
+    re_fd  = zeros(20); residuals_RM_FD!(re_fd, scv, u_pert, mat)
+    re_mem = zeros(20); membrane_residuals_RM!(re_mem, scv, u_pert, mat)
+    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
+    ke_ex = zeros(20, 20); bending_tangent_RM!(ke_ex, scv, u_pert, mat)
+    ke_jac = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), 20)
+        bending_residuals_RM!(re, scv, u, mat)
+        re
+    end, u_pert)
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-8
+end
