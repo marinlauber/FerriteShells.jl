@@ -451,16 +451,14 @@ end
         for cell in CellIterator(dh)
             # Per-node frames: the case the normalization error showed up in.
             reinit!(scv, cell, nf)
-            γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
-            @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-            @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
             re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
             @test norm(re) ≤ 1.0e-11
             # Centroid frames stay zero too (all nodal frames parallel ⇒ ‖d₀‖ = 1).
             reinit!(scv, cell)
-            γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
-            @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-            @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
         end
     end
 

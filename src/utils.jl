@@ -65,7 +65,7 @@ added. The in-place form resizes and overwrites `sd` and allocates nothing.
 shelldofs(sdh::Ferrite.SubDofHandler, cell) = shelldofs!(Int[], sdh, cell)
 
 """
-    shelldofs!(sd::AbstractVector{Int}, sdh::SubDofHandler, cell) -> sd
+    shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell) -> sd
 
 In-place, allocation-free form of [`shelldofs`](@ref): resizes and overwrites `sd`
 with the interleaved 5-dof-per-node order.
