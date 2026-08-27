@@ -31,9 +31,18 @@ to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
 Input layout: ``[u_{1x},u_{1y},u_{1z},\\, u_{2x},\\ldots,u_{nz} \\mid \\theta_{1,1},\\theta_{1,2},\\, \\theta_{2,1},\\ldots,\\theta_{n,2}]``
 
 Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_{2y},u_{2z},\\theta_{2,1},\\theta_{2,2},\\ldots]``
+
+This method reads the layout off the dof count alone, so it is correct only for a
+`DofHandler` carrying exactly `:u` then `:θ` and nothing else. Pass the `SubDofHandler`
+— `shelldofs(sdh, cell)` or [`shelldofs!`](@ref) — to have the ranges read by name
+instead, which stays correct for any field order and any extra fields.
 """
 function shelldofs(cell::CellCache)
     dofs = cell.dofs
+    rem(length(dofs), 5) == 0 || throw(ArgumentError(
+        "shelldofs expects the two-field layout `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, " *
+        "whose cells carry a multiple of 5 dofs; this cell has $(length(dofs)). " *
+        "Use `shelldofs(sdh, cell)` to read the dof ranges by name."))
     n = length(dofs) ÷ 5
     perm = similar(dofs)
     for I in 1:n
@@ -42,6 +51,34 @@ function shelldofs(cell::CellCache)
         perm[5I  ] = dofs[3n + 2I]
     end
     return perm
+end
+
+"""
+    shelldofs(sdh::SubDofHandler, cell) -> Vector{Int}
+    shelldofs!(sd::AbstractVector{Int}, sdh::SubDofHandler, cell) -> sd
+
+Layout-safe form of [`shelldofs`](@ref): the same interleaved 5-dof-per-node order,
+but built from the `SubDofHandler`'s own `dof_range`s for `:u` and `:θ`, so it stays
+correct whatever else the `DofHandler` carries and in whatever order the fields were
+added. The in-place form resizes and overwrites `sd` and allocates nothing.
+"""
+shelldofs(sdh::Ferrite.SubDofHandler, cell) = shelldofs!(Int[], sdh, cell)
+
+function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
+    dofs = celldofs(cell)
+    ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
+    n = length(ru) ÷ 3
+    length(ru) == 3n || throw(ArgumentError(":u carries $(length(ru)) dofs per cell, not a multiple of 3"))
+    length(rθ) == 2n || throw(ArgumentError(":u spans $n nodes but :θ spans $(length(rθ) / 2)"))
+    resize!(sd, 5n)
+    @inbounds for I in 1:n
+        sd[5I-4] = dofs[ru[3I-2]]
+        sd[5I-3] = dofs[ru[3I-1]]
+        sd[5I-2] = dofs[ru[3I]]
+        sd[5I-1] = dofs[rθ[2I-1]]
+        sd[5I  ] = dofs[rθ[2I]]
+    end
+    sd
 end
 
 using OrderedCollections
@@ -313,13 +350,13 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
 
-    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
     γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
     d₀  = reference_director(scv, qp, n_nodes)
-    γ₁ -= dot(scv.A₁[qp], d₀)
-    γ₂ -= dot(scv.A₂[qp], d₀)
+    r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+    γ₁ -= r₁; γ₂ -= r₂
 
     return E, κ, Vec{2,T}((γ₁, γ₂))
 end
@@ -409,11 +446,19 @@ reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinate
 reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
     reinit!(scv, x)
-    n_geo = getnbasefunctions(scv.ip_geo)
-    for I in 1:n_geo
+    # The frames live on `ip_shape` nodes (that is how `G₃_elem` is sized and how
+    # `reference_director_curvature!` reads them), but `nf` is indexed by grid node id.
+    # The two only line up when every shape node is a grid node.
+    n_shape = getnbasefunctions(scv.ip_shape)
+    length(node_ids) ≥ n_shape || throw(ArgumentError(
+        "NodeFrames needs one frame per shape node, but the cell carries $(length(node_ids)) " *
+        "nodes for $n_shape shape functions. Use an `ip_shape` whose nodes are grid nodes " *
+        "(e.g. `ip_geo == ip_shape`), or call `reinit!(scv, x)` for centroid frames."))
+    for I in 1:n_shape
         scv.G₃_elem[I] = nf.G₃[node_ids[I]]
         scv.T₁_elem[I] = nf.T₁[node_ids[I]]
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
     end
+    reference_director_curvature!(scv)   # B₀ follows the frames actually in use
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
