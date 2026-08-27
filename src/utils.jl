@@ -456,6 +456,7 @@ node out of the sets passed here.
 """
 function add_director_symmetry!(ch::ConstraintHandler, dh::DofHandler, nf::NodeFrames,
                                 nodeset_name::String, n::Vec{3}; atol = 0.25)
+    norm(n) > 0 || throw(ArgumentError("n must be nonzero"))
     n̂ = n / norm(n)
     dofmap = _theta_dofmap(dh)
     for nid in sort!(collect(getnodeset(dh.grid, nodeset_name)))
@@ -470,7 +471,8 @@ function add_director_symmetry!(ch::ConstraintHandler, dh::DofHandler, nf::NodeF
         a = nf.T₁[nid] ⋅ n̂
         b = nf.T₂[nid] ⋅ n̂
         d₁, d₂ = dofmap[nid]
-        # (T₁,T₂,G₃) is orthonormal and n̂ ⊥ G₃, so a² + b² = 1: never both small.
+        # (T₁,T₂,G₃) is orthonormal, so a² + b² = 1 - (G₃·n̂)² ≥ 1 - atol² (enforced
+        # above, atol defaults to 0.25): never both small.
         if abs(a) ≥ abs(b)
             add!(ch, Ferrite.AffineConstraint(d₁, [d₂ => -b / a], 0.0))
         else
