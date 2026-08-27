@@ -429,6 +429,38 @@ end
     end
 end
 
+@testset "MITC tying reference director: mixed geometry/shape interpolation" begin
+    # `reinit!(mitc, ...)` gets the nodal frames sized to `ip_shape` (n_shape entries) but the
+    # coordinates sized to `ip_geo` (n_geo entries). Building `d₀_tie` with `ip_geo` values over
+    # `1:n_geo` therefore reads the wrong frames when n_geo < n_shape and runs off the end when
+    # n_geo > n_shape. It must use `mitc.N_tie` (from `ip_shape`) over `1:N`, which is exactly
+    # what `tying_shear_strains` interpolates the current director with.
+    mat  = LinearElastic(1.0e6, 0.3, 0.01)
+    surf = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2)
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2)); map = surf)
+    ip1  = Lagrange{RefQuadrilateral, 1}()
+    ip2  = Lagrange{RefQuadrilateral, 2}()
+    # subparametric (n_geo = 4 < n_shape = 9) and superparametric (n_geo = 9 > n_shape = 4)
+    for (ip_geo, ip_shape, mitc) in ((ip1, ip2, MITC9), (ip2, ip1, MITC4))
+        nf    = NodeFrames(grid, ip_geo)
+        scv   = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_geo, ip_shape; mitc)
+        n_dof = 5 * getnbasefunctions(ip_shape)
+        u0    = zeros(n_dof)
+        for cell in CellIterator(grid)
+            reinit!(scv, cell, nf)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
+            re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
+        end
+    end
+
+    # The node count of the tying scheme and of `ip_shape` must agree — `N_tie` is indexed
+    # alongside the per-node frames, which are sized N.
+    @test_throws ArgumentError MITC9(ip1, QuadratureRule{RefQuadrilateral}(3))
+    @test_throws ArgumentError MITC3(Lagrange{RefTriangle, 2}(), QuadratureRule{RefTriangle}(3))
+end
+
 @testset "MITC tying reference director on curved elements" begin
     # The tying strain builds the current director at ξ_k by interpolating the nodal
     # Rodrigues directors, Σ N_I(ξ_k) d_I — which is not a unit vector. Its reference

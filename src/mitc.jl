@@ -38,6 +38,10 @@ end
 function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
                  h_tie_1::Matrix{T}, h_tie_2::Matrix{T}) where {N,T}
     n_shape = getnbasefunctions(ip_shape)
+    # `N_tie` is indexed alongside the per-node frames `G₃_node`/`T₁_node`/`T₂_node`, which are
+    # sized N, so the tying scheme and the shape interpolation must have the same node count.
+    n_shape == N || throw(ArgumentError(
+        "MITC{$N} tying needs an $N-node shape interpolation, got $ip_shape with $n_shape base functions"))
     M = length(ξ_tie)
     # shape values and the derivative along the tied direction at each tying point
     N_tie = zeros(T, n_shape, M); dN_tie = zeros(T, n_shape, M)
@@ -76,10 +80,14 @@ struct NoMITC <: AbstractMITC end
 import Ferrite: reinit!
 
 """
-    reinit!(mitc, ip_geo, x)
+    reinit!(mitc, ip_geo, x, G₃_nodes, T₁_nodes, T₂_nodes)
 
-Update the MITC data for a cell with cell coordinates `x`.
-The reference geometry at the tying points is recomputed and stored.
+Update the MITC data for a cell with cell coordinates `x` and nodal frames
+`G₃_nodes`/`T₁_nodes`/`T₂_nodes` (length `N`, i.e. sized to `ip_shape`, not `ip_geo`).
+
+The reference geometry at the tying points is recomputed and stored: the covariant tangent
+`A_tie[k]` from the geometric interpolation `ip_geo`, and the reference director `d₀_tie[k]`
+from the shape interpolation via the precomputed `N_tie`.
 """
 reinit!
 
@@ -100,11 +108,18 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
     # (NoMITC) path.
     for k in 1:M
         ξ_k = mitc.ξ_tie[k]; α = mitc.α_tie[k]
-        A = zero(Vec{3,T}); d₀ = zero(Vec{3,T})
+        # A_α from the *geometric* interpolation (n_geo coordinates) ...
+        A = zero(Vec{3,T})
         for i in 1:n_geo
-            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
+            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A += x[i] * dN[α]
-            d₀ += Nval * G₃_nodes[i]
+        end
+        # ... d₀ from the *shape* interpolation, through the precomputed `N_tie`: the nodal
+        # frames are sized to `ip_shape` (N entries), and `tying_shear_strains` interpolates
+        # the current director with the very same weights, so the two agree term by term.
+        d₀ = zero(Vec{3,T})
+        for I in 1:N
+            d₀ += mitc.N_tie[I,k] * mitc.G₃_node[I]
         end
         mitc.A_tie[k]  = A
         mitc.d₀_tie[k] = d₀
@@ -185,7 +200,7 @@ coefficients are ``c = C^{-1} W \\gamma^\\text{tie}``, hence
 ``h_\\alpha[q,k] = \\sum_j P_j(\\xi_q)_\\alpha (C^{-1}W)_{jk}``.
 """
 function tying_weights(qr::QuadratureRule, conds, basis; atol = 1e-12)
-    T = Float64
+    T = eltype(qr.weights)
     length(conds) == length(basis) ||
         throw(ArgumentError("$(length(conds)) tying conditions for $(length(basis)) basis fields"))
     ξ_tie = Vec{2,T}[]; α_tie = Int[]
