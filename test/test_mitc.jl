@@ -10,9 +10,8 @@
     n_dof = 45
 
     # 1. All tying-point shear strains are zero at the reference state.
-    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
-    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+    γ_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ_k)
 
     # 2. Explicit residual matches ForwardDiff gradient (no-MITC path, exact to rounding).
     #    The no-MITC explicit formula is exact; MITC introduces a ~0.03% approximation
@@ -215,9 +214,8 @@ end
     n_dof = 20
 
     # 1. All tying-point shear strains are zero at the reference state.
-    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
-    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+    γ_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ_k)
 
     # 2. No-MITC explicit residual matches ForwardDiff gradient exactly.
     #    MITC4 explicit residual agrees to within the MITC-δγ approximation (~1%).
