@@ -451,7 +451,7 @@ reinit!
 reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinates(cell), nf, getnodes(cell))
 reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
-    reinit!(scv, x)
+    _reinit_geometry!(scv, x)
     # The frames live on `ip_shape` nodes (that is how `G₃_elem` is sized and how
     # `reference_director_curvature!` reads them), but `nf` is indexed by grid node id.
     # The two only line up when every shape node is a grid node.

@@ -149,7 +149,11 @@ reinit!
 
 reinit!(scv::ShellCellValues, cell) = reinit!(scv, getcoordinates(cell))
 reinit!(scv::ShellCellValues, cc::CellCache) = reinit!(scv, getcoordinates(cc))
-function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
+
+# Per-QP reference geometry: covariant tangents/curvature, metric, patch normal frame,
+# and detJdV. Independent of which element-director frame (centroid vs. NodeFrames) is
+# used downstream, so both `reinit!` paths share this instead of each recomputing it.
+function _reinit_geometry!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     n_geo = getnbasefunctions(scv.ip_geo)
     for q in eachindex(scv.qr.weights)
         ξ = scv.qr.points[q]
@@ -173,6 +177,11 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃[q]       = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
         scv.B[q]        = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
+end
+
+function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
+    _reinit_geometry!(scv, x)
+    n_geo = getnbasefunctions(scv.ip_geo)
     # Centroid frame — single consistent director frame for the whole element.
     # T₁_c is chosen by Gram-Schmidt projection of a global reference vector (ê_x) onto
     # the element tangent plane. For flat shells this gives T₁_c = ê_x and T₂_c = ê_y
