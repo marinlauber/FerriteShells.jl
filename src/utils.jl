@@ -64,6 +64,12 @@ added. The in-place form resizes and overwrites `sd` and allocates nothing.
 """
 shelldofs(sdh::Ferrite.SubDofHandler, cell) = shelldofs!(Int[], sdh, cell)
 
+"""
+    shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell) -> sd
+
+In-place, allocation-free form of [`shelldofs`](@ref): resizes and overwrites `sd`
+with the interleaved 5-dof-per-node order.
+"""
 function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
     dofs = celldofs(cell)
     ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
@@ -352,8 +358,8 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
-    γ₁_k, γ₂_k = tying_shear_strains(scv.mitc, u_e)
-    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ₁_k, γ₂_k, scv.mitc)
+    γ_k = tying_shear_strains(scv.mitc, u_e)
+    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ_k, scv.mitc)
     d₀  = reference_director(scv, qp, n_nodes)
     r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
     γ₁ -= r₁; γ₂ -= r₂

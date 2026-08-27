@@ -1,4 +1,51 @@
 
+@testset "quadrilateral MITC assumed-strain interpolation" begin
+    # Same contract as the triangular schemes: sampling a field of the assumed space at the
+    # tying entries and interpolating back to the quadrature points returns the field itself.
+    for (mitc_ctor, refshape, qro, M) in ((MITC4, RefQuadrilateral, 2, 4),
+                                          (MITC9, RefQuadrilateral, 3, 12))
+        qr = QuadratureRule{refshape}(qro)
+        conds, basis = FerriteShells.tying_conditions(mitc_ctor)
+        ξ_tie, α_tie, h₁, h₂ = FerriteShells.tying_weights(qr, conds, basis)
+        @test length(ξ_tie) == M
+        for P in basis
+            γ = [P(ξ_tie[k])[α_tie[k]] for k in eachindex(ξ_tie)]
+            for q in eachindex(qr.weights)
+                @test sum(h₁[q,:] .* γ) ≈ P(qr.points[q])[1] atol=1e-12
+                @test sum(h₂[q,:] .* γ) ≈ P(qr.points[q])[2] atol=1e-12
+            end
+        end
+        # Unlike the triangles, no quadrilateral condition couples the two components, so
+        # the off-component columns must come out exactly zero.
+        @test all(iszero, h₁[:, α_tie .== 2])
+        @test all(iszero, h₂[:, α_tie .== 1])
+    end
+
+    # Pin the weights to the closed forms the hand-written constructors used to ship, in
+    # their tying-entry order: bilinear edge interpolation for MITC4, and the tensor-product
+    # Lagrange interpolation on the 2×3 / 3×2 Gauss grids for MITC9.
+    let qr = QuadratureRule{RefQuadrilateral}(2)
+        _, _, h₁, h₂ = FerriteShells.tying_weights(qr, FerriteShells.tying_conditions(MITC4)...)
+        for q in eachindex(qr.weights)
+            ξ, η = qr.points[q][1], qr.points[q][2]
+            @test h₁[q,:] ≈ [(1-η)/2, (1+η)/2, 0, 0] atol=1e-14
+            @test h₂[q,:] ≈ [0, 0, (1-ξ)/2, (1+ξ)/2] atol=1e-14
+        end
+    end
+    let qr = QuadratureRule{RefQuadrilateral}(3)
+        _, _, h₁, h₂ = FerriteShells.tying_weights(qr, FerriteShells.tying_conditions(MITC9)...)
+        for q in eachindex(qr.weights)
+            ξ, η = qr.points[q][1], qr.points[q][2]
+            g₁ = (1 - sqrt(3)*ξ)/2;  g₂ = (1 + sqrt(3)*ξ)/2
+            L₁ = η*(η-1)/2;  L₂ = 1 - η^2;  L₃ = η*(η+1)/2
+            @test h₁[q,:] ≈ [g₁*L₁, g₂*L₁, g₁*L₂, g₂*L₂, g₁*L₃, g₂*L₃, 0, 0, 0, 0, 0, 0] atol=1e-14
+            l₁ = ξ*(ξ-1)/2;  l₂ = 1 - ξ^2;  l₃ = ξ*(ξ+1)/2
+            f₁ = (1 - sqrt(3)*η)/2;  f₂ = (1 + sqrt(3)*η)/2
+            @test h₂[q,:] ≈ [0, 0, 0, 0, 0, 0, l₁*f₁, l₂*f₁, l₃*f₁, l₁*f₂, l₂*f₂, l₃*f₂] atol=1e-14
+        end
+    end
+end
+
 @testset "MITC9 unit element" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
     ip  = Lagrange{RefQuadrilateral, 2}()
@@ -10,9 +57,8 @@
     n_dof = 45
 
     # 1. All tying-point shear strains are zero at the reference state.
-    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
-    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+    γ_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ_k)
 
     # 2. Explicit residual matches ForwardDiff gradient (no-MITC path, exact to rounding).
     #    The no-MITC explicit formula is exact; MITC introduces a ~0.03% approximation
@@ -215,9 +261,8 @@ end
     n_dof = 20
 
     # 1. All tying-point shear strains are zero at the reference state.
-    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
-    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+    γ_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ_k)
 
     # 2. No-MITC explicit residual matches ForwardDiff gradient exactly.
     #    MITC4 explicit residual agrees to within the MITC-δγ approximation (~1%).
@@ -431,6 +476,38 @@ end
     end
 end
 
+@testset "MITC tying reference director: mixed geometry/shape interpolation" begin
+    # `reinit!(mitc, ...)` gets the nodal frames sized to `ip_shape` (n_shape entries) but the
+    # coordinates sized to `ip_geo` (n_geo entries). Building `d₀_tie` with `ip_geo` values over
+    # `1:n_geo` therefore reads the wrong frames when n_geo < n_shape and runs off the end when
+    # n_geo > n_shape. It must use `mitc.N_tie` (from `ip_shape`) over `1:N`, which is exactly
+    # what `tying_shear_strains` interpolates the current director with.
+    mat  = LinearElastic(1.0e6, 0.3, 0.01)
+    surf = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2)
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2)); map = surf)
+    ip1  = Lagrange{RefQuadrilateral, 1}()
+    ip2  = Lagrange{RefQuadrilateral, 2}()
+    # subparametric (n_geo = 4 < n_shape = 9) and superparametric (n_geo = 9 > n_shape = 4)
+    for (ip_geo, ip_shape, mitc) in ((ip1, ip2, MITC9), (ip2, ip1, MITC4))
+        nf    = NodeFrames(grid, ip_geo)
+        scv   = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_geo, ip_shape; mitc)
+        n_dof = 5 * getnbasefunctions(ip_shape)
+        u0    = zeros(n_dof)
+        for cell in CellIterator(grid)
+            reinit!(scv, cell, nf)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
+            re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
+        end
+    end
+
+    # The node count of the tying scheme and of `ip_shape` must agree — `N_tie` is indexed
+    # alongside the per-node frames, which are sized N.
+    @test_throws ArgumentError MITC9(ip1, QuadratureRule{RefQuadrilateral}(3))
+    @test_throws ArgumentError MITC3(Lagrange{RefTriangle, 2}(), QuadratureRule{RefTriangle}(3))
+end
+
 @testset "MITC tying reference director on curved elements" begin
     # The tying strain builds the current director at ξ_k by interpolating the nodal
     # Rodrigues directors, Σ N_I(ξ_k) d_I — which is not a unit vector. Its reference
@@ -453,16 +530,14 @@ end
         for cell in CellIterator(dh)
             # Per-node frames: the case the normalization error showed up in.
             reinit!(scv, cell, nf)
-            γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
-            @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-            @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
             re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
             @test norm(re) ≤ 1.0e-11
             # Centroid frames stay zero too (all nodal frames parallel ⇒ ‖d₀‖ = 1).
             reinit!(scv, cell)
-            γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
-            @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-            @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
         end
     end
 

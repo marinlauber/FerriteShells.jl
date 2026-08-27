@@ -9,7 +9,7 @@ using Base: @propagate_inbounds
 import Ferrite: reinit!
 
 include("mitc.jl")
-export AbstractMITC, NoMITC, MITC, MITC9
+export AbstractMITC, NoMITC, MITC,MITC3, MITC4, MITC6, MITC9
 
 include("shellcellvalues.jl")
 export ShellCellValues
