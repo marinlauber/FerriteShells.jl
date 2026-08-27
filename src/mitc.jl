@@ -13,6 +13,10 @@ at `ξ_tie[k]`, and both `h_tie_1` and `h_tie_2` span all entries,
 columns zero (``\\gamma_1`` is built from ``\\gamma_1`` tying values only); triangular ones do not, since
 the hypotenuse condition couples the two components (Lee & Bathe 2004).
 
+Every scheme is declared the same way: a `tying_conditions(::typeof(MITCx))` method returning
+its tying conditions and the assumed-strain space they are tied against, which the shared
+`MITC{N}(ip_shape, qr, scheme)` constructor feeds to [`tying_weights`](@ref).
+
 Static fields (`N_tie`, `dN_tie`, `h_tie_*`) are precomputed once at construction.
 Mutable fields (`A_tie`, `d₀_tie`, `*_node`) are updated each [`reinit!`](@ref) call.
 """
@@ -61,17 +65,14 @@ function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vect
     )
 end
 
-# Quadrilateral schemes: two independent per-component tying lists, concatenated into the
-# component-tagged layout. γ₁ never sees a γ₂ tying value, so `h_tie_1` gets zero columns on
-# the γ₂ entries and vice versa.
-function MITC{N}(ip_shape::Interpolation, h_tie_1::Matrix{T}, h_tie_2::Matrix{T},
-                 ξ_tie_1::Vector{<:Vec{2}}, ξ_tie_2::Vector{<:Vec{2}}) where {N,T}
-    M₁ = length(ξ_tie_1); M₂ = length(ξ_tie_2); n_qp = size(h_tie_1, 1)
-    ξ_tie = vcat(convert(Vector{Vec{2,T}}, ξ_tie_1), convert(Vector{Vec{2,T}}, ξ_tie_2))
-    α_tie = vcat(fill(1, M₁), fill(2, M₂))
-    H₁ = hcat(h_tie_1, zeros(T, n_qp, M₂))
-    H₂ = hcat(zeros(T, n_qp, M₁), h_tie_2)
-    MITC{N}(ip_shape, ξ_tie, α_tie, H₁, H₂)
+# Every scheme is declared by a `tying_conditions(::typeof(MITCx))` method returning its tying
+# conditions and the assumed-strain space they are tied against; this is the shared body that
+# turns that pair into the element data, so each scheme file is a docstring, a one-line
+# constructor and the conditions table.
+function MITC{N}(ip_shape::Interpolation, qr::QuadratureRule, scheme) where {N}
+    conds, basis = tying_conditions(scheme)
+    ξ_tie, α_tie, h_tie_1, h_tie_2 = tying_weights(qr, conds, basis)
+    MITC{N}(ip_shape, ξ_tie, α_tie, h_tie_1, h_tie_2)
 end
 
 # empty MITC is standard
@@ -232,8 +233,8 @@ function tying_weights(qr::QuadratureRule, conds, basis; atol = 1e-12)
     return ξ_tie, α_tie, h₁, h₂
 end
 
-# Tied directions shared by the triangular elements: the two natural directions and the
-# hypotenuse of the right-angled reference triangle, γ_q = (γ₂ - γ₁)/√2 (Lee & Bathe Eq. 19).
+# Tied directions used by the schemes below: the two natural directions, and — on triangles —
+# the hypotenuse of the right-angled reference triangle, γ_q = (γ₂ - γ₁)/√2 (Lee & Bathe Eq. 19).
 const Ê₁  = Vec{2}((1.0, 0.0))
 const Ê₂  = Vec{2}((0.0, 1.0))
 const Ê_q = Vec{2}((-1.0, 1.0)) / sqrt(2)

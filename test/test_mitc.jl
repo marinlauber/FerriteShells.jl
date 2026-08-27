@@ -1,4 +1,51 @@
 
+@testset "quadrilateral MITC assumed-strain interpolation" begin
+    # Same contract as the triangular schemes: sampling a field of the assumed space at the
+    # tying entries and interpolating back to the quadrature points returns the field itself.
+    for (mitc_ctor, refshape, qro, M) in ((MITC4, RefQuadrilateral, 2, 4),
+                                          (MITC9, RefQuadrilateral, 3, 12))
+        qr = QuadratureRule{refshape}(qro)
+        conds, basis = FerriteShells.tying_conditions(mitc_ctor)
+        ξ_tie, α_tie, h₁, h₂ = FerriteShells.tying_weights(qr, conds, basis)
+        @test length(ξ_tie) == M
+        for P in basis
+            γ = [P(ξ_tie[k])[α_tie[k]] for k in eachindex(ξ_tie)]
+            for q in eachindex(qr.weights)
+                @test sum(h₁[q,:] .* γ) ≈ P(qr.points[q])[1] atol=1e-12
+                @test sum(h₂[q,:] .* γ) ≈ P(qr.points[q])[2] atol=1e-12
+            end
+        end
+        # Unlike the triangles, no quadrilateral condition couples the two components, so
+        # the off-component columns must come out exactly zero.
+        @test all(iszero, h₁[:, α_tie .== 2])
+        @test all(iszero, h₂[:, α_tie .== 1])
+    end
+
+    # Pin the weights to the closed forms the hand-written constructors used to ship, in
+    # their tying-entry order: bilinear edge interpolation for MITC4, and the tensor-product
+    # Lagrange interpolation on the 2×3 / 3×2 Gauss grids for MITC9.
+    let qr = QuadratureRule{RefQuadrilateral}(2)
+        _, _, h₁, h₂ = FerriteShells.tying_weights(qr, FerriteShells.tying_conditions(MITC4)...)
+        for q in eachindex(qr.weights)
+            ξ, η = qr.points[q][1], qr.points[q][2]
+            @test h₁[q,:] ≈ [(1-η)/2, (1+η)/2, 0, 0] atol=1e-14
+            @test h₂[q,:] ≈ [0, 0, (1-ξ)/2, (1+ξ)/2] atol=1e-14
+        end
+    end
+    let qr = QuadratureRule{RefQuadrilateral}(3)
+        _, _, h₁, h₂ = FerriteShells.tying_weights(qr, FerriteShells.tying_conditions(MITC9)...)
+        for q in eachindex(qr.weights)
+            ξ, η = qr.points[q][1], qr.points[q][2]
+            g₁ = (1 - sqrt(3)*ξ)/2;  g₂ = (1 + sqrt(3)*ξ)/2
+            L₁ = η*(η-1)/2;  L₂ = 1 - η^2;  L₃ = η*(η+1)/2
+            @test h₁[q,:] ≈ [g₁*L₁, g₂*L₁, g₁*L₂, g₂*L₂, g₁*L₃, g₂*L₃, 0, 0, 0, 0, 0, 0] atol=1e-14
+            l₁ = ξ*(ξ-1)/2;  l₂ = 1 - ξ^2;  l₃ = ξ*(ξ+1)/2
+            f₁ = (1 - sqrt(3)*η)/2;  f₂ = (1 + sqrt(3)*η)/2
+            @test h₂[q,:] ≈ [0, 0, 0, 0, 0, 0, l₁*f₁, l₂*f₁, l₃*f₁, l₁*f₂, l₂*f₂, l₃*f₂] atol=1e-14
+        end
+    end
+end
+
 @testset "MITC9 unit element" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
     ip  = Lagrange{RefQuadrilateral, 2}()
