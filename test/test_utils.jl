@@ -381,7 +381,7 @@ end
         # try reinit
         qr  = QuadratureRule{E}(O+1)
         scv = ShellCellValues(qr, ip, ip)
-        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^3); close!(dh)
+        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
         cell = first(CellIterator(dh))
         reinit!(scv, cell, nf)
         node_ids = getnodes(cell)
@@ -394,6 +394,77 @@ end
     end
 end
 
+
+@testset "dof lookup is layout independent" begin
+    # Positional dof arithmetic (`:u` at `3I-2:3I`, `:θ` after it) holds only for the
+    # canonical two-field order. These four layouts all describe the same shell; the
+    # loaders must agree on every one of them. The oracle for "the `:u` dofs of these
+    # nodes" is a ConstraintHandler, which resolves the field by name independently of
+    # anything under test.
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    fqr  = FacetQuadratureRule{RefQuadrilateral}(2)
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)))
+    # every node, so the loaders are exercised at local indices beyond 1 — at I = 1 the
+    # positional and by-name offsets coincide for every layout, hiding the defect.
+    addnodeset!(grid, "all", x -> true)
+
+    layouts = (
+        ("two-field",   dh -> (add!(dh, :u, ip^3); add!(dh, :θ, ip^2))),
+        ("θ first",     dh -> (add!(dh, :θ, ip^2); add!(dh, :u, ip^3))),
+        ("extra field", dh -> (add!(dh, :p, ip); add!(dh, :u, ip^3); add!(dh, :θ, ip^2))),
+        ("interleaved", dh -> add!(dh, :u, ip^5)),
+    )
+
+    u_dofs_of(dh, set) = begin
+        ch = ConstraintHandler(dh)
+        add!(ch, Dirichlet(:u, set, (x, t) -> zeros(3), 1:3))
+        close!(ch)
+        Set(ch.prescribed_dofs)
+    end
+
+    for (name, build!) in layouts
+        dh = DofHandler(grid); build!(dh); close!(dh)
+
+        f = zeros(ndofs(dh))
+        apply_pointload!(f, dh, "all", Vec{3}((1.0, 2.0, 3.0)))
+        @test Set(findall(!iszero, f)) == u_dofs_of(dh, getnodeset(grid, "all"))
+        @test sort(f[findall(!iszero, f)]) == repeat([1.0, 2.0, 3.0], inner = getnnodes(grid))
+        @test sum(f) ≈ 6.0 * getnnodes(grid)   # each node loaded exactly once
+
+        f = zeros(ndofs(dh))
+        fs = getfacetset(grid, "left")
+        assemble_traction!(f, dh, fs, ip, fqr, Vec{3}((0.0, 0.0, 5.0)))
+        @test issubset(Set(findall(!iszero, f)), u_dofs_of(dh, fs))
+        @test sum(f) ≈ 5.0 * 2.0   # edge length 2, uniform pressure 5
+    end
+
+    # shelldofs: the positional form is right only for the canonical layout, the
+    # SubDofHandler form for all of them.
+    dh_ok = DofHandler(grid); add!(dh_ok, :u, ip^3); add!(dh_ok, :θ, ip^2); close!(dh_ok)
+    dh_sw = DofHandler(grid); add!(dh_sw, :θ, ip^2); add!(dh_sw, :u, ip^3); close!(dh_sw)
+    for (dh, canonical) in ((dh_ok, true), (dh_sw, false))
+        sdh  = only(dh.subdofhandlers)
+        cell = first(CellIterator(dh))
+        sd   = shelldofs(sdh, cell)
+        cd   = celldofs(cell)
+        ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
+        @test length(sd) == 20
+        for I in 1:4
+            @test sd[5I-4:5I-2] == cd[ru[3I-2:3I]]
+            @test sd[5I-1:5I]   == cd[rθ[2I-1:2I]]
+        end
+        @test (shelldofs(cell) == sd) == canonical
+        # in-place form: same answer, and allocation-free once warm
+        buf = Int[]; shelldofs!(buf, sdh, cell)
+        @test buf == sd
+        @test (@allocated shelldofs!(buf, sdh, cell)) == 0
+    end
+
+    # a layout that is not 5 dofs/node is rejected instead of silently mis-permuted
+    dh_bad = DofHandler(grid); add!(dh_bad, :u, ip^3); add!(dh_bad, :θ, ip^3); close!(dh_bad)
+    @test_throws ArgumentError shelldofs(first(CellIterator(dh_bad)))
+    @test_throws ArgumentError shelldofs!(Int[], only(dh_bad.subdofhandlers), first(CellIterator(dh_bad)))
+end
 
 @testset "reference director curvature B₀" begin
     # The bending measure is κ = ½(a_α·d,β + a_β·d,α) − B₀, with B₀ built from the
@@ -456,6 +527,53 @@ end
     reinit!(scv_flat, [Vec{3}((p[1], p[2], 0.0)) for p in ref9])
     @test all(iszero, scv_flat.B₀)
     @test all(iszero, scv_flat.B)
+end
+
+@testset "shell_strains shear reference" begin
+    # The MITC tying strains already subtract their own per-tying-point reference, so
+    # the interpolated γ is measured from the reference state; subtracting dot(A_α, d₀)
+    # on top of that double-counts. Zero on flat elements (A_α ⟂ d₀), a spurious O(0.1)
+    # reference shear on curved ones. The assembly kernels dispatch through
+    # `reference_shear_offset`; shell_strains must do the same or it reports strains
+    # that disagree with the ones the residual is built from.
+    ip   = Lagrange{RefQuadrilateral, 2}()
+    qr   = QuadratureRule{RefQuadrilateral}(3)
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2));
+                      map = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2))
+    dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    nf = NodeFrames(grid, ip)
+    u0 = zeros(5 * getnbasefunctions(ip))
+    for mitc in (MITC9, nothing), use_nf in (false, true)
+        scv = ShellCellValues(qr, ip, ip; mitc)
+        for cell in CellIterator(dh)
+            use_nf ? reinit!(scv, cell, nf) : reinit!(scv, cell)
+            for qp in 1:getnquadpoints(scv)
+                _, _, γ = shell_strains(scv, qp, u0)
+                @test norm(γ) ≤ 1.0e-13   # was ≈ 0.09 for MITC9 on this geometry
+            end
+        end
+    end
+end
+
+@testset "NodeFrames reinit! requires a frame per shape node" begin
+    # `nf` is indexed by grid node id but the frames are consumed on `ip_shape` nodes,
+    # so the two only line up when every shape node is a grid node. Driving the copy
+    # loop by `ip_geo` instead either overran `G₃_elem` or silently left the tail of it
+    # at the centroid frame.
+    ip1  = Lagrange{RefQuadrilateral, 1}()
+    ip2  = Lagrange{RefQuadrilateral, 2}()
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)); map = n -> (n.x[1], n.x[2], 0.2 * n.x[1]^2))
+    nf   = NodeFrames(grid, ip1)
+    cell = first(CellIterator(grid))
+    x, ids = getcoordinates(cell), collect(getnodes(cell))
+
+    scv_mixed = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip2)
+    @test_throws ArgumentError reinit!(scv_mixed, x, nf, ids)
+
+    # the matching case still works and writes every frame
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip1)
+    reinit!(scv, x, nf, ids)
+    @test all(I -> scv.G₃_elem[I] ≈ nf.G₃[ids[I]], 1:getnbasefunctions(ip1))
 end
 
 @testset "add_director_symmetry!" begin

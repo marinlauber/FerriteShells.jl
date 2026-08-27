@@ -21,6 +21,17 @@ const mat_MR = Hyperelastic(C -> c₁_MR*(tr(C)-3) + c₂_MR*((tr(C)^2 - C⊡C)/
 # Near-incompressible LinearElastic (E=3μ, ν→0.5)
 const mat_LE_HE = LinearElastic(3*μ_HE, 0.4999, t_HE)
 
+# Saint-Venant-Kirchhoff: compressible, so it needs the plane-stress condensation.
+# W = λ/2 tr(E)² + μ E⊡E with E = (C-I)/2.  Plane-stress SVK ≡ LinearElastic(E,ν,t).
+const E_SVK = 1.0e6
+const ν_SVK = 0.3
+const λ_SVK = E_SVK*ν_SVK/((1 + ν_SVK)*(1 - 2ν_SVK))
+const μ_SVK = E_SVK/(2*(1 + ν_SVK))
+W_SVK(C) = (Eg = (C - one(C))/2; λ_SVK/2 * tr(Eg)^2 + μ_SVK * (Eg ⊡ Eg))
+const mat_SVK_ps  = Hyperelastic(W_SVK, t_HE; incompressible=false)
+const mat_SVK_inc = Hyperelastic(W_SVK, t_HE)
+const mat_LE_SVK  = LinearElastic(E_SVK, ν_SVK, t_HE)
+
 function _cook_assemble_rm!(K, f, dh, scv, mat)
     n_el = ndofs_per_cell(dh)
     fill!(K.nzval, 0); fill!(f, 0)
@@ -176,9 +187,9 @@ end
         C33 = FerriteShells.get_C33(a_metric, 0.0, 0.0, det_A)
         A₁q = Vec{3}(Tuple(scv.A₁[qp])); A₂q = Vec{3}(Tuple(scv.A₂[qp]))
         G₃q = scv.G₃_elem[1]
-        Jinv = inv(FerriteShells._J_ref(A₁q, A₂q, G₃q))
+        Jinv = inv(FerriteShells.J_ref(A₁q, A₂q, G₃q))
         C_nat  = FerriteShells.build_C3D(a_metric, 0.0, 0.0, C33)
-        C_cart = FerriteShells._to_C_cart(C_nat, Jinv)
+        C_cart = FerriteShells.to_C_cart(C_nat, Jinv)
         @test det(C_cart) ≈ 1.0 atol=1e-12   # det(C_cart)=1: incompressible
         @test mat_NH.W(C_cart) > 0.0           # energy positive for non-trivial deformation
     end
@@ -302,4 +313,89 @@ end
     W_nomitc = FerriteShells.energy_RM(u_kl, scv_ref,  mat_NH)
     @test W_mitc > 0.0
     @test W_mitc ≈ W_nomitc rtol=0.05   # should be close for smooth KL mode
+
+    e₁ = Vec{3}((1.,0.,0.)); e₂ = Vec{3}((0.,1.,0.)); e₃ = Vec{3}((0.,0.,1.))
+    A_I  = SymmetricTensor{2,2}((1.,0.,1.))
+    Jinv_I = inv(FerriteShells.J_ref(e₁, e₂, e₃))   # natural frame ≡ Cartesian
+
+    # SVK through the plane-stress condensation reproduces LinearElastic exactly
+    N_ps, C_ps = membrane_stress_and_tangent(mat_SVK_ps, A_I, A_I, e₁, e₂, e₃)
+    N_le, C_le = membrane_stress_and_tangent(mat_LE_SVK, A_I, A_I, e₁, e₂, e₃)
+    @test norm(Array(N_ps)) < 1e-8 * E_SVK * t_HE          # stress-free reference
+    @test norm(Array(C_ps - C_le)) / norm(Array(C_le)) < 1e-12
+    @test isapprox(C_ps[1,1,2,2] / C_ps[1,1,1,1], ν_SVK, rtol=1e-10)   # ν recovered
+
+    # the incompressible condensation of the same W is pinned at ν = 0.5
+    _, C_inc = membrane_stress_and_tangent(mat_SVK_inc, A_I, A_I, e₁, e₂, e₃)
+    @test isapprox(C_inc[1,1,2,2] / C_inc[1,1,1,1], 0.5, rtol=1e-10)
+    @test isapprox(C_inc[1,1,1,1], 4μ_SVK*t_HE, rtol=1e-10)
+
+    # finite deformation: plane-stress SVK is exactly linear in E, so it must still
+    # match LinearElastic to machine precision (membrane stress and bending stiffness)
+    c_def = SymmetricTensor{2,2}((1.44, 0.05, 1.10))
+    N_ps, C_ps = membrane_stress_and_tangent(mat_SVK_ps, c_def, A_I, e₁, e₂, e₃)
+    N_le, C_le = membrane_stress_and_tangent(mat_LE_SVK, c_def, A_I, e₁, e₂, e₃)
+    @test norm(Array(N_ps - N_le)) / norm(Array(N_le)) < 1e-12
+    @test norm(Array(C_ps - C_le)) / norm(Array(C_le)) < 1e-12
+    D_ps, Cs_ps = bending_and_shear_stiffness(mat_SVK_ps, c_def, A_I, e₁, e₂, e₃)
+    D_le, Cs_le = bending_and_shear_stiffness(mat_LE_SVK, c_def, A_I, e₁, e₂, e₃)
+    @test norm(Array(D_ps - D_le)) / norm(Array(D_le)) < 1e-12
+    # transverse shear carries κ_s = 5/6 in both materials
+    @test norm(Array(Cs_ps - Cs_le)) / norm(Array(Cs_le)) < 1e-12
+    _, Cs_nh = bending_and_shear_stiffness(mat_NH, A_I, A_I, e₁, e₂, e₃)
+    @test isapprox(Cs_nh[1,1], (5/6)*μ_HE*t_HE, rtol=1e-10)
+
+    # the condensed C₃₃ satisfies S³³ = 0, the incompressible one does not
+    S33(x) = 2*Tensors.gradient(W_SVK, FerriteShells.build_C3D(c_def, 0.0, 0.0, x))[3,3]
+    C33_ps  = FerriteShells.get_C33(mat_SVK_ps, c_def, 0.0, 0.0, 1.0, Jinv_I)
+    C33_inc = FerriteShells.get_C33(c_def, 0.0, 0.0, 1.0)
+    @test abs(S33(C33_ps)) < 1e-10 * E_SVK
+    @test abs(S33(C33_inc)) > 1e-3 * E_SVK
+    # analytic SVK condensation: E₃₃ = -ν/(1-ν)(E₁₁+E₂₂), C₃₃ = 1 + 2E₃₃
+    E11 = (c_def[1,1] - 1)/2; E22 = (c_def[2,2] - 1)/2
+    @test isapprox(C33_ps, 1 - 2ν_SVK/(1 - ν_SVK)*(E11 + E22), rtol=1e-10)
+    # with shear the condensation is unchanged for SVK (no E_α3 coupling)
+    @test isapprox(FerriteShells.get_C33(mat_SVK_ps, c_def, 0.02, -0.01, 1.0, Jinv_I),
+                   C33_ps, rtol=1e-10)
+
+    # derivatives propagate through the Newton iteration: element tangent vs FD
+    scv_ps = make_q4_scv(); reinit!(scv_ps, X_Q4_SQ)
+    n = 20
+    u_pert = zeros(n)
+    for (I, X) in enumerate(X_Q4_SQ)
+        u_pert[5I-4] = 2e-3*X[1]; u_pert[5I-3] = -1e-3*X[2]; u_pert[5I-2] = 3e-3*X[1]*X[2]
+        u_pert[5I-1] = 4e-4; u_pert[5I] = -2e-4
+    end
+    ke    = rm_tangent(scv_ps, u_pert, mat_SVK_ps)
+    ke_fd = rm_fd_tangent(scv_ps, u_pert, mat_SVK_ps)
+    @test norm(ke .- ke') / (norm(ke) + 1e-14) < 1e-10
+    @test norm(ke .- ke_fd) / (norm(ke_fd) + 1e-14) < 1e-5
+
+    # explicit and FD-energy paths agree: in-plane stretch only, so κ = γ = 0 and
+    # both reduce to the membrane response of the condensed material
+    u_mem = zeros(n)
+    for (I, X) in enumerate(X_Q4_SQ)
+        u_mem[5I-4] = 2e-3*X[1]; u_mem[5I-3] = -1e-3*X[2]
+    end
+    re_ex = zeros(n)
+    membrane_residuals_RM!(re_ex, scv_ps, u_mem, mat_SVK_ps)
+    bending_residuals_RM!(re_ex, scv_ps, u_mem, mat_SVK_ps)
+    re_fd = zeros(n)
+    residuals_RM_FD!(re_fd, scv_ps, u_mem, mat_SVK_ps)
+    @test maximum(abs, re_ex .- re_fd) / maximum(abs, re_fd) < 1e-8
+    # and against LinearElastic, which the condensed SVK must reproduce
+    re_le = zeros(n)
+    membrane_residuals_RM!(re_le, scv_ps, u_mem, mat_LE_SVK)
+    bending_residuals_RM!(re_le, scv_ps, u_mem, mat_LE_SVK)
+    @test maximum(abs, re_ex .- re_le) / maximum(abs, re_le) < 1e-10
+
+    # a volumetric term is inert under incompressibility, active under plane stress
+    W_vol(C) = W_SVK(C) + 1e5*(sqrt(det(C)) - 1)^2
+    mat_vol_inc = Hyperelastic(W_vol, t_HE)
+    mat_vol_ps  = Hyperelastic(W_vol, t_HE; incompressible=false)
+    N_vi, _ = membrane_stress_and_tangent(mat_vol_inc, c_def, A_I, e₁, e₂, e₃)
+    N_si, _ = membrane_stress_and_tangent(mat_SVK_inc, c_def, A_I, e₁, e₂, e₃)
+    N_vp, _ = membrane_stress_and_tangent(mat_vol_ps,  c_def, A_I, e₁, e₂, e₃)
+    @test norm(Array(N_vi - N_si)) < 1e-10 * norm(Array(N_si))   # U(J) ignored: J ≡ 1
+    @test norm(Array(N_vp - N_ps)) > 1e-2  * norm(Array(N_ps))   # U(J) felt
 end

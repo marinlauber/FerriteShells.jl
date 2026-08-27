@@ -8,6 +8,7 @@ Utility functions
 ```@docs
 shell_grid
 shelldofs
+shelldofs!
 compute_volume
 director_field
 shell_strains
