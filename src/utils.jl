@@ -540,6 +540,8 @@ function _theta_dofmap(dh::DofHandler)
         rθ = Ferrite.dof_range(sdh, :θ)
         for cell in CellIterator(sdh)
             cd = celldofs(cell)
+            nn = length(getnodes(cell))
+            length(rθ) == 2nn || throw(ArgumentError("expected :θ to have 2 DOFs per node (φ₁, φ₂); got $(length(rθ)) DOFs per cell for $nn nodes"))
             for (I, nid) in enumerate(getnodes(cell))
                 dofmap[nid] = (cd[rθ[2I-1]], cd[rθ[2I]])
             end
