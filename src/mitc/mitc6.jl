@@ -17,11 +17,7 @@ Assumed field (rotated Raviart–Thomas ``RT_1``, the MITC7 plate space), Lee & 
 Dropping the two interior conditions and the last two basis fields gives the linear variant
 MITC6-b (Eq. 40–41), which is stiffer in bending-dominated problems.
 """
-function MITC6a(ip_shape::Interpolation, qr::QuadratureRule)
-    conds, basis = tying_conditions(MITC6a)
-    ξ_tie, α_tie, h_tie_1, h_tie_2 = tying_weights(qr, conds, basis)
-    MITC{6}(ip_shape, ξ_tie, α_tie, h_tie_1, h_tie_2)
-end
+MITC6a(ip_shape::Interpolation, qr::QuadratureRule) = MITC{6}(ip_shape, qr, MITC6a)
 
 const MITC6 = MITC6a
 

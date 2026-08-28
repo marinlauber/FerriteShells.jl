@@ -13,6 +13,10 @@ at `ξ_tie[k]`, and both `h_tie_1` and `h_tie_2` span all entries,
 columns zero (``\\gamma_1`` is built from ``\\gamma_1`` tying values only); triangular ones do not, since
 the hypotenuse condition couples the two components (Lee & Bathe 2004).
 
+Every scheme is declared the same way: a `tying_conditions(::typeof(MITCx))` method returning
+its tying conditions and the assumed-strain space they are tied against, which the shared
+`MITC{N}(ip_shape, qr, scheme)` constructor feeds to [`tying_weights`](@ref).
+
 Static fields (`N_tie`, `dN_tie`, `h_tie_*`) are precomputed once at construction.
 Mutable fields (`A_tie`, `d₀_tie`, `*_node`) are updated each [`reinit!`](@ref) call.
 """
@@ -38,6 +42,10 @@ end
 function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
                  h_tie_1::Matrix{T}, h_tie_2::Matrix{T}) where {N,T}
     n_shape = getnbasefunctions(ip_shape)
+    # `N_tie` is indexed alongside the per-node frames `G₃_node`/`T₁_node`/`T₂_node`, which are
+    # sized N, so the tying scheme and the shape interpolation must have the same node count.
+    n_shape == N || throw(ArgumentError(
+        "MITC{$N} tying needs an $N-node shape interpolation, got $ip_shape with $n_shape base functions"))
     M = length(ξ_tie)
     # shape values and the derivative along the tied direction at each tying point
     N_tie = zeros(T, n_shape, M); dN_tie = zeros(T, n_shape, M)
@@ -57,17 +65,14 @@ function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vect
     )
 end
 
-# Quadrilateral schemes: two independent per-component tying lists, concatenated into the
-# component-tagged layout. γ₁ never sees a γ₂ tying value, so `h_tie_1` gets zero columns on
-# the γ₂ entries and vice versa.
-function MITC{N}(ip_shape::Interpolation, h_tie_1::Matrix{T}, h_tie_2::Matrix{T},
-                 ξ_tie_1::Vector{<:Vec{2}}, ξ_tie_2::Vector{<:Vec{2}}) where {N,T}
-    M₁ = length(ξ_tie_1); M₂ = length(ξ_tie_2); n_qp = size(h_tie_1, 1)
-    ξ_tie = vcat(convert(Vector{Vec{2,T}}, ξ_tie_1), convert(Vector{Vec{2,T}}, ξ_tie_2))
-    α_tie = vcat(fill(1, M₁), fill(2, M₂))
-    H₁ = hcat(h_tie_1, zeros(T, n_qp, M₂))
-    H₂ = hcat(zeros(T, n_qp, M₁), h_tie_2)
-    MITC{N}(ip_shape, ξ_tie, α_tie, H₁, H₂)
+# Every scheme is declared by a `tying_conditions(::typeof(MITCx))` method returning its tying
+# conditions and the assumed-strain space they are tied against; this is the shared body that
+# turns that pair into the element data, so each scheme file is a docstring, a one-line
+# constructor and the conditions table.
+function MITC{N}(ip_shape::Interpolation, qr::QuadratureRule, scheme) where {N}
+    conds, basis = tying_conditions(scheme)
+    ξ_tie, α_tie, h_tie_1, h_tie_2 = tying_weights(qr, conds, basis)
+    MITC{N}(ip_shape, ξ_tie, α_tie, h_tie_1, h_tie_2)
 end
 
 # empty MITC is standard
@@ -76,10 +81,14 @@ struct NoMITC <: AbstractMITC end
 import Ferrite: reinit!
 
 """
-    reinit!(mitc, ip_geo, x)
+    reinit!(mitc, ip_geo, x, G₃_nodes, T₁_nodes, T₂_nodes)
 
-Update the MITC data for a cell with cell coordinates `x`.
-The reference geometry at the tying points is recomputed and stored.
+Update the MITC data for a cell with cell coordinates `x` and nodal frames
+`G₃_nodes`/`T₁_nodes`/`T₂_nodes` (length `N`, i.e. sized to `ip_shape`, not `ip_geo`).
+
+The reference geometry at the tying points is recomputed and stored: the covariant tangent
+`A_tie[k]` from the geometric interpolation `ip_geo`, and the reference director `d₀_tie[k]`
+from the shape interpolation via the precomputed `N_tie`.
 """
 reinit!
 
@@ -100,11 +109,18 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
     # (NoMITC) path.
     for k in 1:M
         ξ_k = mitc.ξ_tie[k]; α = mitc.α_tie[k]
-        A = zero(Vec{3,T}); d₀ = zero(Vec{3,T})
+        # A_α from the *geometric* interpolation (n_geo coordinates) ...
+        A = zero(Vec{3,T})
         for i in 1:n_geo
-            dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
+            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
             A += x[i] * dN[α]
-            d₀ += Nval * G₃_nodes[i]
+        end
+        # ... d₀ from the *shape* interpolation, through the precomputed `N_tie`: the nodal
+        # frames are sized to `ip_shape` (N entries), and `tying_shear_strains` interpolates
+        # the current director with the very same weights, so the two agree term by term.
+        d₀ = zero(Vec{3,T})
+        for I in 1:N
+            d₀ += mitc.N_tie[I,k] * mitc.G₃_node[I]
         end
         mitc.A_tie[k]  = A
         mitc.d₀_tie[k] = d₀
@@ -185,7 +201,7 @@ coefficients are ``c = C^{-1} W \\gamma^\\text{tie}``, hence
 ``h_\\alpha[q,k] = \\sum_j P_j(\\xi_q)_\\alpha (C^{-1}W)_{jk}``.
 """
 function tying_weights(qr::QuadratureRule, conds, basis; atol = 1e-12)
-    T = Float64
+    T = eltype(qr.weights)
     length(conds) == length(basis) ||
         throw(ArgumentError("$(length(conds)) tying conditions for $(length(basis)) basis fields"))
     ξ_tie = Vec{2,T}[]; α_tie = Int[]
@@ -217,8 +233,8 @@ function tying_weights(qr::QuadratureRule, conds, basis; atol = 1e-12)
     return ξ_tie, α_tie, h₁, h₂
 end
 
-# Tied directions shared by the triangular elements: the two natural directions and the
-# hypotenuse of the right-angled reference triangle, γ_q = (γ₂ - γ₁)/√2 (Lee & Bathe Eq. 19).
+# Tied directions used by the schemes below: the two natural directions, and — on triangles —
+# the hypotenuse of the right-angled reference triangle, γ_q = (γ₂ - γ₁)/√2 (Lee & Bathe Eq. 19).
 const Ê₁  = Vec{2}((1.0, 0.0))
 const Ê₂  = Vec{2}((0.0, 1.0))
 const Ê_q = Vec{2}((-1.0, 1.0)) / sqrt(2)
