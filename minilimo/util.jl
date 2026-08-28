@@ -194,6 +194,37 @@ function make_minilimo_grid(;
     return grid
 end
 
+# ── Wide-actuator miniLIMO geometry ─────────────────────────────────────────────
+# Drop-in alternative to `make_minilimo_grid`: same builder, same cellsets / nodesets /
+# facetsets, different geometry.  The actuator footprint is wider (x_act 0.035 → 0.044)
+# and sits higher on the shell (y_lo 0.004 → 0.02, y_hi 0.09 → 0.102).
+#
+#     grid = make_minilimo_grid_wide(; Np=3, order=1)
+#
+# WHY THE DEFAULT ELEMENT COUNTS ARE HIGHER THAN THEY LOOK LIKE THEY NEED TO BE.
+# Widening x_act shrinks the skirt between the actuator weld and the symmetry clamp at
+# x=±Lx from 15.59 mm to 6.59 mm; raising y_hi shrinks the top skirt from 19.00 mm to
+# 7.00 mm.  The shell edge boundary layer here is √(R·t) ≈ 5.5 mm at t = 1 mm, so each of
+# those bands now holds barely ONE boundary-layer width — the weld-kink layer and the
+# clamp layer overlap — while still having to absorb the whole actuator expansion.
+# nx_left/nx_right = 8 and ny_top = 8 put ~8 elements across each skirt instead of ~4.
+#
+# nx_act = 42 rather than 33 for a second reason: the follower-pressure term −Pact·K_pact
+# is destabilizing and scales like Pact·h, while the bending stiffness that has to contain
+# it scales like D/h², so their ratio grows as h³.  At nx_act = 33 the actuator element is
+# 2.67 mm and that ratio reaches ~0.83 at Pact = 600 mmHg; at 42 the element is 2.10 mm and
+# it drops to ~0.40.  42 is also divisible by Np = 3 (`make_minilimo_grid` asserts this).
+#
+# Cost at these defaults: 5844 cells vs 4126 at 4/33/4.
+function make_minilimo_grid_wide(;
+    nx_left=8, nx_act=42, nx_right=8,
+    ny_bot=10, ny_act=48, ny_top=8,
+    W=0.10118, H=0.109, x_act=0.044, y_lo=0.02, y_hi=0.102,
+    Np=1, even_Np=false, order=2, grade_bot=1.0)
+    make_minilimo_grid(; nx_left, nx_act, nx_right, ny_bot, ny_act, ny_top,
+                         W, H, x_act, y_lo, y_hi, Np, even_Np, order, grade_bot)
+end
+
 # `corner_relief` tapers the morph amplitude smoothly to zero over the first/last
 # `corner_relief` edge nodes (cosine blend: 0 at the x=±Lx corner → 1 at node
 # corner_relief+1 inward).  This gives the singular edge∩sym corner a small flat
