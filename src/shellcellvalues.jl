@@ -18,13 +18,20 @@ functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
 
 **Keyword arguments:** The following keyword arguments are experimental and may change in future minor releases
 * `mitc`:  an instant of [`MITC`](@ref) to specify the shear treatment used in the element (default `NoMITC`)
+* `frames`: a [`NodeFrames`](@ref) object (default `nothing`). When given, the cell-based
+    `reinit!(scv, cell)` / `reinit!(scv, cc)` entry points use the stored per-node frames
+    automatically, so a kernel loop written as `reinit!(scv, cell)` cannot silently fall back
+    to centroid frames. Pass `nothing` for centroid frames.
 
 **Common methods:**
 * [`reinit!`](@ref) computes the reference geometry (``A_1``, ``A_2``, ``G_3``, ``B``, ``\\cdots``) by differentiating the coordinate map using `ip_geo`.
+* [`copy`](@ref copy(::ShellCellValues)) returns an independent object that shares the immutable
+    rule / interpolations / frames but owns its own `reinit!` buffers — the sanctioned idiom for
+    multi-threaded assembly is one `copy(scv)` per task (or per cell-chunk).
 """
 ShellCellValues
 
-struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
+struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M, F} <: AbstractCellValues
     qr       :: QR
     ip_geo   :: IPG
     ip_shape :: IPS
@@ -47,6 +54,7 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
     T₁_elem  :: Vector{Vec{3, T}}
     T₂_elem  :: Vector{Vec{3, T}}
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
+    frames   :: F  # Nothing, or a NodeFrames used by the cell-based reinit! entry points
 end
 
 Ferrite.getnormal(scv::ShellCellValues, q::Int) = scv.G₃[q]
@@ -55,7 +63,7 @@ Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 @propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_geo)
 
-function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing)
+function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing, frames=nothing)
     n_qp    = length(qr.weights)
     n_shape = getnbasefunctions(ip_shape)
     T       = Float64
@@ -74,7 +82,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
     end
 
     m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
-    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m)}(
+    ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m), typeof(frames)}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2, zeros(T, n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
@@ -84,7 +92,25 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_shape), fill(zero(Vec{3, T}), n_shape),
-        fill(zero(Vec{3, T}), n_shape), m
+        fill(zero(Vec{3, T}), n_shape), m, frames
+    )
+end
+
+"""
+    Base.copy(scv::ShellCellValues)
+
+An independent `ShellCellValues` sharing the immutable rule/interpolations/frames but
+with its own reinit! buffers (including the MITC data): the threaded-assembly idiom is
+one `copy(scv)` per task.
+"""
+function Base.copy(scv::ShellCellValues)
+    typeof(scv)(
+        scv.qr, scv.ip_geo, scv.ip_shape,
+        copy(scv.N), copy(scv.dNdξ), copy(scv.d2Ndξ2), copy(scv.detJdV),
+        copy(scv.A₁), copy(scv.A₂), copy(scv.A₁₁), copy(scv.A₁₂), copy(scv.A₂₂),
+        copy(scv.A_metric), copy(scv.G₃), copy(scv.T₁), copy(scv.T₂), copy(scv.B),
+        copy(scv.B₀), copy(scv.G₃_elem), copy(scv.T₁_elem), copy(scv.T₂_elem),
+        copy(scv.mitc), scv.frames
     )
 end
 
@@ -145,10 +171,15 @@ quadrature point.
 **Note:**
 For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
 """
-reinit!
+reinit!(::ShellCellValues, x::AbstractVector{<:Vec{3}})
 
-reinit!(scv::ShellCellValues, cell) = reinit!(scv, getcoordinates(cell))
-reinit!(scv::ShellCellValues, cc::CellCache) = reinit!(scv, getcoordinates(cc))
+# Cell-based entry points route through the frames stored at construction (if any),
+# so kernels written as `reinit!(scv, cell)` cannot silently drop NodeFrames.
+reinit!(scv::ShellCellValues, cell) = _reinit_cell!(scv, scv.frames, cell)
+reinit!(scv::ShellCellValues, cc::CellCache) = _reinit_cell!(scv, scv.frames, cc)
+_reinit_cell!(scv::ShellCellValues, ::Nothing, cell) = reinit!(scv, getcoordinates(cell))
+# frames::NodeFrames — untyped because NodeFrames is defined in utils.jl.
+_reinit_cell!(scv::ShellCellValues, frames, cell) = reinit!(scv, getcoordinates(cell), frames, getnodes(cell))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     n_geo = getnbasefunctions(scv.ip_geo)
     for q in eachindex(scv.qr.weights)

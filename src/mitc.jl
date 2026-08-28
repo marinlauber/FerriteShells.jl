@@ -75,8 +75,12 @@ function MITC{N}(ip_shape::Interpolation, qr::QuadratureRule, scheme) where {N}
     MITC{N}(ip_shape, ξ_tie, α_tie, h_tie_1, h_tie_2)
 end
 
+# safe copy for multi-threaded assembly
+Base.copy(m::MITC{N,M,T}) where {N,M,T} = MITC{N,M,T}(ntuple(i -> copy(getfield(m, i)), fieldcount(MITC{N,M,T}))...)
+
 # empty MITC is standard
 struct NoMITC <: AbstractMITC end
+Base.copy(m::NoMITC) = m
 
 import Ferrite: reinit!
 
