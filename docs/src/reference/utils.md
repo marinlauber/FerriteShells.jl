@@ -14,4 +14,5 @@ director_field
 shell_strains
 embed23
 NodeFrames
+add_director_symmetry!
 ```

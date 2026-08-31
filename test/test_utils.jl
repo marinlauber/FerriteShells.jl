@@ -472,7 +472,8 @@ end
     # rotate — not from the geometric patch curvature B = A_{α,β}·G₃. The two coincide
     # in the continuum but not discretely, so subtracting B leaves a reference bending
     # strain κ(0) = B₀ − B ≠ 0 on curved or warped elements: a pre-moment in the
-    # undeformed configuration.
+    # undeformed configuration. On bilinear panels of a doubly-curved surface the twist
+    # part of that error persists under refinement, so it never converges away.
     ref9 = [Vec{2}((x, y)) for (x, y) in
         ((0.0,0.0),(1.0,0.0),(1.0,1.0),(0.0,1.0),(0.5,0.0),(1.0,0.5),(0.5,1.0),(0.0,0.5),(0.5,0.5))]
     curved9    = [Vec{3}((p[1], p[2], 0.3 * (p[1]^2 - p[2]^2 / 2))) for p in ref9]
@@ -573,4 +574,53 @@ end
     scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip1)
     reinit!(scv, x, nf, ids)
     @test all(I -> scv.G₃_elem[I] ≈ nf.G₃[ids[I]], 1:getnbasefunctions(ip1))
+end
+
+@testset "add_director_symmetry!" begin
+    # Cylinder patch spanning φ ∈ [-π/4, π/4] about the z axis. Nodes on the φ = 0
+    # meridian are interior, so their area-averaged normal is exactly radial (ê_x) and
+    # therefore lies exactly in the y = 0 symmetry plane — d·n = 0 must hold exactly.
+    R, H = 3.0, 2.0
+    grid = shell_grid(generate_grid(Quadrilateral, (4, 3), Vec{2}((-π/4, 0.0)), Vec{2}((π/4, H)));
+                      map = nd -> (R*cos(nd.x[1]), R*sin(nd.x[1]), nd.x[2]))
+    addnodeset!(grid, "sym_y", x -> abs(x[2]) < 1e-9)
+    ip  = Lagrange{RefQuadrilateral, 1}()
+    nf  = NodeFrames(grid, ip)
+    dh  = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    nset = getnodeset(grid, "sym_y")
+    @test !isempty(nset)
+    n̂ = Vec{3}((0.0, 1.0, 0.0))
+    for nid in nset
+        @test abs(nf.G₃[nid] ⋅ n̂) ≤ 1e-12      # two-sided average ⇒ exactly in-plane
+    end
+
+    ch = ConstraintHandler(dh)
+    add_director_symmetry!(ch, dh, nf, "sym_y", n̂)
+    close!(ch); Ferrite.update!(ch, 0.0)
+
+    # Arbitrary free rotations: after apply!, every constrained node's director lies in
+    # the plane. This is what makes the condition frame-independent — it holds whichever
+    # way the `ref = |G₃_x| < 0.9 ? ê_x : ê_y` heuristic happened to orient T₁/T₂.
+    u = zeros(ndofs(dh))
+    Random.seed!(5)
+    sdh = only(dh.subdofhandlers); rθ = Ferrite.dof_range(sdh, :θ)
+    for cell in CellIterator(dh), k in rθ
+        u[celldofs(cell)[k]] = 0.3 * randn()
+    end
+    apply!(u, ch)
+    dofmap = FerriteShells._theta_dofmap(dh)
+    tilted = false
+    for nid in nset
+        φ₁, φ₂ = u[dofmap[nid][1]], u[dofmap[nid][2]]
+        cosθ, sincθ = FerriteShells.cos_sinc_sq(φ₁^2 + φ₂^2)
+        d = cosθ * nf.G₃[nid] + sincθ * (φ₁ * nf.T₁[nid] + φ₂ * nf.T₂[nid])
+        @test abs(d ⋅ n̂) ≤ 1e-12
+        hypot(φ₁, φ₂) > 1e-6 && (tilted = true)
+    end
+    @test tilted                                # the constraint did not just zero everything
+    @test any(nid -> abs(nf.T₂[nid] ⋅ n̂) < 0.9, nset)   # "fix φ₂" would have been wrong here
+
+    # A plane that does not contain the shell normal is not a symmetry plane
+    ch2 = ConstraintHandler(dh)
+    @test_throws ArgumentError add_director_symmetry!(ch2, dh, nf, "sym_y", Vec{3}((1.0, 0.0, 0.0)))
 end
