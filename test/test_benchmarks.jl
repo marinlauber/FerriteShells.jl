@@ -50,6 +50,12 @@ function scordelis_lo_rm_solve_test(ns, nt)
 
     dbc = ConstraintHandler(dh)
     add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"), x -> zeros(2), [2, 3]))
+    # The diaphragms fix u_y and u_z at both ends but leave the axial u_x free, so K keeps a
+    # rigid-body translation along x (one zero singular value, cond ~1e17). The load is
+    # orthogonal to it, so `K \ f` still returns an answer — but an arbitrary multiple of the
+    # null mode, amplified by 1/σ_min, which makes the result depend on the BLAS kernel. u_x = 0
+    # holds exactly at mid-span by symmetry, and "ref_point" is a mid-span node.
+    add!(dbc, Dirichlet(:u, getnodeset(grid, "ref_point"), x -> 0.0, [1]))
     close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
     u_sol = K \ f
 
@@ -177,6 +183,12 @@ function pinched_hemisphere_rm_solve_test(n)
     add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
     add_director_symmetry!(ch, dh, nf, "sym_phi0_n",  Vec{3}((0.0, 1.0, 0.0)))
     add_director_symmetry!(ch, dh, nf, "sym_phi90_n", Vec{3}((1.0, 0.0, 0.0)))
+    # The symmetry planes fix u_y (on y = 0) and u_x (on x = 0) and the director constraints fix
+    # the rotations, but nothing fixes u_z: K keeps a rigid-body translation along z (one zero
+    # singular value, cond ~1e17). The pinching loads are self-equilibrated so the system stays
+    # consistent, but `K \ f` returns an arbitrary multiple of that mode, and rounding leaks it
+    # into u_x — the reported quantity then differs between machines. Pin u_z at one node.
+    add!(ch, Dirichlet(:u, getnodeset(grid, "load_A"), x -> 0.0, [3]))
     close!(ch); Ferrite.update!(ch, 0.0)
 
     n_base = getnbasefunctions(ip)

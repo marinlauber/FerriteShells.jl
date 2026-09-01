@@ -50,6 +50,10 @@ add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
 add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
 add_director_symmetry!(ch, dh, nf, "sym_phi0_n",  Vec{3}((0.0, 1.0, 0.0)))
 add_director_symmetry!(ch, dh, nf, "sym_phi90_n", Vec{3}((1.0, 0.0, 0.0)))
+# The symmetry planes and director constraints leave u_z free, so K keeps a rigid-body
+# translation along z (cond ~1e17) and `K \ f` returns an arbitrary multiple of it, which
+# rounding leaks into u_x. Pin u_z at one node; u_x(A) is unaffected by the gauge.
+add!(ch, Dirichlet(:u, getnodeset(grid, "load_A"), x -> 0.0, [3]))
 close!(ch); Ferrite.update!(ch, 0.0)
 
 # allocate matrices and vectors
