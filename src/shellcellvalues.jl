@@ -178,7 +178,7 @@ reinit!(::ShellCellValues, x::AbstractVector{<:Vec{3}})
 reinit!(scv::ShellCellValues, cell) = _reinit_cell!(scv, scv.frames, cell)
 reinit!(scv::ShellCellValues, cc::CellCache) = _reinit_cell!(scv, scv.frames, cc)
 _reinit_cell!(scv::ShellCellValues, ::Nothing, cell) = reinit!(scv, getcoordinates(cell))
-# frames::NodeFrames — untyped because NodeFrames is defined in utils.jl.
+# frames::NodeFrames — untyped; NodeFrames is defined in nodeframe.jl.
 _reinit_cell!(scv::ShellCellValues, frames, cell) = reinit!(scv, getcoordinates(cell), frames, getnodes(cell))
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     n_geo = getnbasefunctions(scv.ip_geo)
