@@ -1,6 +1,9 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DocumenterCitations = "daee34ce-89f3-4625-b898-19384cb65244"
+DocumenterCodeBlocks = "b6400b83-267f-4b55-9fd8-bffc853bdfd8"
 FerriteShells = "39bd9e63-70f9-4eb3-975d-f599ce62130a"
+Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 MarkdownAST = "d0879d2d-cac2-40c8-9cee-1863dc0c7391"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"

@@ -1,7 +1,12 @@
-using Documenter, DocumenterCitations
+using Documenter, DocumenterCitations, DocumenterCodeBlocks
 using FerriteShells
 
-bib = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"), style=:numeric)
+# run Literate on the code gallery sources to generate the markdown pages
+include("generate.jl")
+
+bibtex_plugin = CitationBibliography(joinpath(@__DIR__, "src", "refs.bib"), style=:numeric)
+
+codeblocks_plugin = CodeBlocks(line_counter=:named)
 
 makedocs(
     modules = [FerriteShells],
@@ -25,9 +30,16 @@ makedocs(
         "Formulations"      => ["shell.md", "KirchhoffLove.md",
                                 "ReissnerMindlin.md", "shell_models.md",
                                 "solvers.md", "References.md"],
+        "Code gallery" => [
+            "Code gallery overview" => "gallery/index.md",
+            "gallery/linear-elasticity.md",
+        ],
         "API reference"     => "reference/index.md",
     ],
-    plugins=[bib]
+    plugins=[
+        bibtex_plugin,
+        codeblocks_plugin,
+    ]
 )
 
 deploydocs(
