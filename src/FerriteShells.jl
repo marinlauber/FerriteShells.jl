@@ -26,6 +26,9 @@ export assemble_pressure!, assemble_pressure_tangent!, assemble_traction!, apply
 
 include("utils.jl")
 export shell_grid, shelldofs, shelldofs!, get_ferrite_grid, compute_volume, volume_residual, volume_gradient!, director_field
-export shell_strains, embed23, NodeFrames, add_director_symmetry!
+export shell_strains, embed23
+
+include("nodeframe.jl")
+export NodeFrames, add_director_symmetry!
 
 end # module FerriteShells
