@@ -1,6 +1,4 @@
-using FerriteShells
-using LinearAlgebra
-using Printf
+using FerriteShells, LinearAlgebra, Printf
 
 # Pinched hemispherical shell — Reissner–Mindlin (5 DOF/node) benchmark.
 # Quarter symmetry model: polar angle θ ∈ [18°, 90°], azimuthal φ ∈ [0°, 90°].
@@ -14,11 +12,7 @@ using Printf
 # sphere — on this geometry it flips right at the equator, where the load is applied, so
 # fixing φ₂ silently clamps the shell there (u_x(A) comes out ~250× too small). Use
 # `add_director_symmetry!`, which writes φ₁(T₁·n) + φ₂(T₂·n) = 0 in whatever frame each
-# node carries. That requires per-node frames, so the assembly must reinit! with `nf`.
-#
-# NOTE: this benchmark is bending-dominated (t/R = 0.004), so MITC is needed. With MITC9,
-# NodeFrames and the frame-independent symmetry BC it converges to the reference:
-# 8×8 → 71% error, 16×16 → 14%, 32×32 → 0.2%.
+# node carries.
 
 function hemisphere_grid(n; R=10.0, θ_hole_deg=18.0)
     θ_min = θ_hole_deg * π / 180
@@ -38,11 +32,11 @@ end
 mat = LinearElastic(6.825e7, 0.3, 0.04)
 grid = hemisphere_grid(32)
 
-# interpolation space and shell with shear treatmens
+# interpolation space and shell with MITC shear treatment
 ip  = Lagrange{RefQuadrilateral, 2}()
 qr  = QuadratureRule{RefQuadrilateral}(3)
 nf = NodeFrames(grid, ip)
-scv  = ShellCellValues(qr, ip, ip; mitc=MITC9)
+scv  = ShellCellValues(qr, ip, ip; mitc=MITC9, frames=nf)
 
 # degrees of freedom
 dh = DofHandler(grid)
@@ -70,7 +64,7 @@ re     = zeros(5n_base)
 asm = start_assemble(K, zeros(N))
 for cell in CellIterator(dh)
     fill!(ke, 0.0)
-    reinit!(scv, cell, nf)   # per-node frames — the frame the symmetry BC is written in
+    reinit!(scv, cell)  # uses the NodeFrame by default
     u0 = zeros(5n_base)
     membrane_tangent_RM!(ke, scv, u0, mat)
     bending_tangent_RM!(ke, scv, u0, mat)
