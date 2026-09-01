@@ -13,4 +13,5 @@ compute_volume
 director_field
 shell_strains
 embed23
+add_director_symmetry!
 ```

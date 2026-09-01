@@ -9,7 +9,7 @@ using Base: @propagate_inbounds
 import Ferrite: reinit!
 
 include("mitc.jl")
-export AbstractMITC, NoMITC, MITC,MITC3, MITC4, MITC6, MITC9
+export AbstractMITC, NoMITC, MITC
 
 include("shellcellvalues.jl")
 export ShellCellValues
@@ -29,6 +29,6 @@ export shell_grid, shelldofs, shelldofs!, get_ferrite_grid, compute_volume, volu
 export shell_strains, embed23
 
 include("nodeframe.jl")
-export NodeFrames
+export NodeFrames, add_director_symmetry!
 
 end # module FerriteShells
