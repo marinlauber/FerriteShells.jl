@@ -154,6 +154,9 @@ function scordelis_lo_roof()
 
         dbc = ConstraintHandler(dh)
         add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"), x -> zeros(2), [2, 3]))
+        # The diaphragms leave the axial u_x free, so K keeps a rigid-body translation along x
+        # (cond ~1e17). u_x = 0 holds exactly at mid-span by symmetry; "ref_point" is mid-span.
+        add!(dbc, Dirichlet(:u, getnodeset(grid, "ref_point"), x -> 0.0, [1]))
         close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
 
         u_sol = K \ f
