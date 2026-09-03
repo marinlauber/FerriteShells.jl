@@ -4,20 +4,30 @@ using ForwardDiff
 abstract type AbstractMaterial end
 
 """
-    LinearElastic(E, ν, thickness=1.0)
+    LinearElastic(E, ν, thickness=1.0; β=1.0)
 
 Linear elastic shell material defined by Young's modulus `E`, Poisson's ratio `ν`,
 and thickness `thickness`.
+
+`β` is a dimensionless **bending scale factor** that decouples the bending/shear
+response from the membrane response: the bending stiffness becomes
+`D = β · C · t³/12` and the transverse-shear stiffness scales likewise, while the
+membrane stiffness `A = C · t` is unaffected. `β = 1` recovers the physical shell;
+`β → 0` approaches a pure membrane (tension-field limit). At exactly `β = 0` the
+rotation DOFs are unconstrained and the assembled tangent is singular — use a small
+positive `β` (e.g. `1e-4`) for a near-membrane response.
 """
 struct LinearElastic{T} <: AbstractMaterial
     E::T
     ν::T
     thickness::T
-    function LinearElastic(E::T, ν::T, thickness::T=one(T)) where T
+    β::T
+    function LinearElastic(E::T, ν::T, thickness::T=one(T); β::T=one(T)) where T
         @assert E > 0 "Young's modulus must be positive"
         @assert 0 ≤ ν < 0.5 "Poisson's ratio must be in [0, 0.5)"
         @assert thickness > 0 "Thickness must be positive"
-        new{typeof(E)}(E, ν, thickness)
+        @assert β ≥ 0 "Bending scale factor must be non-negative"
+        new{typeof(E)}(E, ν, thickness, β)
     end
 end
 
@@ -37,8 +47,8 @@ function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
                                      A_metric::SymmetricTensor{2,2,T},
                                      A₁=nothing, A₂=nothing, G₃=nothing) where T
     _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
-    D    = (mat.thickness^2 / 12) * C
-    cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    D    = mat.β * (mat.thickness^2 / 12) * C
+    cs   = mat.β * T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
     Aup  = inv(A_metric)
     Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
     return D, Cs

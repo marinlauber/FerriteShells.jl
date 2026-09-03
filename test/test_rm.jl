@@ -58,6 +58,35 @@
 end
 
 
+@testset "LinearElastic bending scale factor β" begin
+    A_metric = SymmetricTensor{2,2}((1.3, 0.2, 0.9))
+    c_ms     = SymmetricTensor{2,2}((1.35, 0.22, 0.94))
+
+    mat1 = LinearElastic(1.0e6, 0.3, 0.01)          # β = 1 (default)
+    mat0 = LinearElastic(1.0e6, 0.3, 0.01; β=0.25)
+    matm = LinearElastic(1.0e6, 0.3, 0.01)          # membrane reference
+
+    # β defaults to 1 and does not touch the membrane response.
+    @test mat1.β == 1.0
+    N1, C1 = FerriteShells.membrane_stress_and_tangent(mat1, c_ms, A_metric)
+    N0, C0 = FerriteShells.membrane_stress_and_tangent(mat0, c_ms, A_metric)
+    @test N0 ≈ N1
+    @test C0 ≈ C1
+
+    # β scales bending (D) and shear (Cs) stiffness linearly.
+    D1, Cs1 = FerriteShells.bending_and_shear_stiffness(mat1, c_ms, A_metric)
+    D0, Cs0 = FerriteShells.bending_and_shear_stiffness(mat0, c_ms, A_metric)
+    @test D0  ≈ 0.25 * D1
+    @test Cs0 ≈ 0.25 * Cs1
+
+    # β = 0 zeroes the bending/shear block.
+    matz = LinearElastic(1.0e6, 0.3, 0.01; β=0.0)
+    Dz, Csz = FerriteShells.bending_and_shear_stiffness(matz, c_ms, A_metric)
+    @test iszero(Dz)
+    @test iszero(Csz)
+end
+
+
 @testset "RM bending explicit tangent" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
     scv = make_q9_scv()
