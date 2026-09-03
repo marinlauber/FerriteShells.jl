@@ -50,6 +50,12 @@ function scordelis_lo_rm_solve_test(ns, nt)
 
     dbc = ConstraintHandler(dh)
     add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"), x -> zeros(2), [2, 3]))
+    # The diaphragms fix u_y and u_z at both ends but leave the axial u_x free, so K keeps a
+    # rigid-body translation along x (one zero singular value, cond ~1e17). The load is
+    # orthogonal to it, so `K \ f` still returns an answer — but an arbitrary multiple of the
+    # null mode, amplified by 1/σ_min, which makes the result depend on the BLAS kernel. u_x = 0
+    # holds exactly at mid-span by symmetry, and "ref_point" is a mid-span node.
+    add!(dbc, Dirichlet(:u, getnodeset(grid, "ref_point"), x -> 0.0, [1]))
     close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
     u_sol = K \ f
 
@@ -145,4 +151,78 @@ end
     errs = abs.(ws .- ref)
     @test errs[1] > errs[2]              # monotone convergence
     @test errs[2] / abs(ref) < 0.12     # 16×16 within 12% of reference
+end
+
+# Pinched hemisphere (RM, quarter symmetry, t/R = 0.004)
+# R = 10, t = 0.04, E = 6.825e7, ν = 0.3; P = 1 inward at A = (R,0,0), outward at B = (0,R,0).
+# Reference (linear): |u_x(A)| = 0.0924.
+# Needs all three of: MITC (bending-dominated), NodeFrames (per-node frame so the φ DOFs
+# have a single meaning), and the frame-independent director symmetry BC. Writing the
+# symmetry condition as `Dirichlet(:θ, set, x -> 0.0, [2])` clamps the shell at the
+# equator — where the frame heuristic flips and the load sits — and stalls at 99% error.
+function pinched_hemisphere_rm_solve_test(n)
+    R, θ_min = 10.0, 18π/180
+    mat = LinearElastic(6.825e7, 0.3, 0.04)
+    grid = shell_grid(
+        generate_grid(QuadraticQuadrilateral, (n, n), Vec{2}((θ_min, 0.0)), Vec{2}((π/2, π/2)));
+        map = nd -> (R*sin(nd.x[1])*cos(nd.x[2]), R*sin(nd.x[1])*sin(nd.x[2]), R*cos(nd.x[1])))
+    addfacetset!(grid, "sym_phi0",  x -> abs(x[2]) < 1e-10)
+    addfacetset!(grid, "sym_phi90", x -> abs(x[1]) < 1e-10)
+    addnodeset!(grid, "sym_phi0_n",  x -> abs(x[2]) < 1e-9)
+    addnodeset!(grid, "sym_phi90_n", x -> abs(x[1]) < 1e-9)
+    addnodeset!(grid, "load_A", x -> abs(x[3]) < 1e-6 && abs(x[2]) < 1e-6 && x[1] > 0.5R)
+    addnodeset!(grid, "load_B", x -> abs(x[3]) < 1e-6 && abs(x[1]) < 1e-6 && x[2] > 0.5R)
+
+    ip  = Lagrange{RefQuadrilateral, 2}()
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip, ip; mitc=MITC9)
+    nf  = NodeFrames(grid, ip)
+    dh  = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+
+    ch = ConstraintHandler(dh)
+    add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
+    add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
+    add_director_symmetry!(ch, dh, nf, "sym_phi0_n",  Vec{3}((0.0, 1.0, 0.0)))
+    add_director_symmetry!(ch, dh, nf, "sym_phi90_n", Vec{3}((1.0, 0.0, 0.0)))
+    # The symmetry planes fix u_y (on y = 0) and u_x (on x = 0) and the director constraints fix
+    # the rotations, but nothing fixes u_z: K keeps a rigid-body translation along z (one zero
+    # singular value, cond ~1e17). The pinching loads are self-equilibrated so the system stays
+    # consistent, but `K \ f` returns an arbitrary multiple of that mode, and rounding leaks it
+    # into u_x — the reported quantity then differs between machines. Pin u_z at one node.
+    add!(ch, Dirichlet(:u, getnodeset(grid, "load_A"), x -> 0.0, [3]))
+    close!(ch); Ferrite.update!(ch, 0.0)
+
+    n_base = getnbasefunctions(ip)
+    K = allocate_matrix(dh, ch); f = zeros(ndofs(dh))
+    ke = zeros(5n_base, 5n_base); re = zeros(5n_base)
+    asm = start_assemble(K, zeros(ndofs(dh)))
+    for cell in CellIterator(dh)
+        fill!(ke, 0.0)
+        reinit!(scv, cell, nf)
+        u0 = zeros(5n_base)
+        membrane_tangent_RM!(ke, scv, u0, mat)
+        bending_tangent_RM!(ke, scv, u0, mat)
+        assemble!(asm, shelldofs(cell), ke, re)
+    end
+    apply_pointload!(f, dh, "load_A", Vec{3}((-1.0, 0.0, 0.0)))
+    apply_pointload!(f, dh, "load_B", Vec{3}(( 0.0, 1.0, 0.0)))
+    apply!(K, f, ch)
+    u = K \ f
+    apply!(u, ch)
+
+    nid = first(getnodeset(grid, "load_A"))
+    for cell in CellIterator(dh)
+        sd = shelldofs(cell)
+        for (I, g) in enumerate(getnodes(cell))
+            g == nid && return u[sd[5I-4]]
+        end
+    end
+    error("load_A not found")
+end
+
+@testset "Pinched hemisphere (RM) h-convergence" begin
+    ref = -0.0924
+    us   = [pinched_hemisphere_rm_solve_test(n) for n in (8, 16, 32)]
+    errs = abs.(us .- ref)
+    @test all(diff(errs) .< 0)              # monotone convergence
+    @test errs[end] / abs(ref) < 0.02       # 32×32 within 2% of the reference
 end

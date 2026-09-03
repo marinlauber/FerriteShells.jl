@@ -1,6 +1,4 @@
-using FerriteShells
-using LinearAlgebra
-using Printf
+using FerriteShells, LinearAlgebra, Printf
 
 # Pinched hemispherical shell — Reissner–Mindlin (5 DOF/node) benchmark.
 # Quarter symmetry model: polar angle θ ∈ [18°, 90°], azimuthal φ ∈ [0°, 90°].
@@ -8,13 +6,13 @@ using Printf
 # Loads: P inward at A=(R,0,0); P outward at B=(0,R,0).
 # Reference (linear, P=1): |u_x(A)| = 0.0924.
 #
-# Symmetry BCs (derived from director d = cosθ·G₃ + sincθ·(φ₁T₁ + φ₂T₂)):
-#   φ=0  plane (x-z, y=0): T₂=ê_y   → d_y = sincθ·φ₂ = 0 → fix u_y, φ₂
-#   φ=π/2 plane (y-z, x=0): T₂=−ê_x → d_x = −sincθ·φ₂ = 0 → fix u_x, φ₂
-#
-# NOTE: this benchmark is bending-dominated (t/R = 0.004). Standard displacement-based
-# RM elements suffer from membrane locking here — convergence is monotone but slow.
-# MITC or EAS elements are needed for practical accuracy on coarse meshes.
+# Symmetry BCs. The displacement condition is the usual one (u_n = 0), but the director
+# condition d·n = 0 must NOT be written as "fix φ₂": φ₁,φ₂ are components in the nodal
+# frame, whose tangent vectors come from a heuristic that flips as the normal sweeps the
+# sphere — on this geometry it flips right at the equator, where the load is applied, so
+# fixing φ₂ silently clamps the shell there (u_x(A) comes out ~250× too small). Use
+# `add_director_symmetry!`, which writes φ₁(T₁·n) + φ₂(T₂·n) = 0 in whatever frame each
+# node carries.
 
 function hemisphere_grid(n; R=10.0, θ_hole_deg=18.0)
     θ_min = θ_hole_deg * π / 180
@@ -23,6 +21,8 @@ function hemisphere_grid(n; R=10.0, θ_hole_deg=18.0)
         map = nd -> (R*sin(nd.x[1])*cos(nd.x[2]), R*sin(nd.x[1])*sin(nd.x[2]), R*cos(nd.x[1])))
     addfacetset!(g, "sym_phi0",  x -> abs(x[2]) < 1e-10)
     addfacetset!(g, "sym_phi90", x -> abs(x[1]) < 1e-10)
+    addnodeset!(g, "sym_phi0_n",  x -> abs(x[2]) < 1e-9)
+    addnodeset!(g, "sym_phi90_n", x -> abs(x[1]) < 1e-9)
     addnodeset!(g, "load_A", x -> abs(x[3]) < 1e-6 && abs(x[2]) < 1e-6 && x[1] > 0.5R)
     addnodeset!(g, "load_B", x -> abs(x[3]) < 1e-6 && abs(x[1]) < 1e-6 && x[2] > 0.5R)
     return g
@@ -32,11 +32,11 @@ end
 mat = LinearElastic(6.825e7, 0.3, 0.04)
 grid = hemisphere_grid(32)
 
-# interpolation space and shell with shear treatmens
+# interpolation space and shell with MITC shear treatment
 ip  = Lagrange{RefQuadrilateral, 2}()
 qr  = QuadratureRule{RefQuadrilateral}(3)
 nf = NodeFrames(grid, ip)
-scv  = ShellCellValues(qr, ip, ip; mitc=MITC9)
+scv  = ShellCellValues(qr, ip, ip; mitc=MITC9, frames=nf)
 
 # degrees of freedom
 dh = DofHandler(grid)
@@ -48,14 +48,18 @@ close!(dh)
 ch = ConstraintHandler(dh)
 add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
 add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
-add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
-add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi90"), x -> 0.0, [2]))
+add_director_symmetry!(ch, dh, nf, "sym_phi0_n",  Vec{3}((0.0, 1.0, 0.0)))
+add_director_symmetry!(ch, dh, nf, "sym_phi90_n", Vec{3}((1.0, 0.0, 0.0)))
+# The symmetry planes and director constraints leave u_z free, so K keeps a rigid-body
+# translation along z (cond ~1e17) and `K \ f` returns an arbitrary multiple of it, which
+# rounding leaks into u_x. Pin u_z at one node; u_x(A) is unaffected by the gauge.
+add!(ch, Dirichlet(:u, getnodeset(grid, "load_A"), x -> 0.0, [3]))
 close!(ch); Ferrite.update!(ch, 0.0)
 
 # allocate matrices and vectors
 N      = ndofs(dh)
 n_base = getnbasefunctions(ip)
-K      = allocate_matrix(dh)
+K      = allocate_matrix(dh, ch)   # ch: the affine constraints add coupling entries
 f      = zeros(N)
 ke     = zeros(5n_base, 5n_base)
 re     = zeros(5n_base)
@@ -64,7 +68,7 @@ re     = zeros(5n_base)
 asm = start_assemble(K, zeros(N))
 for cell in CellIterator(dh)
     fill!(ke, 0.0)
-    reinit!(scv, cell)
+    reinit!(scv, cell)  # uses the NodeFrame by default
     u0 = zeros(5n_base)
     membrane_tangent_RM!(ke, scv, u0, mat)
     bending_tangent_RM!(ke, scv, u0, mat)
@@ -78,11 +82,13 @@ apply!(K, f, ch)
 
 #solve and time it
 @time u_sol = K \ f
+apply!(u_sol, ch)   # recover the affine-constrained φ DOFs
 
 # extract solution at point
 ph     = PointEvalHandler(grid, [grid.nodes[first(grid.nodesets["load_A"])].x])
 u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
-@show u_eval
+println("FerriteShells.jl: ", round(u_eval[1],digits=4))
+println("reference       : -0.0924")
 # save
 VTKGridFile("pinched_hemisphere", dh) do vtk
     write_solution(vtk, dh, u_sol)

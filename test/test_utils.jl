@@ -269,6 +269,33 @@ end
     end
 end
 
+@testset "director_field follows the assembly frame" begin
+    # Curved mesh: the per-QP geometric normal (what the old director_field averaged)
+    # differs from the element node frame the kernels actually rotate about. At u = 0 the
+    # reported G₃ must equal that node frame — so with `frames = NodeFrames` it reproduces
+    # `nf.G₃` node-for-node, not the QP-average.
+    grid = shell_grid(generate_grid(Quadrilateral, (4, 4)); map = n -> (n.x[1], n.x[2], 0.3 * n.x[1]^2))
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    qr   = QuadratureRule{RefQuadrilateral}(2)
+    nf   = NodeFrames(grid, ip)
+    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    n_nodes = getnnodes(grid)
+    u0   = zeros(ndofs(dh))
+
+    scv_nf = ShellCellValues(qr, ip, ip; frames = nf)
+    d, G3  = director_field(dh, scv_nf, u0)
+    for i in 1:n_nodes
+        @test G3[:, i] ≈ collect(nf.G₃[i])   # reported normal is the NodeFrames normal
+        @test d[:, i]  ≈ G3[:, i]            # u = 0 ⇒ director = frame normal
+    end
+
+    # Centroid frames (no NodeFrames) generally give a different node normal on this
+    # curved mesh — confirms the frame actually feeds through post-processing.
+    scv_c   = ShellCellValues(qr, ip, ip)
+    _, G3_c = director_field(dh, scv_c, u0)
+    @test any(!isapprox(G3_c[:, i], collect(nf.G₃[i]); atol = 1e-8) for i in 1:n_nodes)
+end
+
 @testset "assemble_traction! regression: two-field DofHandler" begin
     # Regression for the bug where assemble_traction! used the interleaved 5-DOF
     # block (5I-4:5I-2) for a two-field DofHandler, scattering force into θ-DOFs.
@@ -381,7 +408,7 @@ end
         # try reinit
         qr  = QuadratureRule{E}(O+1)
         scv = ShellCellValues(qr, ip, ip)
-        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^3); close!(dh)
+        dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
         cell = first(CellIterator(dh))
         reinit!(scv, cell, nf)
         node_ids = getnodes(cell)
@@ -394,3 +421,329 @@ end
     end
 end
 
+
+@testset "dof lookup is layout independent" begin
+    # Positional dof arithmetic (`:u` at `3I-2:3I`, `:θ` after it) holds only for the
+    # canonical two-field order. These four layouts all describe the same shell; the
+    # loaders must agree on every one of them. The oracle for "the `:u` dofs of these
+    # nodes" is a ConstraintHandler, which resolves the field by name independently of
+    # anything under test.
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    fqr  = FacetQuadratureRule{RefQuadrilateral}(2)
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)))
+    # every node, so the loaders are exercised at local indices beyond 1 — at I = 1 the
+    # positional and by-name offsets coincide for every layout, hiding the defect.
+    addnodeset!(grid, "all", x -> true)
+
+    layouts = (
+        ("two-field",   dh -> (add!(dh, :u, ip^3); add!(dh, :θ, ip^2))),
+        ("θ first",     dh -> (add!(dh, :θ, ip^2); add!(dh, :u, ip^3))),
+        ("extra field", dh -> (add!(dh, :p, ip); add!(dh, :u, ip^3); add!(dh, :θ, ip^2))),
+        ("interleaved", dh -> add!(dh, :u, ip^5)),
+    )
+
+    u_dofs_of(dh, set) = begin
+        ch = ConstraintHandler(dh)
+        add!(ch, Dirichlet(:u, set, (x, t) -> zeros(3), 1:3))
+        close!(ch)
+        Set(ch.prescribed_dofs)
+    end
+
+    for (name, build!) in layouts
+        dh = DofHandler(grid); build!(dh); close!(dh)
+
+        f = zeros(ndofs(dh))
+        apply_pointload!(f, dh, "all", Vec{3}((1.0, 2.0, 3.0)))
+        @test Set(findall(!iszero, f)) == u_dofs_of(dh, getnodeset(grid, "all"))
+        @test sort(f[findall(!iszero, f)]) == repeat([1.0, 2.0, 3.0], inner = getnnodes(grid))
+        @test sum(f) ≈ 6.0 * getnnodes(grid)   # each node loaded exactly once
+
+        f = zeros(ndofs(dh))
+        fs = getfacetset(grid, "left")
+        assemble_traction!(f, dh, fs, ip, fqr, Vec{3}((0.0, 0.0, 5.0)))
+        @test issubset(Set(findall(!iszero, f)), u_dofs_of(dh, fs))
+        @test sum(f) ≈ 5.0 * 2.0   # edge length 2, uniform pressure 5
+    end
+
+    # shelldofs: the positional form is right only for the canonical layout, the
+    # SubDofHandler form for all of them.
+    dh_ok = DofHandler(grid); add!(dh_ok, :u, ip^3); add!(dh_ok, :θ, ip^2); close!(dh_ok)
+    dh_sw = DofHandler(grid); add!(dh_sw, :θ, ip^2); add!(dh_sw, :u, ip^3); close!(dh_sw)
+    for (dh, canonical) in ((dh_ok, true), (dh_sw, false))
+        sdh  = only(dh.subdofhandlers)
+        cell = first(CellIterator(dh))
+        sd   = shelldofs(sdh, cell)
+        cd   = celldofs(cell)
+        ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
+        @test length(sd) == 20
+        for I in 1:4
+            @test sd[5I-4:5I-2] == cd[ru[3I-2:3I]]
+            @test sd[5I-1:5I]   == cd[rθ[2I-1:2I]]
+        end
+        @test (shelldofs(cell) == sd) == canonical
+        # in-place form: same answer, and allocation-free once warm
+        buf = Int[]; shelldofs!(buf, sdh, cell)
+        @test buf == sd
+        @test (@allocated shelldofs!(buf, sdh, cell)) == 0
+    end
+
+    # a layout that is not 5 dofs/node is rejected instead of silently mis-permuted
+    dh_bad = DofHandler(grid); add!(dh_bad, :u, ip^3); add!(dh_bad, :θ, ip^3); close!(dh_bad)
+    @test_throws ArgumentError shelldofs(first(CellIterator(dh_bad)))
+    @test_throws ArgumentError shelldofs!(Int[], only(dh_bad.subdofhandlers), first(CellIterator(dh_bad)))
+end
+
+@testset "reference director curvature B₀" begin
+    # The bending measure is κ = ½(a_α·d,β + a_β·d,α) − B₀, with B₀ built from the
+    # *interpolated initial director* d₀ = Σ N_I G₃_elem[I] — the field the kernels
+    # rotate — not from the geometric patch curvature B = A_{α,β}·G₃. The two coincide
+    # in the continuum but not discretely, so subtracting B leaves a reference bending
+    # strain κ(0) = B₀ − B ≠ 0 on curved or warped elements: a pre-moment in the
+    # undeformed configuration. On bilinear panels of a doubly-curved surface the twist
+    # part of that error persists under refinement, so it never converges away.
+    ref9 = [Vec{2}((x, y)) for (x, y) in
+        ((0.0,0.0),(1.0,0.0),(1.0,1.0),(0.0,1.0),(0.5,0.0),(1.0,0.5),(0.5,1.0),(0.0,0.5),(0.5,0.5))]
+    curved9    = [Vec{3}((p[1], p[2], 0.3 * (p[1]^2 - p[2]^2 / 2))) for p in ref9]
+    nonplanar4 = [Vec{3}((0.0,0.0,0.0)), Vec{3}((1.0,0.0,0.1)), Vec{3}((1.0,1.0,0.0)), Vec{3}((0.0,1.0,0.1))]
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+
+    cases = ((Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3), MITC9,   curved9),
+             (Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3), nothing, curved9),
+             (Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2), MITC4,   nonplanar4),
+             (Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2), nothing, nonplanar4))
+    for (ip, qr, mitc, x) in cases
+        scv = ShellCellValues(qr, ip, ip; mitc)
+        reinit!(scv, x)
+        n_dof = 5 * getnbasefunctions(ip)
+        u0 = zeros(n_dof)
+        for qp in 1:getnquadpoints(scv)
+            E, κ, _ = shell_strains(scv, qp, u0)
+            @test norm(E) ≤ 1.0e-14
+            @test norm(κ) ≤ 1.0e-13      # was ‖B₀ − B‖ ≠ 0 when B was subtracted
+        end
+        # ... and the user-visible consequence: no internal bending force at u = 0
+        re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+        @test norm(re) ≤ 1.0e-11      # was O(0.1) on these geometries
+        ke = zeros(n_dof, n_dof); bending_tangent_RM!(ke, scv, u0, mat)
+        @test norm(ke - ke') ≤ 1.0e-10 * norm(ke)
+    end
+
+    # The same holds through the NodeFrames entry point, on a mesh where the per-node
+    # frames genuinely differ from each element's centroid frame.
+    grid = shell_grid(generate_grid(Quadrilateral, (3, 3)); map = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2))
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    nf   = NodeFrames(grid, ip)
+    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    u0   = zeros(20)
+    for mitc in (MITC4, nothing)
+        scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip; mitc)
+        for cell in CellIterator(dh)
+            reinit!(scv, cell, nf)
+            for qp in 1:getnquadpoints(scv)
+                _, κ, _ = shell_strains(scv, qp, u0)
+                @test norm(κ) ≤ 1.0e-13
+            end
+            re = zeros(20); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
+        end
+    end
+
+    # Flat elements with centroid frames are untouched: B₀ = B = 0 exactly.
+    scv_flat = ShellCellValues(QuadratureRule{RefQuadrilateral}(3),
+                               Lagrange{RefQuadrilateral,2}(), Lagrange{RefQuadrilateral,2}())
+    reinit!(scv_flat, [Vec{3}((p[1], p[2], 0.0)) for p in ref9])
+    @test all(iszero, scv_flat.B₀)
+    @test all(iszero, scv_flat.B)
+end
+
+@testset "shell_strains shear reference" begin
+    # The MITC tying strains already subtract their own per-tying-point reference, so
+    # the interpolated γ is measured from the reference state; subtracting dot(A_α, d₀)
+    # on top of that double-counts. Zero on flat elements (A_α ⟂ d₀), a spurious O(0.1)
+    # reference shear on curved ones. The assembly kernels dispatch through
+    # `reference_shear_offset`; shell_strains must do the same or it reports strains
+    # that disagree with the ones the residual is built from.
+    ip   = Lagrange{RefQuadrilateral, 2}()
+    qr   = QuadratureRule{RefQuadrilateral}(3)
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2));
+                      map = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2))
+    dh = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    nf = NodeFrames(grid, ip)
+    u0 = zeros(5 * getnbasefunctions(ip))
+    for mitc in (MITC9, nothing), use_nf in (false, true)
+        scv = ShellCellValues(qr, ip, ip; mitc)
+        for cell in CellIterator(dh)
+            use_nf ? reinit!(scv, cell, nf) : reinit!(scv, cell)
+            for qp in 1:getnquadpoints(scv)
+                _, _, γ = shell_strains(scv, qp, u0)
+                @test norm(γ) ≤ 1.0e-13   # was ≈ 0.09 for MITC9 on this geometry
+            end
+        end
+    end
+end
+
+@testset "NodeFrames reinit! requires a frame per shape node" begin
+    # `nf` is indexed by grid node id but the frames are consumed on `ip_shape` nodes,
+    # so the two only line up when every shape node is a grid node. Driving the copy
+    # loop by `ip_geo` instead either overran `G₃_elem` or silently left the tail of it
+    # at the centroid frame.
+    ip1  = Lagrange{RefQuadrilateral, 1}()
+    ip2  = Lagrange{RefQuadrilateral, 2}()
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)); map = n -> (n.x[1], n.x[2], 0.2 * n.x[1]^2))
+    nf   = NodeFrames(grid, ip1)
+    cell = first(CellIterator(grid))
+    x, ids = getcoordinates(cell), collect(getnodes(cell))
+
+    scv_mixed = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip2)
+    @test_throws ArgumentError reinit!(scv_mixed, x, nf, ids)
+
+    # the matching case still works and writes every frame
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip1, ip1)
+    reinit!(scv, x, nf, ids)
+    @test all(I -> scv.G₃_elem[I] ≈ nf.G₃[ids[I]], 1:getnbasefunctions(ip1))
+end
+
+@testset "ShellCellValues carries frames" begin
+    # Folded two-quad strip: the shared-edge node frames (area-weighted averages)
+    # differ from either element's centroid frame, so frame routing is observable.
+    nodes = [Node(Vec((0.0, 0.0, 0.0))), Node(Vec((1.0, 0.0, 0.0))),
+             Node(Vec((1.0, 1.0, 0.0))), Node(Vec((0.0, 1.0, 0.0))),
+             Node(Vec((2.0, 0.0, 0.5))), Node(Vec((2.0, 1.0, 0.5)))]
+    cells = [Quadrilateral((1, 2, 3, 4)), Quadrilateral((2, 5, 6, 3))]
+    grid  = Grid(cells, nodes)
+    ip    = Lagrange{RefQuadrilateral, 1}()
+    nf    = NodeFrames(grid, ip)
+    qr    = QuadratureRule{RefQuadrilateral}(2)
+    scv_plain  = ShellCellValues(qr, ip, ip)
+    scv_frames = ShellCellValues(qr, ip, ip; frames = nf)
+    @test scv_frames.frames === nf
+
+    dh = DofHandler(grid)
+    add!(dh, :u, ip^3); add!(dh, :θ, ip^2)
+    close!(dh)
+    for cell in CellIterator(dh)
+        reinit!(scv_frames, cell)          # stored frames applied automatically
+        G3_auto = copy(scv_frames.G₃_elem)
+        reinit!(scv_plain, cell, nf)       # explicit-frames path
+        @test G3_auto == scv_plain.G₃_elem
+        reinit!(scv_plain, cell)           # frameless: centroid frame
+        @test G3_auto != scv_plain.G₃_elem # differs at the shared fold edge
+    end
+end
+
+@testset "copy(::ShellCellValues) independence" begin
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(3),
+                          Lagrange{RefQuadrilateral, 2}(), Lagrange{RefQuadrilateral, 2}();
+                          mitc = MITC9)
+    reinit!(scv, X_Q9_UNIT)
+    scv2 = copy(scv)
+    @test scv2.detJdV == scv.detJdV && scv2.G₃ == scv.G₃
+    @test scv2.mitc.A_tie == scv.mitc.A_tie
+    @test scv2.qr === scv.qr && scv2.N !== scv.N   # shares immutables, owns buffers
+
+    # reinit! on the copy must not touch the original (incl. the MITC tie data)
+    orig_detJ = copy(scv.detJdV)
+    orig_tie  = copy(scv.mitc.A_tie)
+    reinit!(scv2, [2v for v in X_Q9_UNIT])
+    @test scv.detJdV == orig_detJ && scv.mitc.A_tie == orig_tie
+    @test scv2.detJdV ≈ 4 .* orig_detJ
+
+    @test copy(NoMITC()) isa NoMITC
+end
+
+@testset "threaded assembly matches serial (copy thread-safety)" begin
+    # A per-thread `copy(scv)` is the sanctioned way to assemble in parallel. This checks
+    # the guarantee that matters: element tangents computed concurrently on independent
+    # copies are bit-identical to the serial ones. MITC4 + `bending_tangent_RM!` is the
+    # sharp case — that kernel overwrites the MITC scratch (`*_s` fields) every call, so a
+    # shared `scv.mitc` would corrupt across threads; `copy` must give each thread its own.
+    grid = shell_grid(generate_grid(Quadrilateral, (12, 8)); map = n -> (n.x[1], n.x[2], 0.15 * n.x[1]^2))
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    qr   = QuadratureRule{RefQuadrilateral}(2)
+    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    mat  = LinearElastic(1.0, 0.3, 0.1)
+    ncell = getncells(grid)
+    n     = ndofs_per_cell(dh)
+    u     = [1.0e-3 * sinpi(i / ndofs(dh)) for i in 1:ndofs(dh)]   # deterministic nonzero state
+
+    function element_tangent!(ke, scv, cc, u, mat)
+        fill!(ke, 0.0)
+        reinit!(scv, cc)
+        u_e = u[shelldofs(cc)]
+        membrane_tangent_RM!(ke, scv, u_e, mat)
+        bending_tangent_RM!(ke, scv, u_e, mat)   # writes the MITC scratch
+        return ke
+    end
+
+    # serial reference: one element tangent per cell
+    scv  = ShellCellValues(qr, ip, ip; mitc = MITC4)
+    cc0  = CellCache(dh)
+    Kref = [(reinit!(cc0, c); element_tangent!(zeros(n, n), scv, cc0, u, mat)) for c in 1:ncell]
+
+    # threaded: chunk the cells and give each chunk its own copy(scv) + CellCache. Indexing
+    # scratch by the chunk (never `threadid()`, which is unsafe under task migration) keeps
+    # every scratch owned by exactly one running task.
+    nchunks = min(Threads.nthreads(), ncell)
+    chunks  = collect(Iterators.partition(1:ncell, cld(ncell, nchunks)))
+    scvs    = [copy(scv) for _ in eachindex(chunks)]
+    ccs     = [CellCache(dh) for _ in eachindex(chunks)]
+    Kpar    = Vector{Matrix{Float64}}(undef, ncell)
+    Threads.@threads :static for k in eachindex(chunks)
+        scvk, cck = scvs[k], ccs[k]
+        for c in chunks[k]
+            reinit!(cck, c)
+            Kpar[c] = element_tangent!(zeros(n, n), scvk, cck, u, mat)
+        end
+    end
+
+    @test all(Kpar[c] == Kref[c] for c in 1:ncell)
+end
+
+@testset "add_director_symmetry!" begin
+    # Cylinder patch spanning φ ∈ [-π/4, π/4] about the z axis. Nodes on the φ = 0
+    # meridian are interior, so their area-averaged normal is exactly radial (ê_x) and
+    # therefore lies exactly in the y = 0 symmetry plane — d·n = 0 must hold exactly.
+    R, H = 3.0, 2.0
+    grid = shell_grid(generate_grid(Quadrilateral, (4, 3), Vec{2}((-π/4, 0.0)), Vec{2}((π/4, H)));
+                      map = nd -> (R*cos(nd.x[1]), R*sin(nd.x[1]), nd.x[2]))
+    addnodeset!(grid, "sym_y", x -> abs(x[2]) < 1e-9)
+    ip  = Lagrange{RefQuadrilateral, 1}()
+    nf  = NodeFrames(grid, ip)
+    dh  = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    nset = getnodeset(grid, "sym_y")
+    @test !isempty(nset)
+    n̂ = Vec{3}((0.0, 1.0, 0.0))
+    for nid in nset
+        @test abs(nf.G₃[nid] ⋅ n̂) ≤ 1e-12      # two-sided average ⇒ exactly in-plane
+    end
+
+    ch = ConstraintHandler(dh)
+    add_director_symmetry!(ch, dh, nf, "sym_y", n̂)
+    close!(ch); Ferrite.update!(ch, 0.0)
+
+    # Arbitrary free rotations: after apply!, every constrained node's director lies in
+    # the plane. This is what makes the condition frame-independent — it holds whichever
+    # way the `ref = |G₃_x| < 0.9 ? ê_x : ê_y` heuristic happened to orient T₁/T₂.
+    u = zeros(ndofs(dh))
+    Random.seed!(5)
+    sdh = only(dh.subdofhandlers); rθ = Ferrite.dof_range(sdh, :θ)
+    for cell in CellIterator(dh), k in rθ
+        u[celldofs(cell)[k]] = 0.3 * randn()
+    end
+    apply!(u, ch)
+    dofmap = FerriteShells._theta_dofmap(dh)
+    tilted = false
+    for nid in nset
+        φ₁, φ₂ = u[dofmap[nid][1]], u[dofmap[nid][2]]
+        cosθ, sincθ = FerriteShells.cos_sinc_sq(φ₁^2 + φ₂^2)
+        d = cosθ * nf.G₃[nid] + sincθ * (φ₁ * nf.T₁[nid] + φ₂ * nf.T₂[nid])
+        @test abs(d ⋅ n̂) ≤ 1e-12
+        hypot(φ₁, φ₂) > 1e-6 && (tilted = true)
+    end
+    @test tilted                                # the constraint did not just zero everything
+    @test any(nid -> abs(nf.T₂[nid] ⋅ n̂) < 0.9, nset)   # "fix φ₂" would have been wrong here
+
+    # A plane that does not contain the shell normal is not a symmetry plane
+    ch2 = ConstraintHandler(dh)
+    @test_throws ArgumentError add_director_symmetry!(ch2, dh, nf, "sym_y", Vec{3}((1.0, 0.0, 0.0)))
+end

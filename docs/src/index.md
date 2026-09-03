@@ -50,6 +50,7 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
     # shell measures
     A_metric :: Vector{SymmetricTensor{2, 2, T, 3}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
+    B₀       :: Vector{SymmetricTensor{2, 2, T, 3}}   # reference director-gradient curvature
     # shear-locking treatment
     mitc     :: AbstractMITC
 end

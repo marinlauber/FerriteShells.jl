@@ -154,6 +154,9 @@ function scordelis_lo_roof()
 
         dbc = ConstraintHandler(dh)
         add!(dbc, Dirichlet(:u, getnodeset(grid, "diaphragm"), x -> zeros(2), [2, 3]))
+        # The diaphragms leave the axial u_x free, so K keeps a rigid-body translation along x
+        # (cond ~1e17). u_x = 0 holds exactly at mid-span by symmetry; "ref_point" is mid-span.
+        add!(dbc, Dirichlet(:u, getnodeset(grid, "ref_point"), x -> 0.0, [1]))
         close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
 
         u_sol = K \ f
@@ -297,6 +300,8 @@ function pinched_hemisphere()
                        map = nd -> (R*sin(nd.x[1])*cos(nd.x[2]), R*sin(nd.x[1])*sin(nd.x[2]), R*cos(nd.x[1])))
         addfacetset!(g, "sym_phi0",  x -> abs(x[2]) < 1e-10)
         addfacetset!(g, "sym_phi90", x -> abs(x[1]) < 1e-10)
+        addnodeset!(g, "sym_phi0_n",  x -> abs(x[2]) < 1e-9)
+        addnodeset!(g, "sym_phi90_n", x -> abs(x[1]) < 1e-9)
         addnodeset!(g, "load_A", x -> abs(x[3]) < 1e-6 && abs(x[2]) < 1e-6 && x[1] > 0.5R)
         addnodeset!(g, "load_B", x -> abs(x[3]) < 1e-6 && abs(x[1]) < 1e-6 && x[2] > 0.5R)
         return g
@@ -311,8 +316,9 @@ function pinched_hemisphere()
         # material
         mat = LinearElastic(6.825e7, 0.3, 0.04)
 
-        # make grid
+        # make grid amd a NodeFrame
         grid = hemisphere_grid(n; primitive=primitive)
+        nf = NodeFrames(grid, ip)
 
         # degrees of freedom
         dh = DofHandler(grid)
@@ -324,39 +330,41 @@ function pinched_hemisphere()
         ch = ConstraintHandler(dh)
         add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
         add!(ch, Dirichlet(:u, getfacetset(grid, "sym_phi90"), x -> 0.0, [1]))
-        add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi0"),  x -> 0.0, [2]))
-        add!(ch, Dirichlet(:θ, getfacetset(grid, "sym_phi90"), x -> 0.0, [2]))
+        add_director_symmetry!(ch, dh, nf, "sym_phi0_n",  Ferrite.Vec{3}((0.0, 1.0, 0.0)))
+        add_director_symmetry!(ch, dh, nf, "sym_phi90_n", Ferrite.Vec{3}((1.0, 0.0, 0.0)))
         close!(ch); Ferrite.update!(ch, 0.0)
 
-        N      = ndofs(dh)
+        #  allocate matrices and vectors
         n_base = getnbasefunctions(ip)
-        K      = allocate_matrix(dh)
-        f      = zeros(N)
+        K      = allocate_matrix(dh, ch)   # ch: the affine constraints add coupling entries
+        f      = zeros(ndofs(dh))
         ke     = zeros(5n_base, 5n_base)
         re     = zeros(5n_base)
 
-        asm = start_assemble(K, zeros(N))
+        # assemble once
+        asm = start_assemble(K, zeros(ndofs(dh)))
         for cell in CellIterator(dh)
             fill!(ke, 0.0)
-            reinit!(scv, cell)
+            reinit!(scv, cell, nf)   # per-node frames — the frame the symmetry BC is written in
             u0 = zeros(5n_base)
             membrane_tangent_RM!(ke, scv, u0, mat)
             bending_tangent_RM!(ke, scv, u0, mat)
             assemble!(asm, shelldofs(cell), ke, re)
         end
 
+        # apply loading
         apply_pointload!(f, dh, "load_A", Ferrite.Vec{3}((-1.0, 0.0, 0.0)))
         apply_pointload!(f, dh, "load_B", Ferrite.Vec{3}(( 0.0, 1.0, 0.0)))
         apply!(K, f, ch)
-        u_sol = K \ f
 
-        A_node = only(getnodeset(grid, "load_A"))
-        u_x_A  = 0.0
-        for cell in CellIterator(dh), (I, gid) in enumerate(getnodes(cell))
-            gid == A_node || continue
-            u_x_A = u_sol[celldofs(cell)[3I-2]]
-        end
-        return -u_x_A
+        #solve and time it
+        u_sol = K \ f
+        apply!(u_sol, ch)   # recover the affine-constrained φ DOFs
+
+        # extract solution at point
+        ph     = PointEvalHandler(grid, [grid.nodes[first(grid.nodesets["load_A"])].x])
+        u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
+        return -u_eval[1]
     end
 
     # resolution sweep
@@ -368,10 +376,9 @@ function pinched_hemisphere()
     hlines!(ax1, 0.0924, 0, 32, color=:black, linestyle=:dash, label="Reference", linewidth=2)
     for (prim, order, elem, label) in configs
         res = [solve_pinched_hemisphere(n; primitive=prim, order=order, element=elem) for n in N]
-        @show res, N
-        # lines!(ax1, N, res, label=label, linewidth=2)
+        lines!(ax1, N, res, label=label, linewidth=2)
     end
-    img = load(joinpath(IMG_DIR, "pinched_cylinder.png"))  # no dedicated hemisphere schematic yet
+    img = load(joinpath(IMG_DIR, "pinched_hemisphere.png"))  # no dedicated hemisphere schematic yet
     image!(ax0, rotr90(img))
     axislegend(ax1, position=:rb)
     hidespines!(ax0)
@@ -382,7 +389,94 @@ function pinched_hemisphere()
     fig
 end
 
+function hyperbolic_paraboloid()
+    # Partly clamped hyperbolic paraboloid — Reissner-Mindlin shell
+    # Lee & Bathe (2005), Comput. Struct. 83:69-90, §3.4.2 / Chapelle-Bathe locking benchmark.
+    # Surface z = x²-y² on [-1/2,1/2]², clamped along one straight edge (here y=-1/2), free
+    # elsewhere, self-weight load q=80/area. Reference u_z at the midpoint of the opposite free
+    # edge is quoted in the literature as ≈ -9.3137e-5 and ≈ -9.3355e-5 (two independent fine-mesh
+    # solutions, clamped edge x=∓1/2 there); by the surface's own 90°-rotation+z-flip symmetry the
+    # clamped-edge choice doesn't change the value at the corresponding point.
+    function hp_grid(ns; primitive=Quadrilateral)
+        L_hp = 1.0
+        g = shell_grid(generate_grid(primitive, (ns, ns), Ferrite.Vec{2}((-L_hp/2, -L_hp/2)), Ferrite.Vec{2}((L_hp/2, L_hp/2)));
+                       map = n -> (n.x[1], n.x[2], n.x[1]^2 - n.x[2]^2))
+        addfacetset!(g, "clamped", x -> x[2] ≈ -L_hp/2)
+        return g
+    end
+
+    function solve_hyperbolic_paraboloid(n; primitive=Quadrilateral, order=1, element=RefQuadrilateral)
+        ip  = Lagrange{element, order}()
+        qr  = QuadratureRule{element}(order + 1)
+        scv = ShellCellValues(qr, ip, ip; mitc=mitc_for(element, order))
+        mat = LinearElastic(2e11, 0.3, 0.01)
+
+        grid = hp_grid(n; primitive=primitive)
+        nf   = NodeFrames(grid, ip)  # per-node averaged frames (curved-shell frame consistency)
+        dh   = DofHandler(grid)
+        add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+        n_base = getnbasefunctions(ip)
+
+        K  = allocate_matrix(dh)
+        f  = zeros(ndofs(dh))
+        asmb = start_assemble(K, zeros(ndofs(dh)))
+        ke = zeros(5n_base, 5n_base); re = zeros(5n_base); fe = zeros(5n_base)
+        q_hp = Ferrite.Vec{3}((0.0, 0.0, -80.0))
+        for cell in CellIterator(dh)
+            fill!(ke, 0.0); fill!(re, 0.0); fill!(fe, 0.0)
+            reinit!(scv, cell, nf)
+            u0 = zeros(5n_base)
+            membrane_tangent_RM!(ke, scv, u0, mat)
+            bending_tangent_RM!(ke, scv, u0, mat)
+            sd = shelldofs(cell)
+            assemble!(asmb, sd, ke, re)
+            for qp in 1:getnquadpoints(scv)
+                ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
+                for I in 1:n_base
+                    NI = Ferrite.reference_shape_value(ip, ξ, I)
+                    @views fe[5I-4:5I-2] .+= NI * q_hp * dΩ
+                end
+            end
+            @views f[sd] .+= fe
+        end
+
+        dbc = ConstraintHandler(dh)
+        add!(dbc, Dirichlet(:u, getfacetset(grid, "clamped"), x -> zero(x), [1,2,3]))
+        add!(dbc, Dirichlet(:θ, getfacetset(grid, "clamped"), x -> zeros(2), [1,2]))
+        close!(dbc); Ferrite.update!(dbc, 0.0); apply!(K, f, dbc)
+
+        u_sol = K \ f
+
+        # midpoint of the free edge opposite the clamped one
+        ph     = PointEvalHandler(grid, [Ferrite.Vec{3}((0.0, 0.5, -0.25))])
+        u_eval = first(evaluate_at_points(ph, dh, u_sol, :u))
+        return u_eval[3]
+    end
+
+    # resolution sweep
+    N = [8,16,32,64]
+    fig = Figure(size=(800, 400))
+    ax0 = Axis(fig[1, 1], aspect = DataAspect(), title="Deformed mesh Lagrange{RefQuadrilateral, 2}")
+    ax1 = Axis(fig[1, 2], xlabel="Number of elements", ylabel="vertical displacement u₃ at free-edge midpoint",
+               title="Convergence of vertical displacement")
+    hlines!(ax1, -9.335e-5, 0, 64, color=:black, linestyle=:dash, label="Reference", linewidth=2)
+    for (prim, order, elem, label) in configs
+        res = [solve_hyperbolic_paraboloid(n; primitive=prim, order=order, element=elem) for n in N]
+        lines!(ax1, N, res, label=label, linewidth=2)
+    end
+    img = load(joinpath(IMG_DIR, "hyperbolic_paraboloid.png"))
+    image!(ax0, rotr90(img))
+    axislegend(ax1, position=:rt)
+    hidespines!(ax0)
+    hidedecorations!(ax0)
+    xlims!(ax1, 0, maximum(N))
+    ylims!(ax1, -1.1e-4, 0)
+    save(joinpath(IMG_DIR, "hyperbolic_paraboloid_convergence.png"), fig)
+    fig
+end
+
 # cooks_membrane()
 # scordelis_lo_roof()
-pinched_cylinder()
+# pinched_cylinder()
 # pinched_hemisphere()
+hyperbolic_paraboloid()

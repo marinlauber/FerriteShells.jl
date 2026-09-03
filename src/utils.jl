@@ -1,4 +1,4 @@
-import Ferrite: Grid,Triangle,Quadrilateral,Nodes
+import Ferrite: Grid, Triangle, Quadrilateral
 using LinearAlgebra: cross
 using ForwardDiff
 
@@ -31,9 +31,18 @@ to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
 Input layout: ``[u_{1x},u_{1y},u_{1z},\\, u_{2x},\\ldots,u_{nz} \\mid \\theta_{1,1},\\theta_{1,2},\\, \\theta_{2,1},\\ldots,\\theta_{n,2}]``
 
 Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_{2y},u_{2z},\\theta_{2,1},\\theta_{2,2},\\ldots]``
+
+This method reads the layout off the dof count alone, so it is correct only for a
+`DofHandler` carrying exactly `:u` then `:θ` and nothing else. Pass the `SubDofHandler`
+— `shelldofs(sdh, cell)` or [`shelldofs!`](@ref) — to have the ranges read by name
+instead, which stays correct for any field order and any extra fields.
 """
 function shelldofs(cell::CellCache)
     dofs = cell.dofs
+    rem(length(dofs), 5) == 0 || throw(ArgumentError(
+        "shelldofs expects the two-field layout `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, " *
+        "whose cells carry a multiple of 5 dofs; this cell has $(length(dofs)). " *
+        "Use `shelldofs(sdh, cell)` to read the dof ranges by name."))
     n = length(dofs) ÷ 5
     perm = similar(dofs)
     for I in 1:n
@@ -42,6 +51,40 @@ function shelldofs(cell::CellCache)
         perm[5I  ] = dofs[3n + 2I]
     end
     return perm
+end
+
+"""
+    shelldofs(sdh::SubDofHandler, cell) -> Vector{Int}
+    shelldofs!(sd::AbstractVector{Int}, sdh::SubDofHandler, cell) -> sd
+
+Layout-safe form of [`shelldofs`](@ref): the same interleaved 5-dof-per-node order,
+but built from the `SubDofHandler`'s own `dof_range`s for `:u` and `:θ`, so it stays
+correct whatever else the `DofHandler` carries and in whatever order the fields were
+added. The in-place form resizes and overwrites `sd` and allocates nothing.
+"""
+shelldofs(sdh::Ferrite.SubDofHandler, cell) = shelldofs!(Int[], sdh, cell)
+
+"""
+    shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell) -> sd
+
+In-place, allocation-free form of [`shelldofs`](@ref): resizes and overwrites `sd`
+with the interleaved 5-dof-per-node order.
+"""
+function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
+    dofs = celldofs(cell)
+    ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
+    n = length(ru) ÷ 3
+    length(ru) == 3n || throw(ArgumentError(":u carries $(length(ru)) dofs per cell, not a multiple of 3"))
+    length(rθ) == 2n || throw(ArgumentError(":u spans $n nodes but :θ spans $(length(rθ) / 2)"))
+    resize!(sd, 5n)
+    @inbounds for I in 1:n
+        sd[5I-4] = dofs[ru[3I-2]]
+        sd[5I-3] = dofs[ru[3I-1]]
+        sd[5I-2] = dofs[ru[3I]]
+        sd[5I-1] = dofs[rθ[2I-1]]
+        sd[5I  ] = dofs[rθ[2I]]
+    end
+    sd
 end
 
 using OrderedCollections
@@ -232,8 +275,13 @@ end
 Compute per-node deformed director `d` and reference shell normal `G3` from the
 displacement/rotation solution `u`. Both are returned as `3 × n_nodes` matrices.
 
-Each nodal value is the element-average of the QP-level frame vectors, accumulated
-and averaged over all elements sharing the node.
+Each nodal value is accumulated and averaged over all elements sharing the node. The
+frame used per node is the element node frame `scv.G₃_elem`/`scv.T₁_elem`/`scv.T₂_elem`
+— exactly the frame the assembly kernels rotate the director about, so if `scv` was
+built with [`NodeFrames`](@ref) the post-processed director follows them, and otherwise
+it follows the centroid frame. (Averaging the per-quadrature-point geometric frames
+`scv.G₃`, as an earlier version did, is a *different* frame on any non-rectangular
+element and tilts the reported director.)
 
 The director is computed from the Rodrigues rotation formula
 
@@ -260,19 +308,16 @@ function director_field(dh::DofHandler, scv::ShellCellValues, u)
     G3_sum = zeros(3, n_nodes)
     count  = zeros(Int, n_nodes)
     for cell in CellIterator(dh)
-        reinit!(scv, cell)
+        reinit!(scv, cell)   # populates scv.*_elem from scv.frames (NodeFrames or centroid)
         sd  = shelldofs(cell)
         u_e = @views u[sd]
-        nq  = getnquadpoints(scv)
-        G3_avg = sum(scv.G₃[q] for q in 1:nq) / nq
-        T1_avg = sum(scv.T₁[q] for q in 1:nq) / nq
-        T2_avg = sum(scv.T₂[q] for q in 1:nq) / nq
         for (I, nid) in enumerate(cell.nodes)
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = cos_sinc_sq(φ₁^2 + φ₂^2)
-            d_I = cosθ * G3_avg + sincθ * (φ₁ * T1_avg + φ₂ * T2_avg)
+            G₃_I = scv.G₃_elem[I]
+            d_I  = cosθ * G₃_I + sincθ * (φ₁ * scv.T₁_elem[I] + φ₂ * scv.T₂_elem[I])
             @views d_sum[:, nid]  .+= d_I
-            @views G3_sum[:, nid] .+= G3_avg
+            @views G3_sum[:, nid] .+= G₃_I
             count[nid] += 1
         end
     end
@@ -313,13 +358,13 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
 
-    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B[qp])
+    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
     γ_k = tying_shear_strains(scv.mitc, u_e)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ_k, scv.mitc)
     d₀  = reference_director(scv, qp, n_nodes)
-    γ₁ -= dot(scv.A₁[qp], d₀)
-    γ₂ -= dot(scv.A₂[qp], d₀)
+    r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
+    γ₁ -= r₁; γ₂ -= r₂
 
     return E, κ, Vec{2,T}((γ₁, γ₂))
 end
@@ -332,88 +377,3 @@ the out-of-plane rows/columns with zeros. Useful for writing shell strain or
 stress tensors to VTK (ParaView expects 6-component symmetric tensors).
 """
 @inline embed23(S::SymmetricTensor{2,2,T}) where T = SymmetricTensor{2,3,T}((S[1,1], S[1,2], zero(T), S[2,2], zero(T), zero(T)))
-
-"""
-    NodeFrames
-
-Per-node area-weighted averaged director frames for a shell mesh. Eliminates the
-O(h/R) inter-element frame inconsistency that occurs when adjacent curved-shell
-elements each derive their own centroid frame.
-
-Construct via `NodeFrames(grid, ip_geo)`. Pass to `reinit!(scv, x, nf, node_ids)`
-instead of the plain `reinit!(scv, x)` to activate per-node frames.
-
-For flat shells the result is identical to the centroid-frame approach.
-"""
-struct NodeFrames
-    G₃ :: Vector{Vec{3,Float64}}
-    T₁ :: Vector{Vec{3,Float64}}
-    T₂ :: Vector{Vec{3,Float64}}
-end
-
-function NodeFrames(grid::Grid, ip_geo::Interpolation)
-    n_nodes = getnnodes(grid)
-    G₃_sum  = fill(zero(Vec{3,Float64}), n_nodes)
-
-    for cellid in 1:getncells(grid)
-        cell     = getcells(grid, cellid)
-        node_ids = collect(cell.nodes)
-        x        = [grid.nodes[nid].x for nid in node_ids]
-        ξ_c      = reference_centroid(ip_geo)
-        A₁ = zero(Vec{3,Float64}); A₂ = zero(Vec{3,Float64})
-        n_geo = getnbasefunctions(ip_geo)
-        for i in 1:n_geo
-            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_c, i)
-            A₁ += x[i] * dN[1]; A₂ += x[i] * dN[2]
-        end
-        n_vec = A₁ × A₂
-        area  = norm(n_vec)
-        G₃_c  = n_vec / area
-        for nid in node_ids
-            G₃_sum[nid] += area * G₃_c
-        end
-    end
-
-    G₃ = Vector{Vec{3,Float64}}(undef, n_nodes)
-    T₁ = Vector{Vec{3,Float64}}(undef, n_nodes)
-    T₂ = Vector{Vec{3,Float64}}(undef, n_nodes)
-    for i in 1:n_nodes
-        g      = G₃_sum[i]
-        g_norm = norm(g)
-        g_norm < 1e-14 && continue
-        G₃[i] = g / g_norm
-        ref    = abs(G₃[i][1]) < 0.9 ? Vec{3}((1.,0.,0.)) : Vec{3}((0.,1.,0.))
-        t₁     = ref - (ref ⋅ G₃[i]) * G₃[i]
-        T₁[i]  = t₁ / norm(t₁)
-        T₂[i]  = G₃[i] × T₁[i]
-    end
-    NodeFrames(G₃, T₁, T₂)
-end
-
-"""
-    reinit!(scv::ShellCellValues, x::AbstractVector, nf::NodeFrames)
-    reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames)
-    reinit!(scv::ShellCellValues, cell::AbstractCell, nf::NodeFrames)
-
-Update the `ShellCellValues` object for a cell with cell coordinates `x` and a `NodeFrames` object.
-
-The reference surface measures such as the covariant basis are obtained from the `NodeFrames` object
-pre-computed initially from `nf = NodeFrames(grid, ip_geo)`.
-
-**Note:**
-For `ShellCellValues` where a shear treatment has been specified, the `MITC` data is also `reinit!`.
-"""
-reinit!
-
-reinit!(scv::ShellCellValues, cell, nf::NodeFrames) = reinit!(scv, getcoordinates(cell), nf, getnodes(cell))
-reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getcoordinates(cc), nf, getnodes(cc))
-function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
-    reinit!(scv, x)
-    n_geo = getnbasefunctions(scv.ip_geo)
-    for I in 1:n_geo
-        scv.G₃_elem[I] = nf.G₃[node_ids[I]]
-        scv.T₁_elem[I] = nf.T₁[node_ids[I]]
-        scv.T₂_elem[I] = nf.T₂[node_ids[I]]
-    end
-    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
-end
