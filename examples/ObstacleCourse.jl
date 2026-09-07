@@ -385,7 +385,7 @@ function pinched_hemisphere()
     hidedecorations!(ax0)
     xlims!(ax1, 0, maximum(N))
     ylims!(ax1, 0, 0.1)
-    # save(joinpath(IMG_DIR, "pinched_hemisphere_convergence.png"), fig)
+    save(joinpath(IMG_DIR, "pinched_hemisphere_convergence.png"), fig)
     fig
 end
 
@@ -475,8 +475,8 @@ function hyperbolic_paraboloid()
     fig
 end
 
-# cooks_membrane()
-# scordelis_lo_roof()
-# pinched_cylinder()
-# pinched_hemisphere()
+cooks_membrane()
+scordelis_lo_roof()
+pinched_cylinder()
+pinched_hemisphere()
 hyperbolic_paraboloid()
