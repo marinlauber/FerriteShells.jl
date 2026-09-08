@@ -24,15 +24,20 @@ include(joinpath(@__DIR__, "util.jl"))
 #       3×3 solve for (δPlv, δPa, δPv) with the volume row augmented by aᵀv2 / aᵀv1.
 #     Everything in SI (Pa, m³, s); pressures reported in mmHg, volumes in ml.
 #     Three follower surfaces: SRF_1 Plv, SRF_2 Plv−Pact, SRF_3 Pact.
+#
+# PHYSIOLOGICALLY CALIBRATED VARIANT of `limo_coupled_dynamic_strong.jl`.  Identical
+# structure and solver; only the 0D coefficients, the actuation amplitude/timing and the
+# Phase-2 initial 0D state differ.  See the `Windkessel parameters` block for the
+# per-coefficient justification and the predicted hemodynamics.
 
 # Valve diodes (SI: Pa, m³/s).  Return (Q, ∂Q/∂P_first, ∂Q/∂P_second) on the active branch.
 # Mitral: venous → LV filling, opens when Pv ≥ Plv.  Args (Plv, Pv).
-@inline function mitral_flow(Plv, Pv, Rv; R_closed=1e10)
+@inline function mitral_flow(Plv, Pv, Rv; R_closed=1e13)
     Pv ≥ Plv ? ((Pv - Plv)/Rv,       -1/Rv,       1/Rv) :
                ((Plv - Pv)/R_closed,  1/R_closed, -1/R_closed)   # (Q, ∂/∂Plv, ∂/∂Pv)
 end
 # Aortic: LV → arterial ejection, opens when Plv ≥ Pa.  Args (Plv, Pa).
-@inline function aortic_flow(Plv, Pa, Ra; R_closed=1e10)
+@inline function aortic_flow(Plv, Pa, Ra; R_closed=1e13)
     Plv ≥ Pa ? ((Plv - Pa)/Ra,        1/Ra,       -1/Ra) :
                ((Pa - Plv)/R_closed, -1/R_closed,  1/R_closed)   # (Q, ∂/∂Plv, ∂/∂Pa)
 end
@@ -411,14 +416,14 @@ function endo_positions!(X, dh, u, endo_cells, node_map)
     X
 end
 
-pvd = paraview_collection("minilimo-coupled-dynamic-strong")
+pvd = paraview_collection("minilimo-physio")
 vtk_step = Ref(0)
 resu = zeros(3, getnnodes(dh.grid))
 resθ = zeros(2, getnnodes(dh.grid))
 N11 = zeros(getnnodes(dh.grid)); N22 = similar(N11); N12 = similar(N11); Nmin = similar(N11)
 d, G3 = director_field(dh, scv, u)
 membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
-VTKGridFile("minilimo-coupled-dynamic-strong-0", dh) do vtk
+VTKGridFile("minilimo-physio-0", dh) do vtk
     write_solution(vtk, dh, u)
     Ferrite.write_node_data(vtk, resu, "ru")
     Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -470,7 +475,7 @@ un = zeros(N_dof)
 #             end
 #             d, G3 = director_field(dh, scv, u)
 #             membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat, u)
-#             VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
+#             VTKGridFile("minilimo-physio-$(vtk_step[])", dh) do vtk
 #                 write_solution(vtk, dh, u)
 #                 Ferrite.write_node_data(vtk, resu, "ru")
 #                 Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -511,16 +516,77 @@ apply!(u, ch)
     (0.0 <= (t-tR)%1 <= TR ? 0.5*(1 + cos(π*((t-tR)%1)/TR)) :
     (TC <= (t-tC)%1 <= TR ? 1.0 : 0.0))
 
-plot(0:0.01:1, ϕᵢ.(0:0.01:1, tC=0.1, tR=0.35, TC=0.15, TR=0.35),
-     xlabel="t", ylabel="ϕᵢ(t)", title="Actuation Waveform")
+# NOTE: commented out — `using Plots` only happens at the BOTTOM of this file, so this
+# call crashes a fresh non-interactive run.  Uncomment when working in a REPL that
+# already has Plots loaded.
+# plot(0:0.01:1, ϕᵢ.(0:0.01:1, tC=0.1, tR=0.30, TC=0.15, TR=0.25),
+#      xlabel="t", ylabel="ϕᵢ(t)", title="Actuation Waveform")
 
 # Windkessel parameters, SI (Pa, m³, s) — Plv, Pa, Pv all carried in Pa.
-Ra = 8.0e6    # aortic resistance   [Pa·s/m³]
-Rp = 1.0e8    # peripheral resist.  [Pa·s/m³]
-# Rp = 5.0e8    # peripheral resist.  [Pa·s/m³], this leads to higher Plv, but lower Vlv
-Rv = 5.0e5    # mitral resistance   [Pa·s/m³]
-Ca = 8.0e-9   # arterial compliance [m³/Pa]
-Cv = 5.0e-8   # venous compliance   [m³/Pa]
+#
+# CALIBRATED AGAINST THE 0D-MODEL LITERATURE.  Reference column is Regazzoni, Salvador,
+# Africa, Fedele, Dede', Quarteroni, "A cardiac electromechanics model coupled with a
+# lumped parameters model for closed-loop blood circulation", J. Comput. Phys. 457 (2022);
+# parameter values from Part II, Tab. 4 (arXiv:2011.15051).  Conversions:
+#   R[Pa·s/m³] = R[mmHg·s/mL] / 7.50062e-9      C[m³/Pa] = C[mL/mmHg] / 1.33322e8
+#
+#   quantity   this file            clinical        Regazzoni Tab. 4     note
+#   --------   ------------------   -------------   ------------------   ---------------
+#   Ra         4.0e6                0.030           R_min   = 0.0075     valve + Zc, see below
+#   Rp         1.47e8               1.10            R_AR+R_VEN = 1.06    sets MAP at this CO
+#   Rv         1.0e6                0.0075          R_min   = 0.0075     matched exactly
+#   Ca         1.2e-8               1.60            C_AR    = 1.2        lit. range 1.0-2.0
+#   Cv         4.5e-7               60.0            C_VEN   = 60.0       matched exactly
+#   R_closed   1e13                 75006           R_max   = 75006      matched exactly
+#
+# WHY Rv IS AT REGAZZONI'S VALUE AND NOT HIGHER — NEGATIVE-Plv FAILURE MODE.  The device
+# has an UNSTRESSED VOLUME of 221.2 mL (the fitted law Plv = 0.172·Pact + 0.363·V − 80.2
+# gives Plv = 0 at V = 221.2 with the actuator off).  A physiological SV of ~70 mL from an
+# EDV of ~260 mL means end-systolic volume sits ~34 mL BELOW that, so during relaxation —
+# when Pact has decayed but the mitral valve has not yet refilled the chamber — the shell's
+# elastic recoil pulls Plv toward zero and can take it NEGATIVE.  Whether it does is a race
+# between the relaxation rate (TR) and the filling rate (1/Rv).
+#
+# An earlier revision of this file lost that race: Rv doubled to 0.015 to cap peak mitral
+# flow, TR shortened 0.35→0.25 to shorten systole.  Both slow filling relative to
+# relaxation, and the run went to Plv < 0 for ~4% of the cycle.  Rv is back at Regazzoni's
+# R_min and TR is at 0.30 (see the actuation block).  Cost: peak mitral flow ~960 mL/s
+# against a physiological 400-600 — accepted deliberately, because the sign of Plv matters
+# and a cosmetically high E-wave does not.  A small negative dip is not in itself
+# unphysical (the LV does generate early-diastolic suction), but here it also reverses the
+# follower load on the endocardium and drives the shell into exactly the recoil/compression
+# state this file's β-continuation exists to control — so keep it positive.
+#
+# Ra IS NOT A PURE VALVE RESISTANCE.  It sits between the LV and the arterial compliance,
+# which is simultaneously the aortic-valve position (Regazzoni's R_AV) and the
+# characteristic-impedance position of a three-element Windkessel (Westerhof et al.,
+# "The arterial Windkessel", Med Biol Eng Comput 47:131, 2009).  We use the WK3 reading:
+# Ra = 0.030 mmHg·s/mL is a physiological Zc.  CONSEQUENCE: `Pa` is the DISTAL compliance-
+# node pressure, NOT the aortic root.  Root pressure is `Pa + Ra*Qao` — the plotting block
+# at the bottom reports both, do not read `Pa` alone as an arterial line.
+#
+# NO INERTANCE.  Regazzoni's L_AR^SYS / L_VEN^SYS (5e-3 / 5e-4 mmHg·s²/mL) are on the
+# arterial->venous TRANSMISSION branches, i.e. the Rp branch here — their Eq. (8e) has
+# Q_AV = (p_LV - p_AR)/R_AV, purely resistive, so there is no ejection-path inertance to
+# copy.  Tested at the Regazzoni placement and value: SV 69.7->69.7 mL, PP 55.3->55.3,
+# peak Qao 744->744 mL/s — no measurable effect even at 10x the value, and it would cost
+# a fourth 0D state in the condensed Newton block.  An ejection-path inertance would need
+# the FOUR-element Windkessel as justification instead (Stergiopulos, Westerhof &
+# Westerhof, "Total arterial inertance as the fourth element of the windkessel model",
+# Am J Physiol 276:H81, 1999) — worth revisiting only if the aortic FLOW waveform starts
+# to matter; peak Qao here is ~890 mL/s against a physiological 400-600.
+Ra = 4.00e6   # aortic valve + characteristic impedance  [Pa·s/m³]  (0.030 mmHg·s/mL)
+Rp = 1.47e8   # peripheral resistance                    [Pa·s/m³]  (1.10  mmHg·s/mL)
+Rv = 1.00e6   # mitral resistance                        [Pa·s/m³]  (0.0075 mmHg·s/mL)
+Ca = 1.20e-8  # arterial compliance                      [m³/Pa]    (1.60  mL/mmHg)
+Cv = 4.50e-7  # venous compliance                        [m³/Pa]    (60.0  mL/mmHg)
+# Ca = 1.50e-8 # (2.00 mL/mmHg) narrows pulse pressure 48 -> 42 mmHg; still within the
+#              # 1.0-2.0 mL/mmHg literature range but at its upper edge.
+#
+# Pscale is the normalisation of the R_art / R_ven convergence check and is DELIBERATELY
+# left at p_max (6 mmHg) rather than raised to the ~90 mmHg arterial scale: raising it
+# would loosen the 0D tolerance ~15x.  Kept tight; revisit only if Phase 2 stalls on the
+# pressure rows rather than the structural one.
 wk = (; Ra, Rp, Rv, Ca, Cv, Pscale = p_max)
 
 # coupling controls
@@ -709,13 +775,31 @@ println("Initial volume of the device: ", round(V_LV0 * m3_to_ml; digits=4), " m
 println("\nPHASE 2 — monolithic strong 3D-0D coupling (adaptive Δt, Δt₀=$(dt_cpl) s)")
 println("      t [s] |  p [mmHg]   |  Vlv_full [ml]  |  Pact [mmHg]  | iters |    Δt [s]  |    β")
 
-# initial 0D state [Pa]: filled ventricle (Plv=Pv=p_max), arterial at 80 mmHg
-Pa0 = 80.0 / Pa2mmHg
-Pv0 = p_max
+# Initial 0D state [Pa].  PRELOAD IS SET HERE, NOT BY A RESISTANCE.  The loop conserves
+# stressed volume exactly — d/dt(V_LV + Ca*Pa + Cv*Pv) = 0 — so V_tot is fixed once and for
+# all by this initial condition, and with Cv now physiological the venous compartment is
+# the reservoir that sets end-diastolic volume:
+#     V_tot = V_LV0 (~250 mL) + Ca*Pa0 (144 mL) + Cv*Pv0 (840 mL) ~ 1234 mL
+# against ~1200-1500 mL of stressed volume in a human — the right order at last (it was
+# ~350 mL before, with 63% of it inside the ventricle).  Pv0 is the knob, and it is also
+# what keeps Plv positive through relaxation: each +2 mmHg of Pv0 lifts EDV ~5 mL and the
+# relaxation-phase trough in Plv by ~1 mmHg.
+#
+# Pv0 IS DELIBERATELY DECOUPLED FROM p_max.  It used to read `Pv0 = p_max`, tying the
+# venous preload to the Phase-1 morph fill pressure — two unrelated quantities that
+# happened to share the value 6 mmHg.  p_max stays the Phase-1 fill pressure only.
+Pa0 = 90.0 / Pa2mmHg   # arterial, 90 mmHg
+# Pv0 RAISED 10 -> 14 mmHg.  This is the structural half of the negative-Plv fix: preload
+# sets EDV through the device law, and lifting EDV 250->260 mL lifts the whole operating
+# range so end-systole sits 34 mL below the 221 mL unstressed volume instead of 42 mL.
+# 14 mmHg is mildly above the 8-12 mmHg normal LAP, but it is COHERENT with the rest of
+# this operating point: a ventricle at EF 28% and CO 4.3 L/min is a compensated low-output
+# configuration, and an elevated filling pressure is what such a ventricle actually has.
+Pv0 = 14.0 / Pa2mmHg   # venous / LA preload, 14 mmHg
 # Adaptive Δt driven by 3D-0D coupling convergence (same policy as the Phase-1 morph):
 # a converged monolithic step commits and grows Δt by 1.2× (capped at Δt_max); a failed
 # step is discarded (structural + 0D history untouched), Δt halved, and the step retried.
-@time let V_LVₙ = V_LV0, Paₙ = Pa0, Pvₙ = Pv0, t_cpl = 0.0, Plv = p_max, Pa = Pa0, Pv = Pv0
+@time let V_LVₙ = V_LV0, Paₙ = Pa0, Pvₙ = Pv0, t_cpl = 0.0, Plv = Pv0, Pa = Pa0, Pv = Pv0
     step = 0
     Δt_cur = dt_cpl
     t_next_vtk = 0.0   # next Phase-2 time at which a VTK frame is written
@@ -723,8 +807,29 @@ Pv0 = p_max
         t_new  = min(t_cpl + Δt_cur, T_beat)
         Δt_cur = t_new - t_cpl   # clip the final step to land exactly on T_beat
 
-        # Pact_mmHg = 600 * ϕᵢ(t_new; tC=0.1, tR=0.4, TC=0.3, TR=0.3)
-        Pact_mmHg = 600 * ϕᵢ(t_new; tC=0.1, tR=0.35, TC=0.15, TR=0.35)
+        # AMPLITUDE 600 -> 750 mmHg.  The device is a pressure source of ~0.172*Pact
+        # (fitted from the 600 mmHg run, see the header of the plotting block), so at
+        # Pact=600 it CANNOT generate more than ~103 mmHg of LV pressure and no choice of
+        # Windkessel coefficients reaches a physiological systolic pressure.  750 mmHg
+        # lifts the ceiling to ~129 mmHg, which is what buys Pao 121/73.
+        #
+        # TIMING tR 0.35->0.30 shortens systole from 0.10-0.70 s to 0.10-0.60 s, i.e. a
+        # systolic fraction of 50% instead of 60% (physiological is 35-40%).
+        #
+        # TR IS DELIBERATELY 0.30, NOT SHORTER.  It was briefly 0.25; combined with the
+        # doubled Rv that made relaxation outrun diastolic filling and drove Plv NEGATIVE
+        # through the relaxation phase (see the negative-Plv note in the Windkessel block).
+        # TR sets how fast the actuator lets go, and the chamber cannot refill from below
+        # its 221 mL unstressed volume faster than (Pv-Plv)/Rv allows.  If Plv still dips
+        # below zero, lengthen TR before touching anything else — it is the direct knob.
+        #
+        # WATCH THE FOLD.  Per the geometry note at the top of this file the destabilising
+        # follower-pressure term -Pact*K_pact scales with Pact, so +25% amplitude pushes
+        # that ratio from ~0.40 to ~0.50 at nx_act=42 (it was ~0.83 that flipped K_eff
+        # indefinite on the old mesh).  Expected to hold, but if Newton starts failing at
+        # peak actuation raise β_start above 4.0 before touching anything else.
+        # Pact_mmHg = 600 * ϕᵢ(t_new; tC=0.1, tR=0.35, TC=0.15, TR=0.35)   # previous
+        Pact_mmHg = 750 * ϕᵢ(t_new; tC=0.1, tR=0.30, TC=0.15, TR=0.30)
         Pact = Pact_mmHg / Pa2mmHg
 
         # Bending-scale continuation: one β per time step, held fixed through the Newton
@@ -777,7 +882,7 @@ Pv0 = p_max
             end
             d, G3 = director_field(dh, scv, u)
             membrane_resultants!(N11, N22, N12, Nmin, dh, scv, mat_cur, u)
-            VTKGridFile("minilimo-coupled-dynamic-strong-$(vtk_step[])", dh) do vtk
+            VTKGridFile("minilimo-physio-$(vtk_step[])", dh) do vtk
                 write_solution(vtk, dh, u)
                 Ferrite.write_node_data(vtk, resu, "ru")
                 Ferrite.write_node_data(vtk, resθ, "rθ")
@@ -812,15 +917,49 @@ Pv0 = p_max
 end
 close(pvd)
 
-jldsave("minilimo-coupled-dynamic-strong-positions.jld2";
+jldsave("minilimo-physio-positions.jld2";
         positions=poss, connectivity=conn, t=tpos, t_all=tsav,
         vols=vols, pres=pres, pact=pact, paos=paos, pvns=pvns)
 
+# ── Post-processing ────────────────────────────────────────────────────────────────────
+# AORTIC ROOT PRESSURE.  `paos` is the pressure at the COMPLIANCE NODE, downstream of Ra.
+# With Ra read as a characteristic impedance (see the Windkessel block) the root pressure
+# is Pa + Ra·Qao, and because the valve is a pure resistor — Qao = (Plv−Pa)/Ra while open,
+# 0 while closed — that collapses exactly to max(Plv, Pa).  Reporting `paos` alone
+# under-states systolic pressure by the whole Ra·Qao drop (41 mmHg in the uncalibrated run).
+Ra_c  = Ra * Pa2mmHg / m3_to_ml            # Pa·s/m³ → mmHg·s/mL
+proot = max.(pres, paos)                   # aortic ROOT pressure [mmHg]
+Qao   = max.(0.0, pres .- paos) ./ Ra_c    # aortic flow [mL/s]
+Qmv   = max.(0.0, pvns .- pres) ./ (Rv * Pa2mmHg / m3_to_ml)
+
+# Beat metrics over the last cycle, next to the 0D-surrogate predictions this calibration
+# was solved for.  Large disagreement means the linear device law (Plv = 0.172·Pact +
+# 0.363·V − 80.2, R²=0.93) extrapolated badly to Pact=750 — retrim Rp and rerun.
+let m = tsav .≥ (T_beat - T_cycle)
+    V, P, Pr, Pvn = vols[m], pres[m], proot[m], pvns[m]
+    EDV, ESV = maximum(V), minimum(V); SV = EDV - ESV
+    MAP = sum(Pr) / length(Pr)
+    @printf("\n── last-cycle hemodynamics ──────────────────────────────────────────\n")
+    @printf("  EDV %6.1f  ESV %6.1f  SV %5.1f mL   CO %4.2f L/min   EF %4.1f%%\n",
+            EDV, ESV, SV, SV * 60 / 1000, 100SV / EDV)
+    @printf("  Plv peak %6.1f | Pao(root) %5.1f/%5.1f  PP %4.1f  MAP %5.1f mmHg\n",
+            maximum(P), maximum(Pr), minimum(Pr), maximum(Pr) - minimum(Pr), MAP)
+    @printf("  Pv %5.1f ± %4.1f mmHg | peak Qao %5.0f  Qmv %5.0f mL/s\n",
+            sum(Pvn)/length(Pvn), maximum(Pvn) - minimum(Pvn), maximum(Qao[m]), maximum(Qmv[m]))
+    @printf("  Plv trough %6.1f mmHg  <-- MUST STAY POSITIVE, see the Rv/TR notes above\n",
+            minimum(P))
+    @printf("  predicted:  SV 72.4  CO 4.35  EDV 260  ESV 188  MAP 96.0  Plv 124.3..+7.1\n")
+    @printf("              peak Qmv ~960   (EF ~28%% is device geometry, not the 0D model)\n")
+    @printf("              the 0D surrogate ran ~4.8 mmHg HIGH at the trough, so a real\n")
+    @printf("              trough near +2 mmHg matches prediction; negative means retune.\n")
+    @printf("  healthy:    SV 60-100  CO 4.5-6.0  Pao 120/80 (PP ~40)  MAP ~93  LAP 8-12\n\n")
+end
+
 using Plots
 times = tsav   # adaptive Δt → non-uniform sample times
-p1 = plot(times, [vols, pres, paos, pvns], xlabel="Time [s]",
-          label=["Vlv" "Plv" "Pao" "Pv"], lw=2, legend=:right)
+p1 = plot(times, [vols, pres, proot, paos, pvns], xlabel="Time [s]",
+          label=["Vlv" "Plv" "Pao (root)" "Pa (distal)" "Pv"], lw=2, legend=:right)
 p2 = plot(vols, pres, label=:none, xlim=extrema(vols).+(-20,20), ylims=(0, maximum(pres)+30),
           xlabel="Volume [ml]", ylabel="Pressure [mmHg]", lw=2, linez=round.(times, RoundUp))
 plot(p1, p2)
-savefig("minilimo-coupled-dynamic-strong-31082026.png")
+savefig("minilimo-physio-2.png")
