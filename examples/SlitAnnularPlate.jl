@@ -147,3 +147,4 @@ using Plots
 λs, wA, wB = getindex.(trace, 1), getindex.(trace, 2), getindex.(trace, 3)
 plot([wA, wB], λs, marker=:o, label=["u_z(A) outer" "u_z(B) inner"],
      xlabel="tip deflection", ylabel="load factor λ", legend=:bottomright)
+savefig("slit_annular_plate_tip_deflection.png")
