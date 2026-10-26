@@ -4,8 +4,8 @@
 
 # FerriteShells.jl
 
-> [!WARNING]
-> This package is under active development; as such, nothing is guaranteed and breaking changes might occur.
+> [!NOTE]
+> This package follows [semantic versioning](https://semver.org/). While it is in `0.x`, breaking changes are only made in minor releases (e.g. `0.1` → `0.2`) and are listed in the release notes.
 
 This package provides helper functions to assemble the different terms in the weak form of most classical shell formulations — C⁰ Kirchhoff–Love linear, C⁰ Koiter (non-linear Kirchhoff–Love), Reissner–Mindlin, and Naghi (non-linear Reissner–Mindlin) shells.
 Specifically, the classical membrane, bending, and shear contributions of the residuals, the consistent tangent stiffness matrix can be integrated and used with [Ferrite.jl](https://ferrite-fem.github.io/Ferrite.jl/stable/).
