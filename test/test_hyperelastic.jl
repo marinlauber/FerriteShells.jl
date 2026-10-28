@@ -399,3 +399,50 @@ end
     @test norm(Array(N_vi - N_si)) < 1e-10 * norm(Array(N_si))   # U(J) ignored: J ≡ 1
     @test norm(Array(N_vp - N_ps)) > 1e-2  * norm(Array(N_ps))   # U(J) felt
 end
+
+@testset "Hyperelastic reference frame on curved elements" begin
+    # The material maps the natural-frame C to Cartesian through J_ref = [A₁ A₂ G₃], so
+    # its third column must be the unit normal at the QP. Neither G₃_elem[1] (the
+    # centroid normal, or node 1's normal with NodeFrames) nor the interpolated director
+    # d₀ is orthonormal to A_α on a curved element: the former made the KL kernels
+    # depend on the director frame (which KL does not have), the latter left a
+    # reference stress in the RM kernels driven with NodeFrames (|r(0)| ≈ 48 here).
+    mat = Hyperelastic(C -> μ_HE/2 * (tr(C) - 3), 1e-2)
+    for (cell_t, order, qr_order) in ((Quadrilateral, 1, 2), (QuadraticQuadrilateral, 2, 3))
+        ip   = Lagrange{RefQuadrilateral, order}()
+        grid = shell_grid(generate_grid(cell_t, (3, 3)); map = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2))
+        nf   = NodeFrames(grid, ip)
+        qr   = QuadratureRule{RefQuadrilateral}(qr_order)
+        scv_n = ShellCellValues(qr, ip, ip)   # NodeFrames
+        scv_c = ShellCellValues(qr, ip, ip)   # centroid frames
+        nn = getnbasefunctions(ip)
+        for cellid in 1:getncells(grid)
+            ids = collect(getcells(grid, cellid).nodes)
+            x   = [grid.nodes[i].x for i in ids]
+            reinit!(scv_n, x, nf, ids); reinit!(scv_c, x)
+
+            # RM: stress-free reference, and explicit kernels ≈ FD of energy_RM
+            u0 = zeros(5nn)
+            r0 = zeros(5nn); residuals_RM_FD!(r0, scv_n, u0, mat)
+            @test norm(r0) < 1e-10
+            r0 = zeros(5nn); membrane_residuals_RM!(r0, scv_n, u0, mat); bending_residuals_RM!(r0, scv_n, u0, mat)
+            @test norm(r0) < 1e-10
+            u = zeros(5nn)
+            for I in 1:nn; u[5I-4] = 1e-6 * x[I][1]; u[5I-3] = -4e-7 * x[I][2]; end
+            re = zeros(5nn); membrane_residuals_RM!(re, scv_n, u, mat); bending_residuals_RM!(re, scv_n, u, mat)
+            rf = zeros(5nn); residuals_RM_FD!(rf, scv_n, u, mat)
+            @test norm(re - rf) / norm(rf) < 1e-6
+
+            # KL: no director, so the response must not depend on the frame choice
+            uk = zeros(3nn)
+            for I in 1:nn; uk[3I-2] = 1e-3 * x[I][1]; uk[3I-1] = -4e-4 * x[I][2]; uk[3I] = 2e-3 * x[I][1] * x[I][2]; end
+            rn = zeros(3nn); membrane_residuals_KL!(rn, scv_n, uk, mat)
+            rc = zeros(3nn); membrane_residuals_KL!(rc, scv_c, uk, mat)
+            @test rn ≈ rc rtol=1e-12
+            kn = zeros(3nn, 3nn); membrane_tangent_KL!(kn, scv_n, uk, mat)
+            kc = zeros(3nn, 3nn); membrane_tangent_KL!(kc, scv_c, uk, mat)
+            @test kn ≈ kc rtol=1e-12
+            @test FerriteShells.bending_energy_KL(uk, scv_n, mat) ≈ FerriteShells.bending_energy_KL(uk, scv_c, mat) rtol=1e-12
+        end
+    end
+end
