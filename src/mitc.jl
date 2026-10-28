@@ -17,21 +17,19 @@ Every scheme is declared the same way: a `tying_conditions(::typeof(MITCx))` met
 its tying conditions and the assumed-strain space they are tied against, which the shared
 `MITC{N}(ip_shape, qr, scheme)` constructor feeds to [`tying_weights`](@ref).
 
-Static fields (`N_tie`, `dN_tie`, `h_tie_*`) are precomputed once at construction.
-Mutable fields (`A_tie`, `d₀_tie`, `*_node`) are updated each [`reinit!`](@ref) call.
+The reference geometry at the tying points comes from `scv_tie`, a `ShellCellValues` whose
+"quadrature points" are the tying points (entry `k` is point `k`, the weights are unused), so the
+tying points go through exactly the same [`reinit!`](@ref) and `reference_director` code as the
+quadrature points. `N_tie` and `dN_tie` are read from `scv_tie` once at construction.
 """
-struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
+struct MITC{N,M,T<:AbstractFloat,SV} <: AbstractMITC
+    scv_tie :: SV                 # ShellCellValues (NoMITC) on the tying points; holds A_α, the node frames and N
     N_tie   :: Matrix{T}          # shape functions           at the tying points  [n_shape × M]
     dN_tie  :: Matrix{T}          # ∂N_I/∂ξ_{α_k} of the tied component            [n_shape × M]
     h_tie_1 :: Matrix{T}          # MITC interp weights for γ₁  [n_qp × M]
     h_tie_2 :: Matrix{T}          # MITC interp weights for γ₂  [n_qp × M]
     ξ_tie   :: Vector{Vec{2,T}}   # local coordinates of the tying points
     α_tie   :: Vector{Int}        # tied covariant component (1 or 2) of each entry
-    A_tie   :: Vector{Vec{3,T}}   # reference tangent A_{α_k} at the tying points
-    d₀_tie  :: Vector{Vec{3,T}}   # reference director Σ N_I(ξ_k) G₃_node[I] at the tying points — NOT normalized
-    G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
-    T₁_node :: Vector{Vec{3,T}}
-    T₂_node :: Vector{Vec{3,T}}
     # Reusable scratch for bending_tangent_RM! (overwritten each call; not thread-safe).
     a_tie_s :: Vector{Vec{3,T}}; d_tie_s :: Vector{Vec{3,T}}     # length M (tying points)
     dd1_s   :: Vector{Vec{3,T}}; dd2_s   :: Vector{Vec{3,T}}     # length N (nodes), Rodrigues ∂d/∂φ
@@ -39,24 +37,21 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     Bγ₁φ1_s :: Vector{T}; Bγ₁φ2_s :: Vector{T}
     Bγ₂φ1_s :: Vector{T}; Bγ₂φ2_s :: Vector{T}
 end
-function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
+function MITC{N}(ip_shape::Interpolation, ip_geo::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
                  h_tie_1::Matrix{T}, h_tie_2::Matrix{T}) where {N,T}
     n_shape = getnbasefunctions(ip_shape)
-    # `N_tie` is indexed alongside the per-node frames `G₃_node`/`T₁_node`/`T₂_node`, which are
-    # sized N, so the tying scheme and the shape interpolation must have the same node count.
+    # `N_tie` is indexed alongside the per-node frames of `scv_tie`, which are sized to
+    # `ip_shape`, so the tying scheme and the shape interpolation must have the same node count.
     n_shape == N || throw(ArgumentError(
         "MITC{$N} tying needs an $N-node shape interpolation, got $ip_shape with $n_shape base functions"))
     M = length(ξ_tie)
+    qr_tie  = QuadratureRule{Ferrite.getrefshape(ip_shape)}(ones(T, M), ξ_tie)
+    scv_tie = ShellCellValues(qr_tie, ip_geo, ip_shape)
     # shape values and the derivative along the tied direction at each tying point
-    N_tie = zeros(T, n_shape, M); dN_tie = zeros(T, n_shape, M)
-    for (k, ξ_k) in enumerate(ξ_tie), I in 1:n_shape
-        dN, Nval = Ferrite.reference_shape_gradient_and_value(ip_shape, ξ_k, I)
-        N_tie[I, k] = Nval;  dN_tie[I, k] = dN[α_tie[k]]
-    end
-    MITC{N,M,T}(
-        N_tie, dN_tie, h_tie_1, h_tie_2, ξ_tie, α_tie,
-        fill(zero(Vec{3,T}), M), fill(zero(Vec{3,T}), M),
-        fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N),
+    N_tie  = copy(scv_tie.N)
+    dN_tie = [scv_tie.dNdξ[I, k][α_tie[k]] for I in 1:n_shape, k in 1:M]
+    MITC{N,M,T,typeof(scv_tie)}(
+        scv_tie, N_tie, dN_tie, h_tie_1, h_tie_2, ξ_tie, α_tie,
         Vector{Vec{3,T}}(undef, M), Vector{Vec{3,T}}(undef, M),
         Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
         Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
@@ -69,14 +64,14 @@ end
 # conditions and the assumed-strain space they are tied against; this is the shared body that
 # turns that pair into the element data, so each scheme file is a docstring, a one-line
 # constructor and the conditions table.
-function MITC{N}(ip_shape::Interpolation, qr::QuadratureRule, scheme) where {N}
+function MITC{N}(ip_shape::Interpolation, qr::QuadratureRule, scheme; ip_geo::Interpolation = ip_shape) where {N}
     conds, basis = tying_conditions(scheme)
     ξ_tie, α_tie, h_tie_1, h_tie_2 = tying_weights(qr, conds, basis)
-    MITC{N}(ip_shape, ξ_tie, α_tie, h_tie_1, h_tie_2)
+    MITC{N}(ip_shape, ip_geo, ξ_tie, α_tie, h_tie_1, h_tie_2)
 end
 
 # safe copy for multi-threaded assembly
-Base.copy(m::MITC{N,M,T}) where {N,M,T} = MITC{N,M,T}(ntuple(i -> copy(getfield(m, i)), fieldcount(MITC{N,M,T}))...)
+Base.copy(m::MITC) = typeof(m)(ntuple(i -> copy(getfield(m, i)), fieldcount(typeof(m)))...)
 
 # empty MITC is standard
 struct NoMITC <: AbstractMITC end
@@ -85,51 +80,47 @@ Base.copy(m::NoMITC) = m
 import Ferrite: reinit!
 
 """
-    reinit!(mitc, ip_geo, x, G₃_nodes, T₁_nodes, T₂_nodes)
+    reinit!(mitc, x, G₃_nodes, T₁_nodes, T₂_nodes)
 
 Update the MITC data for a cell with cell coordinates `x` and nodal frames
 `G₃_nodes`/`T₁_nodes`/`T₂_nodes` (length `N`, i.e. sized to `ip_shape`, not `ip_geo`).
 
-The reference geometry at the tying points is recomputed and stored: the covariant tangent
-`A_tie[k]` from the geometric interpolation `ip_geo`, and the reference director `d₀_tie[k]`
-from the shape interpolation via the precomputed `N_tie`.
+The reference geometry at the tying points is recomputed by `reinit_geometry!` on `scv_tie`,
+and the nodal frames are copied into it, so [`tying_tangent`](@ref) and
+[`tying_reference_director`](@ref) follow the same code as the quadrature points.
 """
 reinit!
 
 reinit!(::NoMITC, args...) = nothing
-function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:Vec{3}},
-                 G₃_nodes::AbstractVector{<:Vec{3}}, T₁_nodes::AbstractVector{<:Vec{3}}, T₂_nodes::AbstractVector{<:Vec{3}}) where {N,M,T}
-    n_geo = getnbasefunctions(ip_geo)
+function reinit!(mitc::MITC{N}, x::AbstractVector{<:Vec{3}}, G₃_nodes::AbstractVector{<:Vec{3}},
+                 T₁_nodes::AbstractVector{<:Vec{3}}, T₂_nodes::AbstractVector{<:Vec{3}}) where {N}
+    scv = mitc.scv_tie
+    reinit_geometry!(scv, x)
     for I in 1:N
-        mitc.G₃_node[I] = G₃_nodes[I]
-        mitc.T₁_node[I] = T₁_nodes[I]
-        mitc.T₂_node[I] = T₂_nodes[I]
+        scv.G₃_elem[I] = G₃_nodes[I]
+        scv.T₁_elem[I] = T₁_nodes[I]
+        scv.T₂_elem[I] = T₂_nodes[I]
     end
-    # d₀_tie is left un-normalized — exactly the field `d_k` builds at u = 0 in
-    # `tying_shear_strains` below. Normalizing it here (the earlier behaviour) leaves a
-    # reference shear γ_α(0) = (A_α·d₀)(1 − 1/‖d₀‖) at every tying point, nonzero whenever
-    # the nodal frames are not all parallel, i.e. on any curved element driven with
-    # `NodeFrames`. This is the same rule `reference_director` follows for the QP-direct
-    # (NoMITC) path.
-    for k in 1:M
-        ξ_k = mitc.ξ_tie[k]; α = mitc.α_tie[k]
-        # A_α from the *geometric* interpolation (n_geo coordinates) ...
-        A = zero(Vec{3,T})
-        for i in 1:n_geo
-            dN, _ = Ferrite.reference_shape_gradient_and_value(ip_geo, ξ_k, i)
-            A += x[i] * dN[α]
-        end
-        # ... d₀ from the *shape* interpolation, through the precomputed `N_tie`: the nodal
-        # frames are sized to `ip_shape` (N entries), and `tying_shear_strains` interpolates
-        # the current director with the very same weights, so the two agree term by term.
-        d₀ = zero(Vec{3,T})
-        for I in 1:N
-            d₀ += mitc.N_tie[I,k] * mitc.G₃_node[I]
-        end
-        mitc.A_tie[k]  = A
-        mitc.d₀_tie[k] = d₀
-    end
+    return mitc
 end
+
+"""
+    tying_tangent(mitc, k)
+
+Reference covariant tangent ``A_{\\alpha_k}`` at tying entry `k`, from the geometric interpolation.
+"""
+@inline tying_tangent(mitc::MITC, k::Int) = mitc.α_tie[k] == 1 ? mitc.scv_tie.A₁[k] : mitc.scv_tie.A₂[k]
+
+"""
+    tying_reference_director(mitc, k)
+
+Reference director ``d_0 = \\sum_I N_I(\\xi_k) G_{3,I}`` at tying entry `k`, left un-normalized:
+exactly the field `tying_shear_strains` builds at ``u = 0``. Normalizing it leaves a reference
+shear ``\\gamma_\\alpha(0) = (A_\\alpha\\cdot d_0)(1 - 1/\\Vert d_0\\Vert)`` whenever the nodal frames are not
+all parallel, i.e. on any curved element driven with `NodeFrames`. Same rule as `reference_director`
+on the QP-direct (NoMITC) path, which it calls.
+"""
+@inline tying_reference_director(mitc::MITC{N}, k::Int) where {N} = reference_director(mitc.scv_tie, k, N)
 
 
 # default is no tying shear strain
@@ -152,10 +143,11 @@ function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M
             Δa += u_I * mitc.dN_tie[I,k]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
+            G₃_I = mitc.scv_tie.G₃_elem[I]; T₁_I = mitc.scv_tie.T₁_elem[I]; T₂_I = mitc.scv_tie.T₂_elem[I]
             d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
-        dot(mitc.A_tie[k] + Δa, d_k) - dot(mitc.A_tie[k], mitc.d₀_tie[k])
+        A_k = tying_tangent(mitc, k)
+        dot(A_k + Δa, d_k) - dot(A_k, tying_reference_director(mitc, k))
     end
 end
 

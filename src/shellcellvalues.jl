@@ -81,7 +81,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         end
     end
 
-    m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
+    m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr; ip_geo)
     ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m), typeof(frames)}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2, zeros(T, n_qp),
@@ -235,7 +235,7 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃_elem[I] = G₃_c; scv.T₁_elem[I] = T₁_c; scv.T₂_elem[I] = T₂_c
     end
     reference_director_curvature!(scv)
-    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
+    reinit!(scv.mitc, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
 
 # Reference director-gradient curvature B₀_αβ = ½(A_α·d₀,β + A_β·d₀,α), with

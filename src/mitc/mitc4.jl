@@ -14,7 +14,7 @@ Assumed field: ``\\tilde\\gamma_1 = a_1 + b_1\\xi_2`` (constant in ``\\xi_1``, l
 ``\\tilde\\gamma_2 = a_2 + b_2\\xi_1``, the spaces obtained by differentiating the bilinear
 displacement field ``w = c_0 + c_1\\xi_1 + c_2\\xi_2 + c_3\\xi_1\\xi_2``.
 """
-MITC4(ip_shape::Interpolation, qr::QuadratureRule) = MITC{4}(ip_shape, qr, MITC4)
+MITC4(ip_shape::Interpolation, qr::QuadratureRule; ip_geo::Interpolation = ip_shape) = MITC{4}(ip_shape, qr, MITC4; ip_geo)
 
 # γ₁ tied on the two ξ₁-edges, γ₂ on the two ξ₂-edges, against span{1, ξ₂} × span{1, ξ₁}.
 tying_conditions(::typeof(MITC4)) = (
