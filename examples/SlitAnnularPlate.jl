@@ -29,7 +29,6 @@ function slit_annular_grid(a, b, n_r, n_q)
     return shell_grid(grid)                    # embed the planar Q9 grid into 3D (z = 0)
 end
 
-# Residual + tangent via ForwardDiff on energy_RM, required because theexplciit MITC variant is assymetric
 function assemble_global!(K, r, dh, scv, u, mat)
     n_e = ndofs_per_cell(dh); ke = zeros(n_e, n_e); re = zeros(n_e)
     asm = start_assemble(K, r)
@@ -37,8 +36,10 @@ function assemble_global!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         u_e = u[shelldofs(cell)]
-        residuals_RM_FD!(re, scv, u_e, mat)
-        tangent_RM_FD!(ke, scv, u_e, mat)
+        membrane_tangent_RM!(ke, scv, u_e, mat)
+        membrane_residuals_RM!(re, scv, u_e, mat)
+        bending_tangent_RM!(ke, scv, u_e, mat)
+        bending_residuals_RM!(re, scv, u_e, mat)
         assemble!(asm, shelldofs(cell), ke, re)
     end
 end

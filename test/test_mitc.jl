@@ -1,4 +1,51 @@
 
+@testset "quadrilateral MITC assumed-strain interpolation" begin
+    # Same contract as the triangular schemes: sampling a field of the assumed space at the
+    # tying entries and interpolating back to the quadrature points returns the field itself.
+    for (mitc_ctor, refshape, qro, M) in ((MITC4, RefQuadrilateral, 2, 4),
+                                          (MITC9, RefQuadrilateral, 3, 12))
+        qr = QuadratureRule{refshape}(qro)
+        conds, basis = FerriteShells.tying_conditions(mitc_ctor)
+        ξ_tie, α_tie, h₁, h₂ = FerriteShells.tying_weights(qr, conds, basis)
+        @test length(ξ_tie) == M
+        for P in basis
+            γ = [P(ξ_tie[k])[α_tie[k]] for k in eachindex(ξ_tie)]
+            for q in eachindex(qr.weights)
+                @test sum(h₁[q,:] .* γ) ≈ P(qr.points[q])[1] atol=1e-12
+                @test sum(h₂[q,:] .* γ) ≈ P(qr.points[q])[2] atol=1e-12
+            end
+        end
+        # Unlike the triangles, no quadrilateral condition couples the two components, so
+        # the off-component columns must come out exactly zero.
+        @test all(iszero, h₁[:, α_tie .== 2])
+        @test all(iszero, h₂[:, α_tie .== 1])
+    end
+
+    # Pin the weights to the closed forms the hand-written constructors used to ship, in
+    # their tying-entry order: bilinear edge interpolation for MITC4, and the tensor-product
+    # Lagrange interpolation on the 2×3 / 3×2 Gauss grids for MITC9.
+    let qr = QuadratureRule{RefQuadrilateral}(2)
+        _, _, h₁, h₂ = FerriteShells.tying_weights(qr, FerriteShells.tying_conditions(MITC4)...)
+        for q in eachindex(qr.weights)
+            ξ, η = qr.points[q][1], qr.points[q][2]
+            @test h₁[q,:] ≈ [(1-η)/2, (1+η)/2, 0, 0] atol=1e-14
+            @test h₂[q,:] ≈ [0, 0, (1-ξ)/2, (1+ξ)/2] atol=1e-14
+        end
+    end
+    let qr = QuadratureRule{RefQuadrilateral}(3)
+        _, _, h₁, h₂ = FerriteShells.tying_weights(qr, FerriteShells.tying_conditions(MITC9)...)
+        for q in eachindex(qr.weights)
+            ξ, η = qr.points[q][1], qr.points[q][2]
+            g₁ = (1 - sqrt(3)*ξ)/2;  g₂ = (1 + sqrt(3)*ξ)/2
+            L₁ = η*(η-1)/2;  L₂ = 1 - η^2;  L₃ = η*(η+1)/2
+            @test h₁[q,:] ≈ [g₁*L₁, g₂*L₁, g₁*L₂, g₂*L₂, g₁*L₃, g₂*L₃, 0, 0, 0, 0, 0, 0] atol=1e-14
+            l₁ = ξ*(ξ-1)/2;  l₂ = 1 - ξ^2;  l₃ = ξ*(ξ+1)/2
+            f₁ = (1 - sqrt(3)*η)/2;  f₂ = (1 + sqrt(3)*η)/2
+            @test h₂[q,:] ≈ [0, 0, 0, 0, 0, 0, l₁*f₁, l₂*f₁, l₃*f₁, l₁*f₂, l₂*f₂, l₃*f₂] atol=1e-14
+        end
+    end
+end
+
 @testset "MITC9 unit element" begin
     mat = LinearElastic(1.0e6, 0.3, 0.01)
     ip  = Lagrange{RefQuadrilateral, 2}()
@@ -10,9 +57,8 @@
     n_dof = 45
 
     # 1. All tying-point shear strains are zero at the reference state.
-    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
-    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+    γ_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ_k)
 
     # 2. Explicit residual matches ForwardDiff gradient (no-MITC path, exact to rounding).
     #    The no-MITC explicit formula is exact; MITC introduces a ~0.03% approximation
@@ -51,11 +97,12 @@
     re_ex_lg = zeros(n_dof); bending_residuals_RM!(re_ex_lg, scv_mitc, u_large, mat)
     re_fd_lg = zeros(n_dof); residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
     re_mem_lg = zeros(n_dof); membrane_residuals_RM!(re_mem_lg, scv_mitc, u_large, mat)
-    @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-2
+    @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-10
 
-    # 2b. Consistent MITC9 tangent: bending_tangent_RM! (MITC dispatch) must match
-    #     the ForwardDiff Jacobian of bending_residuals_RM! (not the energy Hessian —
-    #     the MITC explicit residual is not the exact gradient of energy_RM).
+    # 2b. Consistent MITC9 tangent: the explicit MITC residual is the exact gradient of
+    #     energy_RM (it varies the tying-interpolated shear strain via the MITC B-operators),
+    #     so bending_tangent_RM! (MITC dispatch) equals both its ForwardDiff Jacobian and the
+    #     energy Hessian, and is symmetric — on curved elements too.
     ke_ex  = zeros(n_dof, n_dof)
     bending_tangent_RM!(ke_ex, scv_mitc, u_pert, mat)
     ke_jac = ForwardDiff.jacobian(u -> begin
@@ -63,7 +110,8 @@
         bending_residuals_RM!(re, scv_mitc, u, mat)
         re
     end, u_pert)
-    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-3
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-8
+    @test norm(ke_ex .- ke_ex') / norm(ke_ex) < 1e-10   # symmetric (conservative residual)
 
     # At zero state: tangent matches Jacobian of residual to near-machine precision.
     ke_ex0  = zeros(n_dof, n_dof)
@@ -99,6 +147,35 @@
     W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc,   mat)
     W_nomitc = FerriteShells.energy_RM(u_kl, scv_nomitc, mat)
     @test W_mitc ≈ W_nomitc rtol=1e-6
+end
+
+@testset "MITC9 curved-element reference state is stress-free (positive definite)" begin
+    # On a doubly-curved element the MITC tying strains are already referenced, so the
+    # QP reference subtraction `dot(A_α, d₀)` must NOT be applied again — doing so injects
+    # a spurious reference shear (zero on flat elements, nonzero on curved) that pre-stresses
+    # u=0 and makes the tangent indefinite. Regression guard for that double-subtraction.
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ip  = Lagrange{RefQuadrilateral, 2}()
+    qr  = QuadratureRule{RefQuadrilateral}(3)
+    # warp the flat unit Q9 onto a paraboloid z = 0.15(x²+y²)
+    X_curv = [Vec{3}((p[1], p[2], 0.15*(p[1]^2 + p[2]^2))) for p in X_Q9_UNIT]
+
+    scv_mitc   = ShellCellValues(qr, ip, ip; mitc=MITC9)
+    scv_nomitc = ShellCellValues(qr, ip, ip)
+    reinit!(scv_mitc,   X_curv)
+    reinit!(scv_nomitc, X_curv)
+
+    # reference (u=0) residual: MITC must not add spurious internal force beyond NoMITC
+    re_m  = zeros(45); residuals_RM_FD!(re_m,  scv_mitc,   zeros(45), mat)
+    re_nm = zeros(45); residuals_RM_FD!(re_nm, scv_nomitc, zeros(45), mat)
+    @test norm(re_m) ≤ 2 * norm(re_nm) + 1e-6
+
+    # tangent at u=0 must be positive semidefinite: exactly 6 zero modes, no negative ones
+    ke = zeros(45, 45); tangent_RM_FD!(ke, scv_mitc, zeros(45), mat)
+    λ  = eigvals(Symmetric(ke))
+    tol = 1e-7 * maximum(abs, λ)
+    @test count(<(-tol), λ) == 0
+    @test count(v -> abs(v) ≤ tol, λ) == 6
 end
 
 @testset "MITC9 anti-locking: thin SS plate h-convergence" begin
@@ -184,9 +261,8 @@ end
     n_dof = 20
 
     # 1. All tying-point shear strains are zero at the reference state.
-    γ₁_k, γ₂_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
-    @test all(v -> abs(v) ≤ 1e-14, γ₁_k)
-    @test all(v -> abs(v) ≤ 1e-14, γ₂_k)
+    γ_k = FerriteShells.tying_shear_strains(scv_mitc.mitc, zeros(n_dof))
+    @test all(v -> abs(v) ≤ 1e-14, γ_k)
 
     # 2. No-MITC explicit residual matches ForwardDiff gradient exactly.
     #    MITC4 explicit residual agrees to within the MITC-δγ approximation (~1%).
@@ -398,4 +474,93 @@ end
             @test errs_mitc[end] < errs_nomitc[end] / 5   # MITC4 at least 5× more accurate at finest mesh
         end
     end
+end
+
+@testset "MITC tying reference director: mixed geometry/shape interpolation" begin
+    # `reinit!(mitc, ...)` gets the nodal frames sized to `ip_shape` (n_shape entries) but the
+    # coordinates sized to `ip_geo` (n_geo entries). Building `d₀_tie` with `ip_geo` values over
+    # `1:n_geo` therefore reads the wrong frames when n_geo < n_shape and runs off the end when
+    # n_geo > n_shape. It must use `mitc.N_tie` (from `ip_shape`) over `1:N`, which is exactly
+    # what `tying_shear_strains` interpolates the current director with.
+    mat  = LinearElastic(1.0e6, 0.3, 0.01)
+    surf = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2)
+    grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2)); map = surf)
+    ip1  = Lagrange{RefQuadrilateral, 1}()
+    ip2  = Lagrange{RefQuadrilateral, 2}()
+    # subparametric (n_geo = 4 < n_shape = 9) and superparametric (n_geo = 9 > n_shape = 4)
+    for (ip_geo, ip_shape, mitc) in ((ip1, ip2, MITC9), (ip2, ip1, MITC4))
+        nf    = NodeFrames(grid, ip_geo)
+        scv   = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_geo, ip_shape; mitc)
+        n_dof = 5 * getnbasefunctions(ip_shape)
+        u0    = zeros(n_dof)
+        for cell in CellIterator(grid)
+            reinit!(scv, cell, nf)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
+            re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
+        end
+    end
+
+    # The node count of the tying scheme and of `ip_shape` must agree — `N_tie` is indexed
+    # alongside the per-node frames, which are sized N.
+    @test_throws ArgumentError MITC9(ip1, QuadratureRule{RefQuadrilateral}(3))
+    @test_throws ArgumentError MITC3(Lagrange{RefTriangle, 2}(), QuadratureRule{RefTriangle}(3))
+end
+
+@testset "MITC tying reference director on curved elements" begin
+    # The tying strain builds the current director at ξ_k by interpolating the nodal
+    # Rodrigues directors, Σ N_I(ξ_k) d_I — which is not a unit vector. Its reference
+    # must be the same field at u = 0, Σ N_I(ξ_k) G₃_I. Subtracting the *normalized*
+    # director instead left γ_α(0) = (A_α·d₀)(1 − 1/‖d₀‖) at every tying point, nonzero
+    # whenever the nodal frames are not all parallel — so centroid frames hid it and
+    # `NodeFrames` on any curved mesh exposed it (measured ‖re(0)‖ ≈ 0.54).
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    surf = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2)
+    cases = ((Quadrilateral,          RefQuadrilateral, 1, MITC4),
+             (QuadraticQuadrilateral, RefQuadrilateral, 2, MITC9))
+    for (primitive, refshape, order, mitc) in cases
+        grid = shell_grid(generate_grid(primitive, (3, 3)); map = surf)
+        ip   = Lagrange{refshape, order}()
+        nf   = NodeFrames(grid, ip)
+        scv  = ShellCellValues(QuadratureRule{refshape}(order + 1), ip, ip; mitc)
+        dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+        n_dof = 5 * getnbasefunctions(ip)
+        u0    = zeros(n_dof)
+        for cell in CellIterator(dh)
+            # Per-node frames: the case the normalization error showed up in.
+            reinit!(scv, cell, nf)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
+            re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)
+            @test norm(re) ≤ 1.0e-11
+            # Centroid frames stay zero too (all nodal frames parallel ⇒ ‖d₀‖ = 1).
+            reinit!(scv, cell)
+            γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
+            @test all(v -> abs(v) ≤ 1e-14, γ_k)
+        end
+    end
+
+    # The corrected reference is still the exact gradient of the energy: residual and
+    # consistent tangent must match ForwardDiff on a curved element with node frames.
+    grid = shell_grid(generate_grid(Quadrilateral, (2, 2)); map = surf)
+    ip   = Lagrange{RefQuadrilateral, 1}()
+    nf   = NodeFrames(grid, ip)
+    scv  = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip, ip; mitc = MITC4)
+    dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+    mat  = LinearElastic(1.0e6, 0.3, 0.01)
+    Random.seed!(11)
+    u_pert = 1e-2 .* randn(20)
+    reinit!(scv, first(CellIterator(dh)), nf)
+    re_ex  = zeros(20); bending_residuals_RM!(re_ex, scv, u_pert, mat)
+    re_fd  = zeros(20); residuals_RM_FD!(re_fd, scv, u_pert, mat)
+    re_mem = zeros(20); membrane_residuals_RM!(re_mem, scv, u_pert, mat)
+    @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
+    ke_ex = zeros(20, 20); bending_tangent_RM!(ke_ex, scv, u_pert, mat)
+    ke_jac = ForwardDiff.jacobian(u -> begin
+        re = zeros(eltype(u), 20)
+        bending_residuals_RM!(re, scv, u, mat)
+        re
+    end, u_pert)
+    @test norm(ke_ex .- ke_jac) / norm(ke_jac) < 1e-8
 end
