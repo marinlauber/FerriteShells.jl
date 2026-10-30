@@ -33,15 +33,11 @@ function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2
 end
 
 # LinearElastic: frame arguments accepted but ignored.
-function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
-                                     A_metric::SymmetricTensor{2,2,T},
-                                     A₁=nothing, A₂=nothing, G₃=nothing) where T
-    _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
-    D    = (mat.thickness^2 / 12) * C
-    cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    Aup  = inv(A_metric)
-    Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
-    return D, Cs
+function shear_stiffness(mat::LinearElastic, c_ms, A_metric::SymmetricTensor{2,2,T},
+                         A₁=nothing, A₂=nothing, G₃=nothing) where T
+    cs  = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    Aup = inv(A_metric)
+    SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
 end
 
 # used to specialise the Hyperelastic formulation
@@ -202,15 +198,34 @@ function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,
     return N, C
 end
 
-# Bending and shear stiffness tensors in the physical Cartesian frame.
-function bending_and_shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
-                                     A_metric, A₁, A₂, G₃) where T
-    _, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
-    D     = (mat.thickness^2 / 12) * C
+# Transverse shear stiffness in the physical Cartesian frame.
+function shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
+                         A_metric, A₁, A₂, G₃) where T
     det_A = det(A_metric)
     Jinv  = inv(J_ref(A₁, A₂, G₃))
     W_sh(γ) = W_phys(mat, c_ms, γ[1], γ[2], det_A, Jinv)
     Cs_full = mat.thickness * hessian(W_sh, zero(Vec{2,T}))
-    Cs = SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
-    return D, Cs
+    SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
+end
+
+# Membrane stress and tangent, bending stiffness D = t²/12·C and shear stiffness, with the
+# membrane tangent evaluated once — for Hyperelastic it is the dominant per-point cost.
+function shell_stress_and_stiffness(mat::Union{LinearElastic,Hyperelastic}, c_ms, A_metric,
+                                    A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
+    N, C, (mat.thickness^2 / 12) * C, shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+end
+
+# Any other material, through its membrane_stress_and_tangent / bending_and_shear_stiffness.
+function shell_stress_and_stiffness(mat, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
+    D, Cs = bending_and_shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+    N, C, D, Cs
+end
+
+# Bending and shear stiffness tensors in the physical Cartesian frame.
+function bending_and_shear_stiffness(mat::Union{LinearElastic,Hyperelastic}, c_ms, A_metric,
+                                     A₁=nothing, A₂=nothing, G₃=nothing)
+    _, _, D, Cs = shell_stress_and_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+    D, Cs
 end

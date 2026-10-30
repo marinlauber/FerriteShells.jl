@@ -74,14 +74,13 @@ function assemble_shell!(K_int, r_int, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = shelldofs(cell)
         u_e = u[sd]
-        membrane_residuals_RM!(re_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
-        membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
+        residuals_and_tangent_RM!(ke_i, re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
 end
 ```
+
+The membrane and bending/shear parts are also available on their own ([`membrane_residuals_RM!`](@ref), [`bending_residuals_RM!`](@ref), [`membrane_tangent_RM!`](@ref), [`bending_tangent_RM!`](@ref)), e.g. for membrane-only problems; the combined call evaluates the kinematics and the material once per quadrature point, which matters most for `Hyperelastic` materials.
 
 where `shelldofs` is a helper function (similar to `celldofs`) to get the degrees of freedom of the shell element, which are ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
 

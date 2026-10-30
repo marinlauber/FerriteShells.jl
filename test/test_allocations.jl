@@ -82,5 +82,11 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
                   membrane_residuals_RM!(re, scv_mitc, u_e, mat); bending_residuals_RM!(re, scv_mitc, u_e, mat);
                   membrane_tangent_RM!(ke, scv_mitc, u_e, mat);   bending_tangent_RM!(ke, scv_mitc, u_e, mat))
         @test alloc_of(full) == 0
+        # fused kernels, with and without MITC
+        for sv in (scv_mitc, scv)
+            @test alloc_of(() -> residuals_RM!(re, sv, u_e, mat)) == 0
+            @test alloc_of(() -> tangent_RM!(ke, sv, u_e, mat)) == 0
+            @test alloc_of(() -> residuals_and_tangent_RM!(ke, re, sv, u_e, mat)) == 0
+        end
     end
 end

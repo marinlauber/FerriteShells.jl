@@ -22,6 +22,9 @@ bending_energy_KL
 ## Reissner-Mindlin functions
 
 ```@docs
+residuals_and_tangent_RM!
+residuals_RM!
+tangent_RM!
 membrane_residuals_RM!
 bending_residuals_RM!
 membrane_tangent_RM!
