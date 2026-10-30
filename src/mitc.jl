@@ -30,12 +30,6 @@ struct MITC{N,M,T<:AbstractFloat,SV} <: AbstractMITC
     h_tie_2 :: Matrix{T}          # MITC interp weights for γ₂  [n_qp × M]
     ξ_tie   :: Vector{Vec{2,T}}   # local coordinates of the tying points
     α_tie   :: Vector{Int}        # tied covariant component (1 or 2) of each entry
-    # Reusable scratch for bending_tangent_RM! (overwritten each call; not thread-safe).
-    a_tie_s :: Vector{Vec{3,T}}; d_tie_s :: Vector{Vec{3,T}}     # length M (tying points)
-    dd1_s   :: Vector{Vec{3,T}}; dd2_s   :: Vector{Vec{3,T}}     # length N (nodes), Rodrigues ∂d/∂φ
-    Bγ₁u_s  :: Vector{Vec{3,T}}; Bγ₂u_s  :: Vector{Vec{3,T}}     # length N
-    Bγ₁φ1_s :: Vector{T}; Bγ₁φ2_s :: Vector{T}
-    Bγ₂φ1_s :: Vector{T}; Bγ₂φ2_s :: Vector{T}
 end
 function MITC{N}(ip_shape::Interpolation, ip_geo::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
                  h_tie_1::Matrix{T}, h_tie_2::Matrix{T}) where {N,T}
@@ -50,14 +44,7 @@ function MITC{N}(ip_shape::Interpolation, ip_geo::Interpolation, ξ_tie::Vector{
     # shape values and the derivative along the tied direction at each tying point
     N_tie  = copy(scv_tie.N)
     dN_tie = [scv_tie.dNdξ[I, k][α_tie[k]] for I in 1:n_shape, k in 1:M]
-    MITC{N,M,T,typeof(scv_tie)}(
-        scv_tie, N_tie, dN_tie, h_tie_1, h_tie_2, ξ_tie, α_tie,
-        Vector{Vec{3,T}}(undef, M), Vector{Vec{3,T}}(undef, M),
-        Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
-        Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
-        Vector{T}(undef, N), Vector{T}(undef, N),
-        Vector{T}(undef, N), Vector{T}(undef, N),
-    )
+    MITC{N,M,T,typeof(scv_tie)}(scv_tie, N_tie, dN_tie, h_tie_1, h_tie_2, ξ_tie, α_tie)
 end
 
 # Every scheme is declared by a `tying_conditions(::typeof(MITCx))` method returning its tying

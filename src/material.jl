@@ -107,17 +107,25 @@ function membrane_stress(mat::LinearElastic, c_ms::SymmetricTensor{2,2}, A_metri
     tension_field_relax(N, A₁, A₂, mat.ε_tf)
 end
 
-# LinearElastic: frame arguments accepted but ignored.  Uses the UN-relaxed C so
-# bending/shear never inherits the membrane wrinkling relaxation.
-function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
-                                     A_metric::SymmetricTensor{2,2,T},
-                                     A₁=nothing, A₂=nothing, G₃=nothing) where T
-    C    = contravariant_elasticity(mat, A_metric)
-    D    = mat.β * (mat.thickness^2 / 12) * C
-    cs   = mat.β * T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    Aup  = inv(A_metric)
-    Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
-    return D, Cs
+# LinearElastic bending and shear stiffness: from the UN-relaxed elasticity, so bending/shear
+# never inherits the membrane wrinkling relaxation, and both scaled by β while the membrane
+# is not (see `LinearElastic`).  Frame arguments accepted but ignored.
+bending_stiffness(mat::LinearElastic, A_metric) =
+    mat.β * (mat.thickness^2 / 12) * contravariant_elasticity(mat, A_metric)
+
+function shear_stiffness(mat::LinearElastic, c_ms, A_metric::SymmetricTensor{2,2,T},
+                         A₁=nothing, A₂=nothing, G₃=nothing) where T
+    cs  = mat.β * T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    Aup = inv(A_metric)
+    SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
+end
+
+bending_and_shear_stiffness(mat::LinearElastic, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing) =
+    (bending_stiffness(mat, A_metric), shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃))
+
+function shell_stress_and_stiffness(mat::LinearElastic, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
+    N, C, bending_and_shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)...
 end
 
 # used to specialise the Hyperelastic formulation
@@ -284,15 +292,34 @@ function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,
     return N, C
 end
 
-# Bending and shear stiffness tensors in the physical Cartesian frame.
-function bending_and_shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
-                                     A_metric, A₁, A₂, G₃) where T
-    _, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
-    D     = (mat.thickness^2 / 12) * C
+# Transverse shear stiffness in the physical Cartesian frame.
+function shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
+                         A_metric, A₁, A₂, G₃) where T
     det_A = det(A_metric)
     Jinv  = inv(J_ref(A₁, A₂, G₃))
     W_sh(γ) = W_phys(mat, c_ms, γ[1], γ[2], det_A, Jinv)
     Cs_full = mat.thickness * hessian(W_sh, zero(Vec{2,T}))
-    Cs = SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
-    return D, Cs
+    SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
+end
+
+# Membrane stress and tangent, bending stiffness D = t²/12·C and shear stiffness, with the
+# membrane tangent evaluated once — it is the dominant per-point cost.
+function shell_stress_and_stiffness(mat::Hyperelastic, c_ms, A_metric,
+                                    A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
+    N, C, (mat.thickness^2 / 12) * C, shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+end
+
+# Any other material, through its membrane_stress_and_tangent / bending_and_shear_stiffness.
+function shell_stress_and_stiffness(mat, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
+    D, Cs = bending_and_shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+    N, C, D, Cs
+end
+
+# Bending and shear stiffness tensors in the physical Cartesian frame.
+function bending_and_shear_stiffness(mat::Hyperelastic, c_ms, A_metric,
+                                     A₁=nothing, A₂=nothing, G₃=nothing)
+    _, _, D, Cs = shell_stress_and_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+    D, Cs
 end

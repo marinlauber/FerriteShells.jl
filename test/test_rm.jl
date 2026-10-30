@@ -153,6 +153,39 @@ end
     @test norm(Ke_fd .- Ke_impl) / (norm(Ke_impl) + 1e-14) < 1e-10
 end
 
+@testset "Fused RM kernels match the split membrane + bending kernels" begin
+    # Curved, distorted element and finite rotations so every term of both parts is active.
+    X = [x + Vec{3}((0.05*x[2], -0.03*x[1], 0.2*x[1]*x[2] + 0.1*x[1]^2)) for x in X_Q9_UNIT]
+    Random.seed!(7)
+    u = 1e-2 .* randn(45)
+    for mitc in (nothing, MITC9),
+        mat in (LinearElastic(1.0e6, 0.3, 0.01), mat_NH, mat_SVK_ps)
+        scv = mitc === nothing ? make_q9_scv() :
+              ShellCellValues(QuadratureRule{RefQuadrilateral}(3), Lagrange{RefQuadrilateral,2}(),
+                              Lagrange{RefQuadrilateral,2}(); mitc=mitc)
+        reinit!(scv, X)
+        re_split = zeros(45); ke_split = zeros(45, 45)
+        membrane_residuals_RM!(re_split, scv, u, mat); bending_residuals_RM!(re_split, scv, u, mat)
+        membrane_tangent_RM!(ke_split, scv, u, mat);   bending_tangent_RM!(ke_split, scv, u, mat)
+        re = zeros(45); residuals_RM!(re, scv, u, mat)
+        ke = zeros(45, 45); tangent_RM!(ke, scv, u, mat)
+        re_both = zeros(45); ke_both = zeros(45, 45)
+        residuals_and_tangent_RM!(ke_both, re_both, scv, u, mat)
+        @test re ≈ re_split rtol=1e-12
+        @test ke ≈ ke_split rtol=1e-12
+        @test re_both == re
+        @test ke_both == ke
+    end
+    # the residual stays ForwardDiff-differentiable, and its Jacobian is the fused tangent
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), Lagrange{RefQuadrilateral,2}(),
+                          Lagrange{RefQuadrilateral,2}(); mitc=MITC9)
+    reinit!(scv, X)
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ke = zeros(45, 45); tangent_RM!(ke, scv, u, mat)
+    J  = ForwardDiff.jacobian(v -> (r = zeros(eltype(v), 45); residuals_RM!(r, scv, v, mat); r), u)
+    @test J ≈ ke rtol=1e-10
+end
+
 @testset "RM membrane patch test" begin
     nodes_p = [Vec{3}(( 0.0,  0.0, 0.0)), Vec{3}((10.0,  0.0, 0.0)),
                Vec{3}((10.0, 10.0, 0.0)), Vec{3}(( 0.0, 10.0, 0.0)),
