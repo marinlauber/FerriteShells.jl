@@ -637,15 +637,17 @@ end
                           mitc = MITC9)
     reinit!(scv, X_Q9_UNIT)
     scv2 = copy(scv)
+    tie(s) = [FerriteShells.tying_tangent(s.mitc, k) for k in eachindex(s.mitc.ξ_tie)]
     @test scv2.detJdV == scv.detJdV && scv2.G₃ == scv.G₃
-    @test scv2.mitc.A_tie == scv.mitc.A_tie
+    @test tie(scv2) == tie(scv)
+    @test scv2.mitc.scv_tie.A₁ !== scv.mitc.scv_tie.A₁   # MITC owns its tying-point buffers too
     @test scv2.qr === scv.qr && scv2.N !== scv.N   # shares immutables, owns buffers
 
     # reinit! on the copy must not touch the original (incl. the MITC tie data)
     orig_detJ = copy(scv.detJdV)
-    orig_tie  = copy(scv.mitc.A_tie)
+    orig_tie  = tie(scv)
     reinit!(scv2, [2v for v in X_Q9_UNIT])
-    @test scv.detJdV == orig_detJ && scv.mitc.A_tie == orig_tie
+    @test scv.detJdV == orig_detJ && tie(scv) == orig_tie
     @test scv2.detJdV ≈ 4 .* orig_detJ
 
     @test copy(NoMITC()) isa NoMITC

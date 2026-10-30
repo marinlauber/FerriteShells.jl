@@ -14,7 +14,7 @@ Assumed field: ``\\tilde\\gamma_1 \\in`` span``\\{1,\\xi_1\\}\\otimes\\{1,\\xi_2
 quadratic in ``\\xi_2`` — and ``\\tilde\\gamma_2`` its transpose. The ``\\pm1/\\sqrt3`` stations are the
 superconvergent points of the degree that is dropped.
 """
-MITC9(ip_shape::Interpolation, qr::QuadratureRule) = MITC{9}(ip_shape, qr, MITC9)
+MITC9(ip_shape::Interpolation, qr::QuadratureRule; ip_geo::Interpolation = ip_shape) = MITC{9}(ip_shape, qr, MITC9; ip_geo)
 
 # Gauss station of the reduced direction: γ₁ is sampled at ξ₁ = ∓S_Q9, γ₂ at ξ₂ = ∓S_Q9.
 const S_Q9 = 1 / sqrt(3)

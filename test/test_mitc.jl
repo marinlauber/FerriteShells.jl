@@ -478,10 +478,10 @@ end
 
 @testset "MITC tying reference director: mixed geometry/shape interpolation" begin
     # `reinit!(mitc, ...)` gets the nodal frames sized to `ip_shape` (n_shape entries) but the
-    # coordinates sized to `ip_geo` (n_geo entries). Building `d₀_tie` with `ip_geo` values over
-    # `1:n_geo` therefore reads the wrong frames when n_geo < n_shape and runs off the end when
-    # n_geo > n_shape. It must use `mitc.N_tie` (from `ip_shape`) over `1:N`, which is exactly
-    # what `tying_shear_strains` interpolates the current director with.
+    # coordinates sized to `ip_geo` (n_geo entries). The reference director at the tying points
+    # must therefore be interpolated with `ip_shape` over `1:N` (the frames), and the tangent
+    # `A_α` with `ip_geo` over `1:n_geo` (the coordinates), which is exactly what
+    # `tying_shear_strains` combines with the current director.
     mat  = LinearElastic(1.0e6, 0.3, 0.01)
     surf = n -> (n.x[1], n.x[2], 0.25 * n.x[1]^2 - 0.15 * n.x[2]^2)
     grid = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2)); map = surf)
@@ -495,6 +495,14 @@ end
         u0    = zeros(n_dof)
         for cell in CellIterator(grid)
             reinit!(scv, cell, nf)
+            x = getcoordinates(cell)
+            for (k, ξ_k) in enumerate(scv.mitc.ξ_tie)
+                α = scv.mitc.α_tie[k]
+                A = sum(x[i] * Ferrite.reference_shape_gradient(ip_geo, ξ_k, i)[α] for i in 1:getnbasefunctions(ip_geo))
+                @test FerriteShells.tying_tangent(scv.mitc, k) ≈ A rtol=1e-14
+                d₀ = sum(Ferrite.reference_shape_value(ip_shape, ξ_k, I) * scv.G₃_elem[I] for I in 1:getnbasefunctions(ip_shape))
+                @test FerriteShells.tying_reference_director(scv.mitc, k) ≈ d₀ rtol=1e-14
+            end
             γ_k = FerriteShells.tying_shear_strains(scv.mitc, u0)
             @test all(v -> abs(v) ≤ 1e-14, γ_k)
             re = zeros(n_dof); bending_residuals_RM!(re, scv, u0, mat)

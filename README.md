@@ -47,7 +47,7 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M} <: AbstractCellValues
     N, dNdξ, d2Ndξ2, detJdV :: Various{T}
     # additional fields for shells
     A₁, A₂, A₁₁, A₁₂, A₂₂ :: Vector{Vec{3, T}}
-    G₃, T₁, T₂            :: Vector{Vec{3, T}}
+    G₃                    :: Vector{Vec{3, T}}
     # shell measures
     A_metric :: Vector{SymmetricTensor{2, 2, T, 3}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
