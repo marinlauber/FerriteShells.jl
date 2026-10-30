@@ -442,7 +442,7 @@ end
 # Only then is the residual the exact gradient of energy_RM (conservative ⇒ symmetric
 # tangent). The QP-direct variant is only ~O(1%) accurate and non-symmetric on curved
 # elements. Bending (κ/D) terms are QP-direct as in the NoMITC path.
-function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM,MT}}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,NN,MM,MT,T}
+function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,<:MITC{NN,MM,MT}}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,NN,MM,MT,T}
     mitc = scv.mitc
     # Tying-point deformed tangents/directors and per-node Rodrigues Jacobians (node frame),
     # built as stack-allocated tuples (Val(MM)/Val(NN)) so the kernel stays allocation-free
@@ -453,12 +453,12 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM
             u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
             Δa += u_I * mitc.dN_tie[I,k]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]; cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            dk += mitc.N_tie[I,k] * (cosθ*mitc.G₃_node[I] + sincθ*(φ₁*mitc.T₁_node[I] + φ₂*mitc.T₂_node[I]))
+            dk += mitc.N_tie[I,k] * (cosθ*mitc.scv_tie.G₃_elem[I] + sincθ*(φ₁*mitc.scv_tie.T₁_elem[I] + φ₂*mitc.scv_tie.T₂_elem[I]))
         end
-        (mitc.A_tie[k] + Δa, dk)
+        (tying_tangent(mitc, k) + Δa, dk)
     end
     ddn = ntuple(Val(NN)) do I
-        _, _, d1, d2 = rodrigues_jac(u_e[5I-1], u_e[5I], mitc.G₃_node[I], mitc.T₁_node[I], mitc.T₂_node[I])
+        _, _, d1, d2 = rodrigues_jac(u_e[5I-1], u_e[5I], mitc.scv_tie.G₃_elem[I], mitc.scv_tie.T₁_elem[I], mitc.scv_tie.T₂_elem[I])
         (d1, d2)
     end
 
@@ -544,10 +544,10 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
             Δa += u_I * mitc.dN_tie[I,k]
             φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
             cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
+            G₃_I = mitc.scv_tie.G₃_elem[I]; T₁_I = mitc.scv_tie.T₁_elem[I]; T₂_I = mitc.scv_tie.T₂_elem[I]
             d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
         end
-        a_tie[k] = mitc.A_tie[k] + Δa
+        a_tie[k] = tying_tangent(mitc, k) + Δa
         d_tie[k] = d_k
     end
 
@@ -555,7 +555,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
     # which is k-independent here, so a single value per node suffices).
     for J in 1:n_nodes
         φ₁_J = u_e[5J-1]; φ₂_J = u_e[5J]
-        G₃_J = mitc.G₃_node[J]; T₁_J = mitc.T₁_node[J]; T₂_J = mitc.T₂_node[J]
+        G₃_J = mitc.scv_tie.G₃_elem[J]; T₁_J = mitc.scv_tie.T₁_elem[J]; T₂_J = mitc.scv_tie.T₂_elem[J]
         _, _, dd1, dd2 = rodrigues_jac(φ₁_J, φ₂_J, G₃_J, T₁_J, T₂_J)
         dd1_J[J] = dd1; dd2_J[J] = dd2
     end
@@ -658,7 +658,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
             end
             WQ = Q₁*W₁ + Q₂*W₂
             d2n_11, d2n_12, d2n_22 = rodrigues_hess(s_I, sc_I, sccc_I, φ₁_I, φ₂_I,
-                                                     mitc.G₃_node[I], mitc.T₁_node[I], mitc.T₂_node[I])
+                                                     mitc.scv_tie.G₃_elem[I], mitc.scv_tie.T₁_elem[I], mitc.scv_tie.T₂_elem[I])
             ke[5I-1, 5I-1] += (dot(Sb_I, d2e_11) + dot(WQ, d2n_11)) * dΩ
             ke[5I-1, 5I  ] += (dot(Sb_I, d2e_12) + dot(WQ, d2n_12)) * dΩ
             ke[5I,   5I-1] += (dot(Sb_I, d2e_12) + dot(WQ, d2n_12)) * dΩ

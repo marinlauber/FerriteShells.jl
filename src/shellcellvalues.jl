@@ -46,8 +46,6 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M, F} <: AbstractCellValu
     A₂₂      :: Vector{Vec{3, T}}
     A_metric :: Vector{SymmetricTensor{2, 2, T, 3}}
     G₃       :: Vector{Vec{3, T}}
-    T₁       :: Vector{Vec{3, T}}
-    T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
     B₀       :: Vector{SymmetricTensor{2, 2, T, 3}}  # reference director-gradient curvature, see reference_director_curvature!
     G₃_elem  :: Vector{Vec{3, T}}   # per-node frame (length n_shape) — updated each reinit!
@@ -81,14 +79,13 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         end
     end
 
-    m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr)
+    m = isnothing(mitc) ? NoMITC() : mitc(ip_shape, qr; ip_geo)
     ShellCellValues{typeof(qr), typeof(ip_geo), typeof(ip_shape), T, typeof(m), typeof(frames)}(
         qr, ip_geo, ip_shape,
         N, dNdξ, d2Ndξ2, zeros(T, n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
-        fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_shape), fill(zero(Vec{3, T}), n_shape),
@@ -108,7 +105,7 @@ function Base.copy(scv::ShellCellValues)
         scv.qr, scv.ip_geo, scv.ip_shape,
         copy(scv.N), copy(scv.dNdξ), copy(scv.d2Ndξ2), copy(scv.detJdV),
         copy(scv.A₁), copy(scv.A₂), copy(scv.A₁₁), copy(scv.A₁₂), copy(scv.A₂₂),
-        copy(scv.A_metric), copy(scv.G₃), copy(scv.T₁), copy(scv.T₂), copy(scv.B),
+        copy(scv.A_metric), copy(scv.G₃), copy(scv.B),
         copy(scv.B₀), copy(scv.G₃_elem), copy(scv.T₁_elem), copy(scv.T₂_elem),
         copy(scv.mitc), scv.frames
     )
@@ -181,7 +178,7 @@ _reinit_cell!(scv::ShellCellValues, ::Nothing, cell) = reinit!(scv, getcoordinat
 # frames::NodeFrames — untyped; NodeFrames is defined in nodeframe.jl.
 _reinit_cell!(scv::ShellCellValues, frames, cell) = reinit!(scv, getcoordinates(cell), frames, getnodes(cell))
 
-# Per-QP reference geometry: covariant tangents/curvature, metric, patch normal frame,
+# Per-QP reference geometry: covariant tangents/curvature, metric, unit normal,
 # and detJdV. Independent of which element-director frame (centroid vs. NodeFrames) is
 # used downstream, so both `reinit!` paths share this instead of each recomputing it.
 function reinit_geometry!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
@@ -198,14 +195,12 @@ function reinit_geometry!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         n_vec = A₁ × A₂
         area  = norm(n_vec)
         G₃    = n_vec / area
-        T₁    = A₁ / norm(A₁)
-        T₂    = (G₃ × T₁) / norm(G₃ × T₁)
 
         scv.detJdV[q]   = area * scv.qr.weights[q]
         scv.A₁[q]       = A₁;  scv.A₂[q]  = A₂
         scv.A₁₁[q]      = A₁₁; scv.A₁₂[q] = A₁₂; scv.A₂₂[q] = A₂₂
         scv.A_metric[q] = SymmetricTensor{2,2,Float64}((dot(A₁,A₁), dot(A₁,A₂), dot(A₂,A₂)))
-        scv.G₃[q]       = G₃;  scv.T₁[q]  = T₁;  scv.T₂[q]  = T₂
+        scv.G₃[q]       = G₃
         scv.B[q]        = SymmetricTensor{2,2,Float64}((dot(A₁₁,G₃), dot(A₁₂,G₃), dot(A₂₂,G₃)))
     end
 end
@@ -235,7 +230,7 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
         scv.G₃_elem[I] = G₃_c; scv.T₁_elem[I] = T₁_c; scv.T₂_elem[I] = T₂_c
     end
     reference_director_curvature!(scv)
-    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
+    reinit!(scv.mitc, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
 
 # Reference director-gradient curvature B₀_αβ = ½(A_α·d₀,β + A_β·d₀,α), with
