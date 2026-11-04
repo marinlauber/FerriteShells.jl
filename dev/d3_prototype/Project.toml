@@ -1,0 +1,9 @@
+[deps]
+Ferrite = "c061ca5d-56c9-439f-9c0e-210fe06d3992"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Tensors = "48a634ad-e948-5137-8d70-aa71f2a747f4"
+
+[sources]
+# Ferrite.jl PR #1544, "Design 3: store local frame in CellValues" (2026-11-01)
+Ferrite = {url = "https://github.com/Ferrite-FEM/Ferrite.jl", rev = "b1616f499f4b2efc6fd85db3b6ca75618a5af96f"}
