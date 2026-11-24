@@ -87,8 +87,6 @@ function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
     sd
 end
 
-using OrderedCollections
-
 """
     get_ferrite_grid(::String; T=Float64)
 
