@@ -88,7 +88,7 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFram
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
     end
     reference_director_curvature!(scv)   # B₀ follows the frames actually in use
-    reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
+    reinit!(scv.mitc, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
 
 """

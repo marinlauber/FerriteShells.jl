@@ -15,7 +15,7 @@ Assumed field (rotated Raviart–Thomas ``RT_0``), Lee & Bathe Eq. (25):
 ``\\tilde\\gamma_1 = a_1 + c\\,s``, ``\\tilde\\gamma_2 = a_2 - c\\,r``, i.e. the span of
 ``(1,0)``, ``(0,1)`` and ``(s,-r)``.
 """
-MITC3(ip_shape::Interpolation, qr::QuadratureRule) = MITC{3}(ip_shape, qr, MITC3)
+MITC3(ip_shape::Interpolation, qr::QuadratureRule; ip_geo::Interpolation = ip_shape) = MITC{3}(ip_shape, qr, MITC3; ip_geo)
 
 # constant shear along each of the three edges, tied against the RT₀ space
 tying_conditions(::typeof(MITC3)) = (
