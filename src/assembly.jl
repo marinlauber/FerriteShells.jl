@@ -7,36 +7,17 @@ Mass matrix for embedded shell elements (2D mesh in 3D). Only translational DOFs
 """
 function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     ρt = ρ * mat.thickness
     for qp in 1:getnquadpoints(scv)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes, J in 1:n_nodes
             m = scv.N[I, qp] * scv.N[J, qp] * ρt * dΩ
-            me[5I-4, 5J-4] += m
-            me[5I-3, 5J-3] += m
-            me[5I-2, 5J-2] += m
+            me[ru[3I-2], ru[3J-2]] += m
+            me[ru[3I-1], ru[3J-1]] += m
+            me[ru[3I],   ru[3J]] += m
         end
     end
-end
-
-# Local positions of the three displacement components of node `I` within a cell's dof
-# vector, read from the SubDofHandler's own `dof_range(:u)` rather than assumed to sit at
-# `3I-2:3I`. That assumption holds only when `:u` is the first field; it silently writes
-# into the wrong dofs when the fields are added in another order, when the DofHandler
-# carries an extra field, or for the single-field interleaved `:u` as `ip^5` layout.
-@inline function _u_dofs(ru, ncomp::Int, I::Int)
-    o = ncomp * (I - 1)
-    (ru[o+1], ru[o+2], ru[o+3])
-end
-
-# Components per node in the `:u` field: 3 for the two-field layout (`:u` as ip^3,
-# `:θ` as ip^2), 5 for the single-field interleaved one.
-@inline function _u_ncomp(ru, n_base::Int)
-    ncomp, r = divrem(length(ru), n_base)
-    (r == 0 && ncomp in (3, 5)) || throw(ArgumentError(
-        ":u carries $(length(ru)) dofs over $n_base base functions; expected 3 per node " *
-        "(two-field `:u` as ip^3) or 5 (single-field interleaved `:u` as ip^5)"))
-    ncomp
 end
 
 # ∂ξ/∂t for the mapping t → 2D cell reference coord along facet `f`, where t is the
@@ -62,9 +43,8 @@ Assemble external traction into force vector f for embedded shell elements (2D m
 Uses a `FacetQuadratureRule` and computes the edge length element directly from 3D node positions,
 bypassing the sdim mismatch that prevents standard `FacetValues` from working on embedded meshes.
 Works for RefQuadrilateral and RefTriangle of any interpolation order.
-The `:u` dofs are located through each cell's SubDofHandler `dof_range`, so the two-field
-(`:u` as ip³, `:θ` as ip²) layout, the single-field interleaved (`:u` as ip⁵) one, any field
-order and any additional fields are all handled.
+The `:u` dofs (`ip^3`) are located through each cell's SubDofHandler `dof_range`, so any
+field order and any additional fields are handled.
 """
 function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
@@ -74,7 +54,6 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
         cd    = celldofs(fc)
         sdh   = dh.subdofhandlers[dh.cell_to_subdofhandler[Ferrite.cellid(fc)]]
         ru    = Ferrite.dof_range(sdh, :u)
-        ncomp = _u_ncomp(ru, n_base)
         resize!(fe, length(cd)); fill!(fe, 0.0)
         x        = getcoordinates(fc)
         facet_nr = fc.current_facet_id
@@ -92,9 +71,7 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
             t  = t_func(xp)
             for I in 1:n_base
                 N   = Ferrite.reference_shape_value(ip, ξ, I)
-                Ndg = N * dΓ
-                d1, d2, d3 = _u_dofs(ru, ncomp, I)
-                fe[d1] += Ndg * t[1]; fe[d2] += Ndg * t[2]; fe[d3] += Ndg * t[3]
+                @views fe[ru[3I-2:3I]] .+= (N * dΓ) * t
             end
         end
         f[cd] .+= fe
@@ -110,12 +87,13 @@ Follower pressure residual for embedded shell elements.
 """
 function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         n_w = cross(a₁, a₂)
         for I in 1:n_nodes
-            @views re[5I-4:5I-2] .+= p * scv.N[I, qp] * n_w * w
+            @views re[ru[3I-2:3I]] .+= p * scv.N[I, qp] * n_w * w
         end
     end
 end
@@ -140,6 +118,7 @@ K_{IJ} = p N_I w \\bigl[\\partial_1 N_J (-\\mathrm{spin}(a_2)) + \\partial_2 N_J
 """
 function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
@@ -150,7 +129,7 @@ function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVecto
             NI = scv.N[I, qp]
             for J in 1:n_nodes
                 ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (pw * NI) * (∂NJ1 * neg_sp_a₂ + ∂NJ2 * sp_a₁)
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= (pw * NI) * (∂NJ1 * neg_sp_a₂ + ∂NJ2 * sp_a₁)
             end
         end
     end
@@ -160,9 +139,8 @@ end
     apply_pointload!(f, dh, nodeset_name, load)
 
 Add a concentrated force `load::Vec{3}` to the displacement DOFs of all nodes in `nodeset_name`.
-The `:u` dofs are located through the SubDofHandler's `dof_range`, so the two-field
-(`:u` as ip³, `:θ` as ip²) layout, the single-field interleaved (`:u` as ip⁵) one, any
-field order and any additional fields are all handled.
+The `:u` dofs (`ip^3`) are located through the SubDofHandler's `dof_range`, so any field
+order and any additional fields are handled.
 """
 function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
     node_set  = getnodeset(dh.grid, nodeset_name)
@@ -173,12 +151,10 @@ function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
         cd    = celldofs(cell)
         sdh   = dh.subdofhandlers[dh.cell_to_subdofhandler[Ferrite.cellid(cell)]]
         ru    = Ferrite.dof_range(sdh, :u)
-        ncomp = _u_ncomp(ru, length(nodes))
         for (I, gid) in enumerate(nodes)
             if gid ∈ node_set && gid ∉ processed
                 push!(processed, gid)
-                d1, d2, d3 = _u_dofs(ru, ncomp, I)
-                f[cd[d1]] += load[1]; f[cd[d2]] += load[2]; f[cd[d3]] += load[3]
+                @views f[cd[ru[3I-2:3I]]] .+= load
             end
         end
     end

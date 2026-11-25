@@ -36,13 +36,13 @@ function scordelis_lo_rm_solve_test(ns, nt)
         x  = getcoordinates(cell)
         u0 = zeros(5n_base)
         tangent_RM_FD!(ke, scv, u0, mat)
-        sd = shelldofs(cell)
+        sd = celldofs(cell)
         assemble!(asmb, sd, ke, re)
         for qp in 1:getnquadpoints(scv)
             ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
             for I in 1:n_base
                 NI = Ferrite.reference_shape_value(ip, ξ, I)
-                @views fe[5I-4:5I-2] .+= NI * q_sl * dΩ
+                @views fe[3I-2:3I] .+= NI * q_sl * dΩ
             end
         end
         @views f[sd] .+= fe
@@ -107,7 +107,7 @@ function pinched_cylinder_rm_solve_test(ns, na)
         x  = getcoordinates(cell)
         u0 = zeros(5n_base)
         tangent_RM_FD!(ke, scv, u0, mat)
-        assemble!(asmb, shelldofs(cell), ke, re)
+        assemble!(asmb, celldofs(cell), ke, re)
     end
 
     apply_pointload!(f, dh, "load_point", Vec{3}((0.0, 0.0, -P_pc / 4)))
@@ -201,7 +201,7 @@ function pinched_hemisphere_rm_solve_test(n)
         u0 = zeros(5n_base)
         membrane_tangent_RM!(ke, scv, u0, mat)
         bending_tangent_RM!(ke, scv, u0, mat)
-        assemble!(asm, shelldofs(cell), ke, re)
+        assemble!(asm, celldofs(cell), ke, re)
     end
     apply_pointload!(f, dh, "load_A", Vec{3}((-1.0, 0.0, 0.0)))
     apply_pointload!(f, dh, "load_B", Vec{3}(( 0.0, 1.0, 0.0)))
@@ -211,9 +211,9 @@ function pinched_hemisphere_rm_solve_test(n)
 
     nid = first(getnodeset(grid, "load_A"))
     for cell in CellIterator(dh)
-        sd = shelldofs(cell)
+        sd = celldofs(cell)
         for (I, g) in enumerate(getnodes(cell))
-            g == nid && return u[sd[5I-4]]
+            g == nid && return u[sd[3I-2]]
         end
     end
     error("load_A not found")

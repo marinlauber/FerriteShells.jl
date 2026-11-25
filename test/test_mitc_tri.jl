@@ -41,7 +41,7 @@ end
         u = zeros(30)
         for I in 1:6
             xI, yI = X_T6_UNIT[I][1], X_T6_UNIT[I][2]
-            u[5I-2] = α*xI*yI; u[5I-1] = -α*yI; u[5I] = -α*xI
+            u[3I] = α*xI*yI; u[iφ(u,I,1)] = -α*yI; u[iφ(u,I,2)] = -α*xI
         end
         FerriteShells.energy_RM(u, scv, mat)
     end
@@ -65,8 +65,8 @@ end
         Random.seed!(42)
         u_pert = zeros(n_dof)
         for I in 1:n_base
-            u_pert[5I-2] = 1e-2 * sin(π*x_nodes[I][1]) * sin(π*x_nodes[I][2])
-            u_pert[5I-1] = 1e-3 * randn(); u_pert[5I] = 1e-3 * randn()
+            u_pert[3I] = 1e-2 * sin(π*x_nodes[I][1]) * sin(π*x_nodes[I][2])
+            u_pert[iφ(u_pert,I,1)] = 1e-3 * randn(); u_pert[iφ(u_pert,I,2)] = 1e-3 * randn()
         end
         re_ex  = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
         re_fd  = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
@@ -84,7 +84,7 @@ end
         # 3. Pure in-plane displacement on a flat element: d = G₃ ⇒ γ_α = 0, MITC ≡ NoMITC.
         u_ip = zeros(n_dof)
         for I in 1:n_base
-            u_ip[5I-4] = 1e-3 * x_nodes[I][1]; u_ip[5I-3] = 2e-3 * x_nodes[I][2]
+            u_ip[3I-2] = 1e-3 * x_nodes[I][1]; u_ip[3I-1] = 2e-3 * x_nodes[I][2]
         end
         re_m = zeros(n_dof); bending_residuals_RM!(re_m, scv_mitc,   u_ip, mat)
         re_n = zeros(n_dof); bending_residuals_RM!(re_n, scv_nomitc, u_ip, mat)
@@ -98,7 +98,7 @@ end
         u_kl = zeros(n_dof)
         for I in 1:n_base
             xI, yI = x_nodes[I][1], x_nodes[I][2]
-            u_kl[5I-2] = α*xI*yI; u_kl[5I-1] = -α*yI; u_kl[5I] = -α*xI
+            u_kl[3I] = α*xI*yI; u_kl[iφ(u_kl,I,1)] = -α*yI; u_kl[iφ(u_kl,I,2)] = -α*xI
         end
         W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc,   mat)
         W_nomitc = FerriteShells.energy_RM(u_kl, scv_nomitc, mat)
@@ -124,7 +124,9 @@ end
         qr  = QuadratureRule{RefTriangle}(4)
         scv = ShellCellValues(qr, ip, ip; mitc=mitc_ctor)
         n_dof = 5 * getnbasefunctions(ip)
-        perm  = vcat([[5c-4, 5c-3, 5c-2, 5c-1, 5c] for c in cyc]...)
+        nn    = getnbasefunctions(ip)
+        # renumbered node I is old node cyc[I]: its u dofs then its φ dofs, default layout
+        perm  = [vcat([3c-2:3c for c in cyc]...); vcat([3nn+2c-1:3nn+2c for c in cyc]...)]
 
         reinit!(scv, x_nodes)
         ke = zeros(n_dof, n_dof); tangent_RM_FD!(ke, scv, zeros(n_dof), mat)
@@ -167,9 +169,9 @@ end
         reinit!(scv, x_nodes)
         n_dof = 5 * getnbasefunctions(ip); u_e = zeros(n_dof)
         for I in eachindex(x_nodes)
-            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
-            u_e[5I-2] = x_nodes[I][1] * sin(α)
-            u_e[5I-1] = -α
+            u_e[3I-2] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[3I] = x_nodes[I][1] * sin(α)
+            u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(n_dof)
         membrane_residuals_RM!(re, scv, u_e, mat)
@@ -204,16 +206,16 @@ end
             reinit!(scv, cell)
             x = getcoordinates(cell)
             tangent_RM_FD!(ke, scv, zeros(5n_base), mat)
-            assemble!(asmb, shelldofs(cell), ke, re)
+            assemble!(asmb, celldofs(cell), ke, re)
             for qp in 1:getnquadpoints(scv)
                 ξ = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
                 xp = sum(Ferrite.reference_shape_value(ip, ξ, I) * x[I] for I in 1:n_base)
                 q  = q0 * sin(π*xp[1]) * sin(π*xp[2])
                 for I in 1:n_base
-                    fe[5I-2] += Ferrite.reference_shape_value(ip, ξ, I) * q * dΩ
+                    fe[3I] += Ferrite.reference_shape_value(ip, ξ, I) * q * dΩ
                 end
             end
-            @views f[shelldofs(cell)] .+= fe
+            @views f[celldofs(cell)] .+= fe
         end
         dbc = ConstraintHandler(dh)
         add!(dbc, Dirichlet(:u, getnodeset(grid, "boundary"), x -> zeros(3), [1,2,3]))
@@ -222,7 +224,7 @@ end
         err_sq = 0.0
         for cell in CellIterator(dh)
             reinit!(scv, cell)
-            x = getcoordinates(cell); u_e = u_sol[shelldofs(cell)]
+            x = getcoordinates(cell); u_e = u_sol[celldofs(cell)]
             for qp in 1:getnquadpoints(scv)
                 xp  = Ferrite.spatial_coordinate(scv, qp, x)
                 w_h = Ferrite.function_value(scv, qp, u_e)[3]

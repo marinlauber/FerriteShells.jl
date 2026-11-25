@@ -16,7 +16,7 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0); fill!(re_i, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
         membrane_residuals_RM!(re_i, scv, u_e, mat)
         bending_residuals_RM!(re_i, scv, u_e, mat)

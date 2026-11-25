@@ -3,14 +3,15 @@
 """
     membrane_residuals_KL!(re, scv, u_e, mat)
 
-Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+Kirchhoff–Love membrane residual. `u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function membrane_residuals_KL!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for i in 1:n_nodes
-            ui = Vec{3,T}((u_e[3i-2], u_e[3i-1], u_e[3i]))
+            ui = Vec{3}(@view u_e[ru[3i-2:3i]])
             Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
         end
         a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
@@ -22,7 +23,7 @@ function membrane_residuals_KL!(re, scv::ShellCellValues, u_e::AbstractVector{T}
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
             v = ∂NI1 * (N[1,1]*a₁ + N[1,2]*a₂) +
                 ∂NI2 * (N[2,1]*a₁ + N[2,2]*a₂)
-            @views re[3I-2:3I] .+= v * dΩ
+            @views re[ru[3I-2:3I]] .+= v * dΩ
         end
     end
 end
@@ -30,14 +31,15 @@ end
 """
     membrane_tangent_KL!(ke, scv, u_e, mat)
 
-Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+Kirchhoff–Love membrane tangent. `u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for i in 1:n_nodes
-            ui = Vec{3,T}((u_e[3i-2], u_e[3i-1], u_e[3i]))
+            ui = Vec{3}(@view u_e[ru[3i-2:3i]])
             Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
         end
         a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
@@ -61,7 +63,7 @@ function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
                     v = D1[α,β]*a₁ + D2[α,β]*a₂
                     Kmat += ∂NIα * (aβ ⊗ v)
                 end
-                @views ke[3I-2:3I, 3J-2:3J] .+= (Kgeo + Kmat) * dΩ
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= (Kgeo + Kmat) * dΩ
             end
         end
     end
@@ -97,7 +99,7 @@ Computes the Kirchhoff–Love bending energy through the curvature change ``\\ka
 (current minus reference second fundamental form).
 
 **Arguments:**
-* `u_flat`: a flat vector of length 3·`n_nodes` containing the displacement degrees of freedom of that element [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+* `u_flat`: the element vector `u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 * `scv`: a [`ShellCellValues`](@ref) object containing the precomputed shape function values and derivatives.
 * `mat`: an instance of an `AbstractMaterial` describing the material properties.
 
@@ -107,7 +109,8 @@ To capture the full curvature change ``\\kappa``, quadratic elements are require
 function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
-    u_e     = [Vec{3,T}((u_flat[3i-2], u_flat[3i-1], u_flat[3i])) for i in 1:n_nodes]
+    ru      = scv.ru
+    u_e     = [Vec{3}(@view u_flat[ru[3i-2:3i]]) for i in 1:n_nodes]
     W  = zero(T)
     for qp in 1:getnquadpoints(scv)
         A₁q = scv.A₁[qp]; A₂q = scv.A₂[qp]
@@ -131,7 +134,7 @@ end
     bending_residuals_KL!(re, scv, u_e, mat)
 
 Kirchhoff–Love bending residual via `ForwardDiff.gradient` of [`bending_energy_KL`](@ref).
-`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+`u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
@@ -141,7 +144,7 @@ end
     bending_tangent_KL!(ke, scv, u_e, mat)
 
 Kirchhoff–Love bending tangent via `ForwardDiff.hessian` of [`bending_energy_KL`](@ref).
-`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+`u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> bending_energy_KL(u, scv, mat), u_e)

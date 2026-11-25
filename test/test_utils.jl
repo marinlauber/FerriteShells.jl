@@ -32,15 +32,27 @@ using Test
     # RM layout: rotation DOFs (4th and 5th) are ignored, displacements match
     u_rm = randn(5n)
     for qp in 1:getnquadpoints(scv)
-        v_manual = sum(scv.N[I,qp] * Vec{3}((u_rm[5I-4], u_rm[5I-3], u_rm[5I-2])) for I in 1:n)
+        v_manual = sum(scv.N[I,qp] * Vec{3}((u_rm[3I-2], u_rm[3I-1], u_rm[3I])) for I in 1:n)
         @test norm(Ferrite.function_value(scv, qp, u_rm) - v_manual) < 1e-14
     end
 
     # RM: perturbing rotation DOFs alone must not change function_value
     u_rm2 = copy(u_rm)
-    for I in 1:n; u_rm2[5I-1] += 1.0; u_rm2[5I] -= 1.0; end
+    for I in 1:n; u_rm2[iφ(u_rm2,I,1)] += 1.0; u_rm2[iφ(u_rm2,I,2)] -= 1.0; end
     for qp in 1:getnquadpoints(scv)
         @test norm(Ferrite.function_value(scv, qp, u_rm) - Ferrite.function_value(scv, qp, u_rm2)) < 1e-14
+    end
+
+    # `:θ` added first puts `:u` at 2n+1:5n; a ShellCellValues built with `dofs = sdh` reads it there
+    grid_sw = shell_grid(generate_grid(QuadraticQuadrilateral, (1, 1)))
+    dh_sw   = DofHandler(grid_sw); add!(dh_sw, :θ, ip^2); add!(dh_sw, :u, ip^3); close!(dh_sw)
+    scv_sw  = ShellCellValues(qr, ip, ip; dofs = dh_sw)
+    @test scv_sw.ru == 2n+1:5n && scv_sw.rθ == 1:2n
+    reinit!(scv_sw, x)
+    u_sw = vcat(randn(2n), u_rm[1:3n])
+    for qp in 1:getnquadpoints(scv)
+        @test Ferrite.function_value(scv_sw, qp, u_sw) ≈ Ferrite.function_value(scv, qp, u_rm)
+        @test Ferrite.function_gradient(scv_sw, qp, u_sw) ≈ Ferrite.function_gradient(scv, qp, u_rm)
     end
 
     # Partition of unity: interpolating node coords recovers position (KL layout)
@@ -71,9 +83,11 @@ end
     end
 
     # pure translation (u = const) → zero gradient (partition of unity: Σ ∂N_I/∂ξ = 0)
-    for stride in (3, 5)
-        u_trans = zeros(stride * n)
-        for I in 1:n; u_trans[stride*(I-1)+1:stride*(I-1)+3] .= [1.3, -0.7, 2.1]; end
+    # (KL: 3n dofs; RM: 5n dofs with `:u` first, so the displacement of node I is at 3I-2:3I
+    # either way; the rotation block is filled too, it must not contribute)
+    for ndof_node in (3, 5)
+        u_trans = ndof_node == 5 ? [zeros(3n); randn(2n)] : zeros(3n)
+        for I in 1:n; u_trans[3I-2:3I] .= [1.3, -0.7, 2.1]; end
         for qp in 1:getnquadpoints(scv)
             @test norm(Ferrite.function_gradient(scv, qp, u_trans)) < 1e-13
         end
@@ -92,7 +106,7 @@ end
 
     # RM: rotation DOFs have no effect on the displacement gradient
     u_rm  = randn(5n); u_rm2 = copy(u_rm)
-    for I in 1:n; u_rm2[5I-1] += 1.0; u_rm2[5I] -= 1.0; end
+    for I in 1:n; u_rm2[iφ(u_rm2,I,1)] += 1.0; u_rm2[iφ(u_rm2,I,2)] -= 1.0; end
     for qp in 1:getnquadpoints(scv)
         @test norm(Ferrite.function_gradient(scv, qp, u_rm) -
                    Ferrite.function_gradient(scv, qp, u_rm2)) < 1e-14
@@ -183,54 +197,32 @@ end
     end
 end
 
-@testset "shelldofs DOF reordering" begin
-    # Build a small 2×2 Q4 mesh and a two-field DofHandler (:u ip^3, :θ ip^2).
-    # shelldofs must reorder celldofs from [u_block | θ_block] to per-node interleaved
-    # [u1,u2,u3,θ1,θ2] layout required by the RM assembly functions.
-    grid = shell_grid(generate_grid(Quadrilateral, (2, 2),
-                                   Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0))))
-    ip_u = Lagrange{RefQuadrilateral, 1}()
-    dh   = DofHandler(grid)
-    add!(dh, :u, ip_u^3)
-    add!(dh, :θ, ip_u^2)
-    close!(dh)
-
-    for cell in CellIterator(dh)
-        cd = celldofs(cell)   # [u_block (3n) | θ_block (2n)]
-        sd = shelldofs(cell)  # interleaved [u1,u2,u3,θ1,θ2, ...]
-        n  = length(cd) ÷ 5  # nodes per cell (4 for Q4)
-
-        @test length(sd) == length(cd) == 5n
-        @test sort(sd) == sort(cd)   # same set of DOFs, just reordered
-
-        for I in 1:n
-            @test sd[5I-4:5I-2] == cd[3I-2:3I]     # u₁,u₂,u₃ for node I
-            @test sd[5I-1]      == cd[3n + 2I-1]    # θ₁ for node I
-            @test sd[5I  ]      == cd[3n + 2I  ]    # θ₂ for node I
-        end
-    end
-
-    # Also test with Q9 elements to cover the higher-order case.
-    ip_q9  = Lagrange{RefQuadrilateral, 2}()
-    grid9  = shell_grid(generate_grid(QuadraticQuadrilateral, (2, 2),
-                                      Vec{2}((0.0, 0.0)), Vec{2}((1.0, 1.0))))
-    dh9    = DofHandler(grid9)
-    add!(dh9, :u, ip_q9^3)
-    add!(dh9, :θ, ip_q9^2)
-    close!(dh9)
-
-    for cell in CellIterator(dh9)
-        cd = celldofs(cell)
-        sd = shelldofs(cell)
-        n  = length(cd) ÷ 5   # 9 for Q9
-
-        @test length(sd) == length(cd) == 5n
-        @test sort(sd) == sort(cd)
-        for I in 1:n
-            @test sd[5I-4:5I-2] == cd[3I-2:3I]
-            @test sd[5I-1]      == cd[3n + 2I-1]
-            @test sd[5I  ]      == cd[3n + 2I  ]
-        end
+@testset "default dof ranges match Ferrite's two-field layout" begin
+    # Without `dofs`, ShellCellValues defaults to `ru = 1:3n` and `rθ = 3n+1:5n`, which must be
+    # exactly what Ferrite produces for `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, so that
+    # `u[celldofs(cell)]` can be passed to the kernels without any reordering.
+    for (C, ip, qr) in ((Quadrilateral,          Lagrange{RefQuadrilateral,1}(), QuadratureRule{RefQuadrilateral}(2)),
+                        (QuadraticQuadrilateral, Lagrange{RefQuadrilateral,2}(), QuadratureRule{RefQuadrilateral}(3)),
+                        (Triangle,               Lagrange{RefTriangle,1}(),      QuadratureRule{RefTriangle}(2)),
+                        (QuadraticTriangle,      Lagrange{RefTriangle,2}(),      QuadratureRule{RefTriangle}(3)))
+        grid = shell_grid(generate_grid(C, (2, 2)))
+        dh   = DofHandler(grid); add!(dh, :u, ip^3); add!(dh, :θ, ip^2); close!(dh)
+        sdh  = only(dh.subdofhandlers)
+        scv  = ShellCellValues(qr, ip, ip)
+        @test scv.ru == Ferrite.dof_range(sdh, :u)
+        @test scv.rθ == Ferrite.dof_range(sdh, :θ)
+        # passing the DofHandler gives the same ranges
+        scv_dh = ShellCellValues(qr, ip, ip; dofs = dh)
+        @test (scv_dh.ru, scv_dh.rθ) == (scv.ru, scv.rθ)
+        # a KL DofHandler (`:u` only) has the same `:u` range and no rotations
+        dh_kl  = DofHandler(grid); add!(dh_kl, :u, ip^3); close!(dh_kl)
+        scv_kl = ShellCellValues(qr, ip, ip; dofs = dh_kl)
+        @test scv_kl.ru == scv.ru && isempty(scv_kl.rθ)
+        # a field that does not match the shape interpolation is rejected
+        dh_bad = DofHandler(grid); add!(dh_bad, :u, ip^3); add!(dh_bad, :θ, ip^3); close!(dh_bad)
+        @test_throws ArgumentError ShellCellValues(qr, ip, ip; dofs = dh_bad)
+        dh_nou = DofHandler(grid); add!(dh_nou, :w, ip^3); close!(dh_nou)
+        @test_throws ArgumentError ShellCellValues(qr, ip, ip; dofs = dh_nou)
     end
 end
 
@@ -347,7 +339,7 @@ end
         reinit!(scv3, cell)
         x = getcoordinates(cell); u_e = zeros(n_el)
         tangent_RM_FD!(ke3, scv3, u_e, mat3)
-        assemble!(asmb3, shelldofs(cell), ke3, re3)
+        assemble!(asmb3, celldofs(cell), ke3, re3)
     end
     dbc3 = ConstraintHandler(dh3)
     add!(dbc3, Dirichlet(:u, getfacetset(grid2, "left"), x -> zeros(3), [1,2,3]))
@@ -416,7 +408,7 @@ end
         @test all([all(scv.T₁_elem[I] .≈ nf.T₁[node_ids[I]]) for I in 1:getnbasefunctions(scv.ip_geo)])
         @test all([all(scv.T₂_elem[I] .≈ nf.T₂[node_ids[I]]) for I in 1:getnbasefunctions(scv.ip_geo)])
         # test the shell_strain output, should all be zero
-        uₑ = zero(shelldofs(cell))
+        uₑ = zero(celldofs(cell))
         @test all(shell_strains(scv, 1, uₑ) .≈ ([0.0 0.0; 0.0 0.0], [0.0 0.0; 0.0 0.0], [0.0; 0.0]))
     end
 end
@@ -439,7 +431,6 @@ end
         ("two-field",   dh -> (add!(dh, :u, ip^3); add!(dh, :θ, ip^2))),
         ("θ first",     dh -> (add!(dh, :θ, ip^2); add!(dh, :u, ip^3))),
         ("extra field", dh -> (add!(dh, :p, ip); add!(dh, :u, ip^3); add!(dh, :θ, ip^2))),
-        ("interleaved", dh -> add!(dh, :u, ip^5)),
     )
 
     u_dofs_of(dh, set) = begin
@@ -465,32 +456,58 @@ end
         @test sum(f) ≈ 5.0 * 2.0   # edge length 2, uniform pressure 5
     end
 
-    # shelldofs: the positional form is right only for the canonical layout, the
-    # SubDofHandler form for all of them.
-    dh_ok = DofHandler(grid); add!(dh_ok, :u, ip^3); add!(dh_ok, :θ, ip^2); close!(dh_ok)
-    dh_sw = DofHandler(grid); add!(dh_sw, :θ, ip^2); add!(dh_sw, :u, ip^3); close!(dh_sw)
-    for (dh, canonical) in ((dh_ok, true), (dh_sw, false))
-        sdh  = only(dh.subdofhandlers)
-        cell = first(CellIterator(dh))
-        sd   = shelldofs(sdh, cell)
-        cd   = celldofs(cell)
-        ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
-        @test length(sd) == 20
-        for I in 1:4
-            @test sd[5I-4:5I-2] == cd[ru[3I-2:3I]]
-            @test sd[5I-1:5I]   == cd[rθ[2I-1:2I]]
+    # A ShellCellValues built with `dofs = dh` reads the kernels' dofs through `dof_range`, so
+    # the assembled global residual and tangent must be the same physical operator for every
+    # layout, whatever the field order or extra fields. Compare against the canonical layout
+    # through the dof permutation mapping each layout's (node, field, component) to it.
+    mat = LinearElastic(1.0e3, 0.3, 0.05)
+    qr  = QuadratureRule{RefQuadrilateral}(2)
+    gridc = shell_grid(generate_grid(Quadrilateral, (2, 2)); map = n -> (n.x[1], n.x[2], 0.1 * n.x[1] * n.x[2]))
+    function assemble_all(dh, scv, u)
+        K = allocate_matrix(dh); r = zeros(ndofs(dh))
+        asm = start_assemble(K, r)
+        n = ndofs_per_cell(dh); ke = zeros(n, n); re = zeros(n)
+        for cell in CellIterator(dh)
+            fill!(ke, 0.0); fill!(re, 0.0)
+            reinit!(scv, cell)
+            u_e = u[celldofs(cell)]
+            membrane_tangent_RM!(ke, scv, u_e, mat); bending_tangent_RM!(ke, scv, u_e, mat)
+            membrane_residuals_RM!(re, scv, u_e, mat); bending_residuals_RM!(re, scv, u_e, mat)
+            assemble!(asm, celldofs(cell), ke, re)
         end
-        @test (shelldofs(cell) == sd) == canonical
-        # in-place form: same answer, and allocation-free once warm
-        buf = Int[]; shelldofs!(buf, sdh, cell)
-        @test buf == sd
-        @test (@allocated shelldofs!(buf, sdh, cell)) == 0
+        K, r
     end
-
-    # a layout that is not 5 dofs/node is rejected instead of silently mis-permuted
-    dh_bad = DofHandler(grid); add!(dh_bad, :u, ip^3); add!(dh_bad, :θ, ip^3); close!(dh_bad)
-    @test_throws ArgumentError shelldofs(first(CellIterator(dh_bad)))
-    @test_throws ArgumentError shelldofs!(Int[], only(dh_bad.subdofhandlers), first(CellIterator(dh_bad)))
+    # global dof of (node, field, comp) for a DofHandler, read by name
+    function dofmap(dh)
+        m = Dict{Tuple{Int,Symbol,Int},Int}()
+        for sdh in dh.subdofhandlers, cell in CellIterator(sdh)
+            cd = celldofs(cell)
+            for (f, nc) in ((:u, 3), (:θ, 2))
+                r = Ferrite.dof_range(sdh, f)
+                for (I, nid) in enumerate(getnodes(cell)), c in 1:nc
+                    m[(nid, f, c)] = cd[r[nc*(I-1)+c]]
+                end
+            end
+        end
+        m
+    end
+    for mitc in (nothing, MITC4)
+        scv  = ShellCellValues(qr, ip, ip; mitc)   # default layout = dh0's
+        dh0  = DofHandler(gridc); add!(dh0, :u, ip^3); add!(dh0, :θ, ip^2); close!(dh0)
+        m0   = dofmap(dh0)
+        u0   = [1.0e-2 * sin(0.7i) for i in 1:ndofs(dh0)]
+        K0, r0 = assemble_all(dh0, scv, u0)
+        for (name, build!) in layouts[2:end]
+            dh = DofHandler(gridc); build!(dh); close!(dh)
+            m  = dofmap(dh)
+            p  = zeros(Int, ndofs(dh0))       # p[canonical dof] = this layout's dof
+            for (k, d0) in m0; p[d0] = m[k]; end
+            u  = zeros(ndofs(dh)); u[p] = u0
+            K, r = assemble_all(dh, ShellCellValues(qr, ip, ip; mitc, dofs = dh), u)
+            @test r[p] ≈ r0 rtol = 1e-12
+            @test Matrix(K)[p, p] ≈ Matrix(K0) rtol = 1e-12
+        end
+    end
 end
 
 @testset "reference director curvature B₀" begin
@@ -669,7 +686,7 @@ end
     function element_tangent!(ke, scv, cc, u, mat)
         fill!(ke, 0.0)
         reinit!(scv, cc)
-        u_e = u[shelldofs(cc)]
+        u_e = u[celldofs(cc)]
         membrane_tangent_RM!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)   # writes the MITC scratch
         return ke

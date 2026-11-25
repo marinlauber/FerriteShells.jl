@@ -22,6 +22,13 @@ functions `ip_shape` ``u(\\xi) = \\sum N_{i}^\\text{shape}(\\xi) u_{i}``.
     `reinit!(scv, cell)` / `reinit!(scv, cc)` entry points use the stored per-node frames
     automatically, so a kernel loop written as `reinit!(scv, cell)` cannot silently fall back
     to centroid frames. Pass `nothing` for centroid frames.
+* `dofs`: the `SubDofHandler` (or a `DofHandler` with a single one) whose cells this object
+    is used on (default `nothing`). The kernels take the element vector in Ferrite's own
+    cell-dof order, `u[celldofs(cell)]`, and locate the displacement and rotation dofs in it
+    through `Ferrite.dof_range(sdh, :u)` and `Ferrite.dof_range(sdh, :θ)`, read once here.
+    With `nothing` they default to `1:3n` and `3n+1:5n`, the layout of
+    `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)` (and, for `:u` alone, of a Kirchhoff–Love
+    `DofHandler`); pass `dofs` for any other field order or additional fields.
 
 **Common methods:**
 * [`reinit!`](@ref) computes the reference geometry (``A_1``, ``A_2``, ``G_3``, ``B``, ``\\cdots``) by differentiating the coordinate map using `ip_geo`.
@@ -55,6 +62,8 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M, F} <: AbstractCellValu
     T₂_elem  :: Vector{Vec{3, T}}
     mitc     :: M  # Nothing, or an AbstractMITCData (e.g. MITC9Data) for locking-free shear
     frames   :: F  # Nothing, or a NodeFrames used by the cell-based reinit! entry points
+    ru       :: UnitRange{Int}  # local positions of the :u dofs (3 per node) in the element vector
+    rθ       :: UnitRange{Int}  # local positions of the :θ dofs (2 per node); empty without :θ
 end
 
 Ferrite.getnormal(scv::ShellCellValues, q::Int) = scv.G₃[q]
@@ -63,10 +72,11 @@ Ferrite.getnquadpoints(scv::ShellCellValues) = getnquadpoints(scv.qr)
 Ferrite.getnbasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_shape)
 @propagate_inbounds Ferrite.getngeobasefunctions(scv::ShellCellValues) = getnbasefunctions(scv.ip_geo)
 
-function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing, frames=nothing)
+function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::Interpolation; mitc=nothing, frames=nothing, dofs=nothing)
     n_qp    = length(qr.weights)
     n_shape = getnbasefunctions(ip_shape)
     T       = Float64
+    ru, rθ  = shell_dof_ranges(dofs, n_shape)
 
     N      = zeros(T, n_shape, n_qp)
     dNdξ   = Matrix{Vec{2, T}}(undef, n_shape, n_qp)
@@ -92,8 +102,24 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_shape), fill(zero(Vec{3, T}), n_shape),
-        fill(zero(Vec{3, T}), n_shape), m, frames
+        fill(zero(Vec{3, T}), n_shape), m, frames, ru, rθ
     )
+end
+
+# Local positions of the `:u` and `:θ` dofs in the element vector, read by name from the
+# SubDofHandler, or the default two-field layout (`:u` as ip^3 first, `:θ` as ip^2).
+shell_dof_ranges(::Nothing, n::Int) = 1:3n, 3n+1:5n
+shell_dof_ranges(dh::DofHandler, n::Int) = shell_dof_ranges(only(dh.subdofhandlers), n)
+function shell_dof_ranges(sdh::SubDofHandler, n::Int)
+    names = Ferrite.getfieldnames(sdh)
+    :u in names || throw(ArgumentError("the SubDofHandler has no :u field"))
+    ru = Ferrite.dof_range(sdh, :u)
+    rθ = :θ in names ? Ferrite.dof_range(sdh, :θ) : (1:0)
+    length(ru) == 3n || throw(ArgumentError(
+        ":u has $(length(ru)) dofs per cell, expected $(3n) (ip^3 with $n shape functions)"))
+    (isempty(rθ) || length(rθ) == 2n) || throw(ArgumentError(
+        ":θ has $(length(rθ)) dofs per cell, expected $(2n) (ip^2 with $n shape functions)"))
+    return ru, rθ
 end
 
 """
@@ -110,38 +136,41 @@ function Base.copy(scv::ShellCellValues)
         copy(scv.A₁), copy(scv.A₂), copy(scv.A₁₁), copy(scv.A₁₂), copy(scv.A₂₂),
         copy(scv.A_metric), copy(scv.G₃), copy(scv.T₁), copy(scv.T₂), copy(scv.B),
         copy(scv.B₀), copy(scv.G₃_elem), copy(scv.T₁_elem), copy(scv.T₂_elem),
-        copy(scv.mitc), scv.frames
+        copy(scv.mitc), scv.frames, scv.ru, scv.rθ
     )
 end
 
 """
     function_value(scv, qp, u_e)
 
-Interpolate the displacement field at quadrature point `qp` from a flat DOF vector `u_e`.
-Works for both KL (3 DOFs/node: ``[u_1,u_2,u_3,\\cdots]``) and RM (5 DOFs/node: ``[u_1,u_2,u_3,\\varphi_1,\\varphi_2,\\cdots]``).
-The DOF stride is inferred from `length(u_e) ÷ n_nodes`; only the first 3 DOFs of each node
-(the displacement components) are used.
+Interpolate the displacement field at quadrature point `qp` from the element vector
+`u_e = u[celldofs(cell)]`. The displacement dofs are read at `scv.ru`, the `:u` dof range
+(see the `dofs` keyword of [`ShellCellValues`](@ref)); rotation dofs are ignored.
 """
 @inline function Ferrite.function_value(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    stride  = length(u_e) ÷ n_nodes
+    ru  = scv.ru
     val = zero(Vec{3, T})
     @inbounds for I in 1:n_nodes
-        o = stride * (I - 1)
-        val += scv.N[I, qp] * Vec{3, T}((u_e[o + 1], u_e[o + 2], u_e[o + 3]))
+        val += scv.N[I, qp] * Vec{3}(@view u_e[ru[3I-2:3I]])
     end
     val
 end
 
+"""
+    function_gradient(scv, qp, u_e)
+
+Parametric displacement gradient ``\\partial u/\\partial \\xi_\\alpha`` at quadrature point `qp`
+(third column zero), with the displacement dofs of `u_e` read at `scv.ru`.
+"""
 @inline function Ferrite.function_gradient(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    stride  = length(u_e) ÷ n_nodes
+    ru  = scv.ru
     val = zero(Tensor{2,3,T})
     @inbounds for I in 1:n_nodes
-        o = stride * (I - 1)
         N = scv.dNdξ[I, qp]
         Nvec = Vec{3,T}((N[1], N[2], 0))
-        val += Vec{3, T}((u_e[o + 1], u_e[o + 2], u_e[o + 3])) ⊗ Nvec
+        val += Vec{3}(@view u_e[ru[3I-2:3I]]) ⊗ Nvec
     end
     val
 end
