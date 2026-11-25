@@ -70,8 +70,7 @@ for cell in CellIterator(dh)
     fill!(ke, 0.0)
     reinit!(scv, cell)  # uses the NodeFrame by default
     u0 = zeros(5n_base)
-    membrane_tangent!(ke, scv, u0, mat)
-    bending_tangent_RM!(ke, scv, u0, mat)
+    tangent_RM!(ke, scv, u0, mat)
     assemble!(asm, celldofs(cell), ke, re)
 end
 
