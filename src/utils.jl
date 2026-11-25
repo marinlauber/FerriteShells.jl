@@ -21,8 +21,6 @@ function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(
                 facetsets=grid.facetsets, cellsets=grid.cellsets, nodesets=grid.nodesets)
 end
 
-using OrderedCollections
-
 """
     get_ferrite_grid(::String; T=Float64)
 
