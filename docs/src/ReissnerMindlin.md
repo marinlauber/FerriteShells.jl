@@ -162,7 +162,7 @@ The first factor is the `frame_stiffness(D, d₁, d₂)` tensor ``\mathbf{L}_{\a
 ```
 with ``g_{IJ}=\partial_\alpha N_I\,M^{\alpha\beta}\,\partial_\beta N_J`` (from ``M^{\alpha\beta}\delta^2\kappa``) and ``q_I=\partial_\alpha N_I\,Q^\alpha`` (from ``Q^\alpha\delta^2\gamma``).
 
-**φu block** (2×3). The transpose of the uφ block evaluated at ``(J,I)``, guaranteed by the symmetry of ``\mathcal{W}``; the code writes the same column into `ke[col, 5I-4:5I-2]`.
+**φu block** (2×3). The transpose of the uφ block evaluated at ``(J,I)``, guaranteed by the symmetry of ``\mathcal{W}``; the code writes the same column into the displacement rows of node ``I`` in row `col`.
 
 **φφ block** (2×2). Both variations are rotations. The **material** part dots the ``J``-side increments (assembled into ``\delta\mathbf{F}_I=\partial_\alpha N_I\,\delta M^{\alpha\beta}\mathbf{a}_\beta+N_I N_J\,\delta Q^\alpha\mathbf{a}_\alpha``) with the ``I``-side Jacobian ``\mathrm{dd}_{Ik}``:
 ```math

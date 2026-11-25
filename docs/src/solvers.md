@@ -37,9 +37,9 @@ function assemble_global!(K, r, dh, scv, u, mat)
     asm = start_assemble(K, r)
     for cell in CellIterator(dh)
         reinit!(scv, cell)
-        u_e = u[shelldofs(cell)]                 # node-major element DOFs
+        u_e = u[celldofs(cell)]                  # Ferrite's cell-dof order
         # ke, re ← membrane_*_RM!(…) + bending_*_RM!(…)   (see examples)
-        assemble!(asm, shelldofs(cell), ke, re)
+        assemble!(asm, celldofs(cell), ke, re)
     end
 end
 ```

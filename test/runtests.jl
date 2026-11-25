@@ -33,6 +33,13 @@ make_t3_scv() = ShellCellValues(QuadratureRule{RefTriangle}(2),
 make_t6_scv(; qr_order=4) = ShellCellValues(QuadratureRule{RefTriangle}(qr_order),
                                              Lagrange{RefTriangle,2}(), Lagrange{RefTriangle,2}())
 
+# Position of dof p ∈ 1:5 (u₁,u₂,u₃,φ₁,φ₂) of node I in an RM vector over nn nodes, laid out
+# as Ferrite's two-field cell dofs (`:u` as ip^3 then `:θ` as ip^2): u at 1:3nn, θ at 3nn+1:5nn.
+# This is the layout ShellCellValues assumes when built without `dofs`.
+rmdof(nn::Int, I, p) = p ≤ 3 ? 3(I-1) + p : 3nn + 2(I-1) + (p-3)
+rmdof(v::AbstractArray, I, p) = rmdof(size(v, 1) ÷ 5, I, p)
+iφ(v, I, l) = rmdof(v, I, 3 + l)
+
 # In-plane rotation about z
 @inline R(θ) = Tensor{2,3}([cos(θ) -sin(θ) 0; sin(θ) cos(θ) 0; 0 0 1])
 

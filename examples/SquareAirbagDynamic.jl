@@ -17,7 +17,7 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0); fill!(re_i, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
         membrane_residuals_RM!(re_i, scv, u_e, mat)
         bending_residuals_RM!(re_i, scv, u_e, mat)
@@ -35,7 +35,7 @@ function assemble_mass!(M, dh, scv, ρ, mat)
         fill!(me, 0.0)
         reinit!(scv, cell)
         mass_matrix!(me, scv, ρ, mat)
-        assemble!(asm, shelldofs(cell), me)
+        assemble!(asm, celldofs(cell), me)
     end
 end
 
@@ -45,7 +45,7 @@ function max_principal_stress_qp(dh, scv, u, mat)
     out     = [zeros(n_qp) for _ in 1:getncells(dh.grid)]
     for cell in CellIterator(dh)
         reinit!(scv, cell)
-        u_e = u[shelldofs(cell)]
+        u_e = u[celldofs(cell)]
         G₃ = scv.G₃_elem[1]
         qp_vals = out[cellid(cell)]
         @inbounds for qp in 1:n_qp
@@ -68,7 +68,7 @@ function assemble_pressure_all!(K_p, F_p, dh, scv, u)
     for cell in CellIterator(dh)
         fill!(ke_p, 0.0); fill!(re_p, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
         assemble_pressure!(re_p, scv, u_e, 1.0)
         assemble_pressure_tangent!(ke_p, scv, u_e, 1.0)

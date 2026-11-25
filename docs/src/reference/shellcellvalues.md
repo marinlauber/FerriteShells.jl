@@ -19,5 +19,6 @@ The following functions are applicable
 ```@docs
 reinit!
 function_value(::ShellCellValues, qp::Int, u_e::AbstractVector)
+function_gradient(::ShellCellValues, qp::Int, u_e::AbstractVector)
 copy(::ShellCellValues)
 ```

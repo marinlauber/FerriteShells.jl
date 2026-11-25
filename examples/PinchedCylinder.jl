@@ -44,7 +44,7 @@ for cell in CellIterator(dh)
     u0 = zeros(5n_base)
     membrane_tangent_RM!(ke, scv, u0, mat)
     bending_tangent_RM!(ke, scv, u0, mat)
-    sd = shelldofs(cell)
+    sd = celldofs(cell)
     assemble!(asmb, sd, ke, re)
 end
 

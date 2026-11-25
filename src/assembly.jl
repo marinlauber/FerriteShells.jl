@@ -30,12 +30,13 @@ end
     cosθ, sincθ, sccθ
 end
 
-# Deformed covariant basis (a₁, a₂) at qp from RM 5-DOF displacement vector u_e.
+# Deformed covariant basis (a₁, a₂) at qp; the displacement dofs of u_e sit at scv.ru.
 @inline function covariant_basis(scv, qp, u_e::AbstractVector{T}, n_nodes) where T
+    ru  = scv.ru
     Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
     for I in 1:n_nodes
         dN = scv.dNdξ[I, qp]
-        u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+        u_I = Vec{3}(@view u_e[ru[3I-2:3I]])
         Δa₁ += u_I * dN[1]; Δa₂ += u_I * dN[2]
     end
     scv.A₁[qp] + Δa₁, scv.A₂[qp] + Δa₂
@@ -47,6 +48,7 @@ end
 # Interpolated director d and covariant derivatives d₁ = d,₁, d₂ = d,₂ at qp.
 # Rodrigues: d_I = cos|φ|·G₃_I + sinc|φ|·(φ₁T₁_I+φ₂T₂_I), |d_I| = 1 (per-node frames).
 @inline function director_field(scv, qp, u_e::AbstractVector{T}, n_nodes) where T
+    rθ = scv.rθ
     d = zero(Vec{3,T}); d₁ = zero(Vec{3,T}); d₂ = zero(Vec{3,T})
     for I in 1:n_nodes
         # get sotred frame data for node I
@@ -54,7 +56,7 @@ end
         T₁_I = scv.T₁_elem[I]
         T₂_I = scv.T₂_elem[I]
         # get rotation dofs for node I
-        φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+        φ₁ = u_e[rθ[2I-1]]; φ₂ = u_e[rθ[2I]]
         cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
         # and compute Rodrigues interpolation
         d_I = cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I)
@@ -107,14 +109,15 @@ end
 """
     membrane_residuals_KL!(re, scv, u_e, mat)
 
-Kirchhoff–Love membrane residual. `u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+Kirchhoff–Love membrane residual. `u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function membrane_residuals_KL!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for i in 1:n_nodes
-            ui = Vec{3,T}((u_e[3i-2], u_e[3i-1], u_e[3i]))
+            ui = Vec{3}(@view u_e[ru[3i-2:3i]])
             Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
         end
         a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
@@ -126,7 +129,7 @@ function membrane_residuals_KL!(re, scv::ShellCellValues, u_e::AbstractVector{T}
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
             v = ∂NI1 * (N[1,1]*a₁ + N[1,2]*a₂) +
                 ∂NI2 * (N[2,1]*a₁ + N[2,2]*a₂)
-            @views re[3I-2:3I] .+= v * dΩ
+            @views re[ru[3I-2:3I]] .+= v * dΩ
         end
     end
 end
@@ -134,14 +137,15 @@ end
 """
     membrane_tangent_KL!(ke, scv, u_e, mat)
 
-Kirchhoff–Love membrane tangent. `u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+Kirchhoff–Love membrane tangent. `u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
         for i in 1:n_nodes
-            ui = Vec{3,T}((u_e[3i-2], u_e[3i-1], u_e[3i]))
+            ui = Vec{3}(@view u_e[ru[3i-2:3i]])
             Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
         end
         a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
@@ -165,7 +169,7 @@ function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
                     v = D1[α,β]*a₁ + D2[α,β]*a₂
                     Kmat += ∂NIα * (aβ ⊗ v)
                 end
-                @views ke[3I-2:3I, 3J-2:3J] .+= (Kgeo + Kmat) * dΩ
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= (Kgeo + Kmat) * dΩ
             end
         end
     end
@@ -201,7 +205,7 @@ Computes the Kirchhoff–Love bending energy through the curvature change ``\\ka
 (current minus reference second fundamental form).
 
 **Arguments:**
-* `u_flat`: a flat vector of length 3·`n_nodes` containing the displacement degrees of freedom of that element [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+* `u_flat`: the element vector `u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 * `scv`: a [`ShellCellValues`](@ref) object containing the precomputed shape function values and derivatives.
 * `mat`: an instance of an `AbstractMaterial` describing the material properties.
 
@@ -211,7 +215,8 @@ To capture the full curvature change ``\\kappa``, quadratic elements are require
 function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
-    u_e     = [Vec{3,T}((u_flat[3i-2], u_flat[3i-1], u_flat[3i])) for i in 1:n_nodes]
+    ru      = scv.ru
+    u_e     = [Vec{3}(@view u_flat[ru[3i-2:3i]]) for i in 1:n_nodes]
     W  = zero(T)
     for qp in 1:getnquadpoints(scv)
         A₁q = scv.A₁[qp]; A₂q = scv.A₂[qp]
@@ -235,7 +240,7 @@ end
     bending_residuals_KL!(re, scv, u_e, mat)
 
 Kirchhoff–Love bending residual via `ForwardDiff.gradient` of [`bending_energy_KL`](@ref).
-`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+`u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function bending_residuals_KL!(re, scv::ShellCellValues, u_e, mat)
     re .+= ForwardDiff.gradient(u -> bending_energy_KL(u, scv, mat), u_e)
@@ -245,7 +250,7 @@ end
     bending_tangent_KL!(ke, scv, u_e, mat)
 
 Kirchhoff–Love bending tangent via `ForwardDiff.hessian` of [`bending_energy_KL`](@ref).
-`u_e` is a flat vector of length 3·`n_nodes`: [``u_1``,``u_2``,``u_3``, ``\\cdots``].
+`u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
 """
 function bending_tangent_KL!(ke, scv::ShellCellValues, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> bending_energy_KL(u, scv, mat), u_e)
@@ -256,9 +261,15 @@ end
 
 RM membrane residual: ``r_I = \\int N^{\\alpha\\beta} \\partial N_I^\\alpha a_\\beta \\, d\\Omega``.
 Stress resultant rows ``P_\\alpha = N^{\\alpha\\beta} a_\\beta`` are precomputed once per QP.
+
+All RM kernels take the element vector in Ferrite's cell-dof order, `u_e = u[celldofs(cell)]`,
+and write `re`/`ke` in the same order, so they assemble with `celldofs(cell)`. The
+displacement and rotation dofs are located at `scv.ru` and `scv.rθ` (see the `dofs` keyword
+of [`ShellCellValues`](@ref)).
 """
 function membrane_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
@@ -269,7 +280,7 @@ function membrane_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
-            @views re[5I-4:5I-2] .+= (∂NI1*P₁ + ∂NI2*P₂) * dΩ
+            @views re[ru[3I-2:3I]] .+= (∂NI1*P₁ + ∂NI2*P₂) * dΩ
         end
     end
 end
@@ -303,14 +314,14 @@ end
     energy_RM(u_flat, scv::ShellCellValues, mat)
 
 Total Reissner–Mindlin strain energy (membrane + bending + transverse shear) per element.
-DOF layout: 5 DOFs per node — [u₁,u₂,u₃,φ₁,φ₂,…].
+`u_flat = u[celldofs(cell)]`, with the displacement and rotation dofs at `scv.ru` and `scv.rθ`.
 Material dispatch happens at the per-QP level via `rm_qp_energy`.
 """
 function energy_RM(u_flat, scv::ShellCellValues, mat)
     T       = eltype(u_flat)
     n_nodes = getnbasefunctions(scv.ip_shape)
     W = zero(T)
-    γ_k = tying_shear_strains(scv.mitc, u_flat)
+    γ_k = tying_shear_strains(scv.mitc, u_flat, scv.ru, scv.rθ)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_flat, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_flat, n_nodes)
@@ -330,7 +341,7 @@ end
     residuals_RM_FD!(re, scv, u_e, mat)
 
 Reissner–Mindlin total residual (membrane + bending + shear) via ForwardDiff.gradient of `energy_RM`.
-`u_e` is a flat vector of length 5·`n_nodes`.
+`u_e = u[celldofs(cell)]`, with the displacement and rotation dofs at `scv.ru` and `scv.rθ`.
 """
 function residuals_RM_FD!(re, scv, u_e, mat)
     re .+= ForwardDiff.gradient(u -> energy_RM(u, scv, mat), u_e)
@@ -340,7 +351,7 @@ end
     tangent_RM_FD!(ke, scv, u_e, mat)
 
 Reissner–Mindlin total tangent (membrane + bending + shear) via ForwardDiff.hessian of `energy_RM`.
-`u_e` is a flat vector of length 5·`n_nodes`.
+`u_e = u[celldofs(cell)]`, with the displacement and rotation dofs at `scv.ru` and `scv.rθ`.
 """
 function tangent_RM_FD!(ke, scv, u_e, mat)
     ke .+= ForwardDiff.hessian(u -> energy_RM(u, scv, mat), u_e)
@@ -367,6 +378,7 @@ Both ``M_{\\alpha\\delta}`` and ``N`` are precomputed once per QP outside the no
 """
 function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
@@ -379,7 +391,7 @@ function membrane_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, 
                 ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
                 K_mat = ∂NI1*∂NJ1*M₁₁ + ∂NI1*∂NJ2*M₁₂ + ∂NI2*∂NJ1*transpose(M₁₂) + ∂NI2*∂NJ2*M₂₂
                 K_geo = (∂NI1*(N[1,1]*∂NJ1 + N[1,2]*∂NJ2) + ∂NI2*(N[2,1]*∂NJ1 + N[2,2]*∂NJ2)) * one(SymmetricTensor{2,3})
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (K_mat + K_geo) * dΩ
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= (K_mat + K_geo) * dΩ
             end
         end
     end
@@ -407,7 +419,8 @@ where ``F_I = \\partial_1 N_I S^1 + \\partial_2 N_I S^2 + N_I (Q_1 a_1 + Q_2 a_2
 """
 function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    γ_k = tying_shear_strains(scv.mitc, u_e)
+    ru, rθ  = scv.ru, scv.rθ
+    γ_k = tying_shear_strains(scv.mitc, u_e, scv.ru, scv.rθ)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
@@ -428,12 +441,12 @@ function bending_residuals_RM!(re, scv::ShellCellValues, u_e::AbstractVector{T},
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
             NI = scv.N[I, qp]
-            @views re[5I-4:5I-2] .+= (∂NI1*P¹ + ∂NI2*P²) * dΩ
+            @views re[ru[3I-2:3I]] .+= (∂NI1*P¹ + ∂NI2*P²) * dΩ
             F_I = ∂NI1*S¹ + ∂NI2*S² + NI*(Q₁*a₁ + Q₂*a₂)
-            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            φ₁ = u_e[rθ[2I-1]]; φ₂ = u_e[rθ[2I]]
             _, _, dd_dφ₁, dd_dφ₂ = rodrigues_jac(φ₁, φ₂, scv.G₃_elem[I], scv.T₁_elem[I], scv.T₂_elem[I])
-            re[5I-1] += dot(F_I, dd_dφ₁) * dΩ
-            re[5I  ] += dot(F_I, dd_dφ₂) * dΩ
+            re[rθ[2I-1]] += dot(F_I, dd_dφ₁) * dΩ
+            re[rθ[2I]] += dot(F_I, dd_dφ₂) * dΩ
         end
     end
 end
@@ -445,25 +458,26 @@ end
 # elements. Bending (κ/D) terms are QP-direct as in the NoMITC path.
 function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM,MT}}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,NN,MM,MT,T}
     mitc = scv.mitc
+    ru, rθ = scv.ru, scv.rθ
     # Tying-point deformed tangents/directors and per-node Rodrigues Jacobians (node frame),
     # built as stack-allocated tuples (Val(MM)/Val(NN)) so the kernel stays allocation-free
     # *and* ForwardDiff-safe — the MITC scratch arrays are Float64-only.
     tie = ntuple(Val(MM)) do k
         Δa = zero(Vec{3,T}); dk = zero(Vec{3,T})
         @inbounds for I in 1:NN
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            u_I = Vec{3}(@view u_e[ru[3I-2:3I]])
             Δa += u_I * mitc.dN_tie[I,k]
-            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]; cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
+            φ₁ = u_e[rθ[2I-1]]; φ₂ = u_e[rθ[2I]]; cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             dk += mitc.N_tie[I,k] * (cosθ*mitc.G₃_node[I] + sincθ*(φ₁*mitc.T₁_node[I] + φ₂*mitc.T₂_node[I]))
         end
         (mitc.A_tie[k] + Δa, dk)
     end
     ddn = ntuple(Val(NN)) do I
-        _, _, d1, d2 = rodrigues_jac(u_e[5I-1], u_e[5I], mitc.G₃_node[I], mitc.T₁_node[I], mitc.T₂_node[I])
+        _, _, d1, d2 = rodrigues_jac(u_e[rθ[2I-1]], u_e[rθ[2I]], mitc.G₃_node[I], mitc.T₁_node[I], mitc.T₂_node[I])
         (d1, d2)
     end
 
-    γ_k = tying_shear_strains(mitc, u_e)
+    γ_k = tying_shear_strains(mitc, u_e, ru, rθ)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, NN)
         d, d₁, d₂ = director_field(scv, qp, u_e, NN)
@@ -494,11 +508,11 @@ function bending_residuals_RM!(re, scv::ShellCellValues{QR,IPG,IPS,FT,MITC{NN,MM
                 Bγ1u += h1 * Bu;  Bγ1φ1 += h1 * Bφ1;  Bγ1φ2 += h1 * Bφ2
                 Bγ2u += h2 * Bu;  Bγ2φ1 += h2 * Bφ1;  Bγ2φ2 += h2 * Bφ2
             end
-            @views re[5I-4:5I-2] .+= (∂NI1*Pb¹ + ∂NI2*Pb² + Q₁*Bγ1u + Q₂*Bγ2u) * dΩ
-            _, _, dd_I1, dd_I2 = rodrigues_jac(u_e[5I-1], u_e[5I], scv.G₃_elem[I], scv.T₁_elem[I], scv.T₂_elem[I])
+            @views re[ru[3I-2:3I]] .+= (∂NI1*Pb¹ + ∂NI2*Pb² + Q₁*Bγ1u + Q₂*Bγ2u) * dΩ
+            _, _, dd_I1, dd_I2 = rodrigues_jac(u_e[rθ[2I-1]], u_e[rθ[2I]], scv.G₃_elem[I], scv.T₁_elem[I], scv.T₂_elem[I])
             Fb_I = ∂NI1*S¹ + ∂NI2*S²
-            re[5I-1] += (dot(Fb_I, dd_I1) + Q₁*Bγ1φ1 + Q₂*Bγ2φ1) * dΩ
-            re[5I  ] += (dot(Fb_I, dd_I2) + Q₁*Bγ1φ2 + Q₂*Bγ2φ2) * dΩ
+            re[rθ[2I-1]] += (dot(Fb_I, dd_I1) + Q₁*Bγ1φ1 + Q₂*Bγ2φ1) * dΩ
+            re[rθ[2I]] += (dot(Fb_I, dd_I2) + Q₁*Bγ1φ2 + Q₂*Bγ2φ2) * dΩ
         end
     end
 end
@@ -528,6 +542,7 @@ Bending (``\\kappa``) terms are unchanged from the NoMITC path — only shear (`
 function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::AbstractVector{T}, mat) where {QR,IPG,IPS,FT<:AbstractFloat,M<:MITC,T}
     mitc    = scv.mitc
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru, rθ  = scv.ru, scv.rθ
     Nt      = length(mitc.ξ_tie)
 
     # Reusable scratch from the MITC object (overwritten here; not thread-safe).
@@ -541,9 +556,9 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
     for k in 1:Nt
         Δa = zero(Vec{3,T}); d_k = zero(Vec{3,T})
         for I in 1:n_nodes
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            u_I = Vec{3}(@view u_e[ru[3I-2:3I]])
             Δa += u_I * mitc.dN_tie[I,k]
-            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            φ₁ = u_e[rθ[2I-1]]; φ₂ = u_e[rθ[2I]]
             cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
@@ -555,13 +570,13 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
     # Rodrigues Jacobian ∂d_J/∂φ_l per node J (uses tying-point reference frame,
     # which is k-independent here, so a single value per node suffices).
     for J in 1:n_nodes
-        φ₁_J = u_e[5J-1]; φ₂_J = u_e[5J]
+        φ₁_J = u_e[rθ[2J-1]]; φ₂_J = u_e[rθ[2J]]
         G₃_J = mitc.G₃_node[J]; T₁_J = mitc.T₁_node[J]; T₂_J = mitc.T₂_node[J]
         _, _, dd1, dd2 = rodrigues_jac(φ₁_J, φ₂_J, G₃_J, T₁_J, T₂_J)
         dd1_J[J] = dd1; dd2_J[J] = dd2
     end
 
-    γ_k = tying_shear_strains(mitc, u_e)
+    γ_k = tying_shear_strains(mitc, u_e, ru, rθ)
 
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
@@ -602,24 +617,26 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
             Sb_I = ∂NI1*S¹ + ∂NI2*S²                 # bending traction at I (geometric φφ)
-            φ₁_I = u_e[5I-1]; φ₂_I = u_e[5I]
+            φ₁_I = u_e[rθ[2I-1]]; φ₂_I = u_e[rθ[2I]]
             s_I, sc_I, dd_I1, dd_I2 = rodrigues_jac(φ₁_I, φ₂_I, scv.G₃_elem[I], scv.T₁_elem[I], scv.T₂_elem[I])
             θ²_I = φ₁_I^2 + φ₂_I^2
             b1I = Bγ1(I); b2I = Bγ2(I)
+            dI  = (ru[3I-2], ru[3I-1], ru[3I], rθ[2I-1], rθ[2I])   # (u₁,u₂,u₃,φ₁,φ₂) of node I
             for J in 1:n_nodes
                 ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
                 # uu bending block: frame stiffness with d₁,d₂ (QP-direct, unchanged)
                 K_bend = ∂NI1*∂NJ1*L₁₁ + ∂NI1*∂NJ2*L₁₂ + ∂NI2*∂NJ1*transpose(L₁₂) + ∂NI2*∂NJ2*L₂₂
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= K_bend * dΩ
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= K_bend * dΩ
                 # MITC shear material: symmetric 5×5 outer product over all DOFs of (I,J)
                 b1J = Bγ1(J); b2J = Bγ2(J)
+                dJ  = (ru[3J-2], ru[3J-1], ru[3J], rθ[2J-1], rθ[2J])
                 @inbounds for p in 1:5, q in 1:5
                     cbq = b1I[p]*(Cs[1,1]*b1J[q] + Cs[1,2]*b2J[q]) +
                           b2I[p]*(Cs[2,1]*b1J[q] + Cs[2,2]*b2J[q])
-                    ke[5(I-1)+p, 5(J-1)+q] += cbq * dΩ
+                    ke[dI[p], dJ[q]] += cbq * dΩ
                 end
                 # bending uφ/φφ material (κ/D, QP-direct) + bending geometric (Mb)
-                φ₁_J = u_e[5J-1]; φ₂_J = u_e[5J]
+                φ₁_J = u_e[rθ[2J-1]]; φ₂_J = u_e[rθ[2J]]
                 _, _, dd_J1, dd_J2 = rodrigues_jac(φ₁_J, φ₂_J, scv.G₃_elem[J], scv.T₁_elem[J], scv.T₂_elem[J])
                 g_IJ = ∂NI1*(Mb[1,1]*∂NJ1+Mb[1,2]*∂NJ2) + ∂NI2*(Mb[2,1]*∂NJ1+Mb[2,2]*∂NJ2)
                 # MITC shear geometric coupling ∂²γ/∂u_I∂φ_J : Σ_k h_α ∂N_tie(I) N_tie(J)
@@ -634,17 +651,17 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
                     c₁ = dot(a₁, dd_Jl); c₂ = dot(a₂, dd_Jl)  # bending δκ: QP geometry
                     δκ = SymmetricTensor{2,2,T}((∂NJ1*c₁, 0.5*(∂NJ1*c₂+∂NJ2*c₁), ∂NJ2*c₂))
                     δM = D ⊡ δκ
-                    col = 5J - 2 + l
+                    col = rθ[2J-2+l]
                     v_bend = ∂NI1*(δM[1,1]*d₁+δM[1,2]*d₂) + ∂NI2*(δM[2,1]*d₁+δM[2,2]*d₂)
                     v_dir  = g_IJ * dd_Jl                   # bending Mb·δd at QP
                     v_shg  = qg * dd_Jl_n                   # MITC shear Q·∂²γ (initial stress)
-                    @views ke[5I-4:5I-2, col] .+= (v_bend + v_dir + v_shg) * dΩ
-                    @views ke[col, 5I-4:5I-2] .+= (v_bend + v_dir + v_shg) * dΩ  # by symmetry
+                    @views ke[ru[3I-2:3I], col] .+= (v_bend + v_dir + v_shg) * dΩ
+                    @views ke[col, ru[3I-2:3I]] .+= (v_bend + v_dir + v_shg) * dΩ  # by symmetry
                     δS¹  = δM[1,1]*a₁ + δM[1,2]*a₂
                     δS²  = δM[2,1]*a₁ + δM[2,2]*a₂
                     δF_I = ∂NI1*δS¹ + ∂NI2*δS²              # bending φφ material (no shear)
-                    ke[5I-1, col] += dot(δF_I, dd_I1) * dΩ
-                    ke[5I,   col] += dot(δF_I, dd_I2) * dΩ
+                    ke[rθ[2I-1], col] += dot(δF_I, dd_I1) * dΩ
+                    ke[rθ[2I],   col] += dot(δF_I, dd_I2) * dΩ
                 end
             end
             # φφ geometric (J=I): bending Sb_I·∂²d (element frame) + shear Q·∂²γ (node frame)
@@ -660,10 +677,10 @@ function bending_tangent_RM!(ke, scv::ShellCellValues{QR,IPG,IPS,FT,M}, u_e::Abs
             WQ = Q₁*W₁ + Q₂*W₂
             d2n_11, d2n_12, d2n_22 = rodrigues_hess(s_I, sc_I, sccc_I, φ₁_I, φ₂_I,
                                                      mitc.G₃_node[I], mitc.T₁_node[I], mitc.T₂_node[I])
-            ke[5I-1, 5I-1] += (dot(Sb_I, d2e_11) + dot(WQ, d2n_11)) * dΩ
-            ke[5I-1, 5I  ] += (dot(Sb_I, d2e_12) + dot(WQ, d2n_12)) * dΩ
-            ke[5I,   5I-1] += (dot(Sb_I, d2e_12) + dot(WQ, d2n_12)) * dΩ
-            ke[5I,   5I  ] += (dot(Sb_I, d2e_22) + dot(WQ, d2n_22)) * dΩ
+            ke[rθ[2I-1], rθ[2I-1]] += (dot(Sb_I, d2e_11) + dot(WQ, d2n_11)) * dΩ
+            ke[rθ[2I-1], rθ[2I]  ] += (dot(Sb_I, d2e_12) + dot(WQ, d2n_12)) * dΩ
+            ke[rθ[2I],   rθ[2I-1]] += (dot(Sb_I, d2e_12) + dot(WQ, d2n_12)) * dΩ
+            ke[rθ[2I],   rθ[2I]  ] += (dot(Sb_I, d2e_22) + dot(WQ, d2n_22)) * dΩ
         end
     end
 end
@@ -680,7 +697,8 @@ RM bending and transverse shear tangent, explicit index-notation form. Four bloc
 """
 function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
-    γ_k = tying_shear_strains(scv.mitc, u_e)
+    ru, rθ  = scv.ru, scv.rθ
+    γ_k = tying_shear_strains(scv.mitc, u_e, scv.ru, scv.rθ)
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
@@ -700,7 +718,7 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
         for I in 1:n_nodes
             ∂NI1, ∂NI2 = scv.dNdξ[I, qp]; NI = scv.N[I, qp]
             F_I = ∂NI1*S¹ + ∂NI2*S² + NI*(Q₁*a₁ + Q₂*a₂)
-            φ₁_I = u_e[5I-1]; φ₂_I = u_e[5I]
+            φ₁_I = u_e[rθ[2I-1]]; φ₂_I = u_e[rθ[2I]]
             s_I, sc_I, dd_I1, dd_I2 = rodrigues_jac(φ₁_I, φ₂_I, scv.G₃_elem[I], scv.T₁_elem[I], scv.T₂_elem[I])
             θ²_I  = φ₁_I^2 + φ₂_I^2
             for J in 1:n_nodes
@@ -708,9 +726,9 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
                 # uu block: frame_stiffness with d₁,d₂ + shear term
                 q_IJ = ∂NI1*(Cs[1,1]*∂NJ1+Cs[1,2]*∂NJ2) + ∂NI2*(Cs[2,1]*∂NJ1+Cs[2,2]*∂NJ2)
                 K_uu = ∂NI1*∂NJ1*L₁₁ + ∂NI1*∂NJ2*L₁₂ + ∂NI2*∂NJ1*transpose(L₁₂) + ∂NI2*∂NJ2*L₂₂ + q_IJ*(d⊗d)
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= K_uu * dΩ
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= K_uu * dΩ
                 # uφ and φφ material blocks: loop over rotation directions l=1,2 of node J
-                φ₁_J = u_e[5J-1]; φ₂_J = u_e[5J]
+                φ₁_J = u_e[rθ[2J-1]]; φ₂_J = u_e[rθ[2J]]
                 _, _, dd_J1, dd_J2 = rodrigues_jac(φ₁_J, φ₂_J, scv.G₃_elem[J], scv.T₁_elem[J], scv.T₂_elem[J])
                 g_IJ  = ∂NI1*(M[1,1]*∂NJ1+M[1,2]*∂NJ2) + ∂NI2*(M[2,1]*∂NJ1+M[2,2]*∂NJ2)
                 q_I   = ∂NI1*Q₁ + ∂NI2*Q₂
@@ -720,20 +738,20 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
                     δM  = D ⊡ δκ
                     δQ₁ = Cs[1,1]*c₁ + Cs[1,2]*c₂
                     δQ₂ = Cs[2,1]*c₁ + Cs[2,2]*c₂
-                    col = 5J - 2 + l
+                    col = rθ[2J-2+l]
                     # uφ block: material (bending+shear) + director contributions
                     v_bend  = ∂NI1*(δM[1,1]*d₁+δM[1,2]*d₂) + ∂NI2*(δM[2,1]*d₁+δM[2,2]*d₂)
                     v_shear = (∂NI1*δQ₁ + ∂NI2*δQ₂)*NJ*d
                     v_dir   = (g_IJ + q_I*NJ)*dd_Jl
                     Kuφ_col = v_bend + v_shear + v_dir
-                    @views ke[5I-4:5I-2, col] .+= Kuφ_col * dΩ
-                    @views ke[col, 5I-4:5I-2] .+= Kuφ_col * dΩ  # φu for (J,I) by symmetry
+                    @views ke[ru[3I-2:3I], col] .+= Kuφ_col * dΩ
+                    @views ke[col, ru[3I-2:3I]] .+= Kuφ_col * dΩ  # φu for (J,I) by symmetry
                     # φφ material block: δF_I = ∂_αN_I δS^α + N_I N_J δQ^α a_α
                     δS¹   = δM[1,1]*a₁ + δM[1,2]*a₂
                     δS²   = δM[2,1]*a₁ + δM[2,2]*a₂
                     δF_I  = ∂NI1*δS¹ + ∂NI2*δS² + NI*NJ*(δQ₁*a₁ + δQ₂*a₂)
-                    ke[5I-1, col] += dot(δF_I, dd_I1) * dΩ
-                    ke[5I,   col] += dot(δF_I, dd_I2) * dΩ
+                    ke[rθ[2I-1], col] += dot(δF_I, dd_I1) * dΩ
+                    ke[rθ[2I],   col] += dot(δF_I, dd_I2) * dΩ
                 end
             end
             # φφ geometric part (J = I only): F_I · ∂²d_I/∂φ_k∂φ_l
@@ -743,10 +761,10 @@ function bending_tangent_RM!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, m
             d2_11 = (3sc_I*φ₁_I + sccc_I*φ₁_I^3)*T₁_I + (sc_I + sccc_I*φ₁_I^2)*φ₂_I*T₂_I - (s_I + sc_I*φ₁_I^2)*G₃_I
             d2_12 = (sc_I + sccc_I*φ₁_I^2)*φ₂_I*T₁_I + (sc_I + sccc_I*φ₂_I^2)*φ₁_I*T₂_I - sc_I*φ₁_I*φ₂_I*G₃_I
             d2_22 = (sc_I + sccc_I*φ₂_I^2)*φ₁_I*T₁_I + (3sc_I*φ₂_I + sccc_I*φ₂_I^3)*T₂_I - (s_I + sc_I*φ₂_I^2)*G₃_I
-            ke[5I-1, 5I-1] += dot(F_I, d2_11) * dΩ
-            ke[5I-1, 5I  ] += dot(F_I, d2_12) * dΩ
-            ke[5I,   5I-1] += dot(F_I, d2_12) * dΩ
-            ke[5I,   5I  ] += dot(F_I, d2_22) * dΩ
+            ke[rθ[2I-1], rθ[2I-1]] += dot(F_I, d2_11) * dΩ
+            ke[rθ[2I-1], rθ[2I]  ] += dot(F_I, d2_12) * dΩ
+            ke[rθ[2I],   rθ[2I-1]] += dot(F_I, d2_12) * dΩ
+            ke[rθ[2I],   rθ[2I]  ] += dot(F_I, d2_22) * dΩ
         end
     end
 end
@@ -758,36 +776,17 @@ Mass matrix for embedded shell elements (2D mesh in 3D). Only translational DOFs
 """
 function mass_matrix!(me, scv::ShellCellValues, ρ::T, mat) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     ρt = ρ * mat.thickness
     for qp in 1:getnquadpoints(scv)
         dΩ = scv.detJdV[qp]
         for I in 1:n_nodes, J in 1:n_nodes
             m = scv.N[I, qp] * scv.N[J, qp] * ρt * dΩ
-            me[5I-4, 5J-4] += m
-            me[5I-3, 5J-3] += m
-            me[5I-2, 5J-2] += m
+            me[ru[3I-2], ru[3J-2]] += m
+            me[ru[3I-1], ru[3J-1]] += m
+            me[ru[3I],   ru[3J]] += m
         end
     end
-end
-
-# Local positions of the three displacement components of node `I` within a cell's dof
-# vector, read from the SubDofHandler's own `dof_range(:u)` rather than assumed to sit at
-# `3I-2:3I`. That assumption holds only when `:u` is the first field; it silently writes
-# into the wrong dofs when the fields are added in another order, when the DofHandler
-# carries an extra field, or for the single-field interleaved `:u` as `ip^5` layout.
-@inline function _u_dofs(ru, ncomp::Int, I::Int)
-    o = ncomp * (I - 1)
-    (ru[o+1], ru[o+2], ru[o+3])
-end
-
-# Components per node in the `:u` field: 3 for the two-field layout (`:u` as ip^3,
-# `:θ` as ip^2), 5 for the single-field interleaved one.
-@inline function _u_ncomp(ru, n_base::Int)
-    ncomp, r = divrem(length(ru), n_base)
-    (r == 0 && ncomp in (3, 5)) || throw(ArgumentError(
-        ":u carries $(length(ru)) dofs over $n_base base functions; expected 3 per node " *
-        "(two-field `:u` as ip^3) or 5 (single-field interleaved `:u` as ip^5)"))
-    ncomp
 end
 
 # ∂ξ/∂t for the mapping t → 2D cell reference coord along facet `f`, where t is the
@@ -813,9 +812,8 @@ Assemble external traction into force vector f for embedded shell elements (2D m
 Uses a `FacetQuadratureRule` and computes the edge length element directly from 3D node positions,
 bypassing the sdim mismatch that prevents standard `FacetValues` from working on embedded meshes.
 Works for RefQuadrilateral and RefTriangle of any interpolation order.
-The `:u` dofs are located through each cell's SubDofHandler `dof_range`, so the two-field
-(`:u` as ip³, `:θ` as ip²) layout, the single-field interleaved (`:u` as ip⁵) one, any field
-order and any additional fields are all handled.
+The `:u` dofs (`ip^3`) are located through each cell's SubDofHandler `dof_range`, so any
+field order and any additional fields are handled.
 """
 function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadratureRule, traction)
     t_func = traction isa Function ? traction : (_ -> Vec{3}(traction))
@@ -825,7 +823,6 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
         cd    = celldofs(fc)
         sdh   = dh.subdofhandlers[dh.cell_to_subdofhandler[Ferrite.cellid(fc)]]
         ru    = Ferrite.dof_range(sdh, :u)
-        ncomp = _u_ncomp(ru, n_base)
         resize!(fe, length(cd)); fill!(fe, 0.0)
         x        = getcoordinates(fc)
         facet_nr = fc.current_facet_id
@@ -843,9 +840,7 @@ function assemble_traction!(f, dh, facetset, ip::Interpolation, fqr::FacetQuadra
             t  = t_func(xp)
             for I in 1:n_base
                 N   = Ferrite.reference_shape_value(ip, ξ, I)
-                Ndg = N * dΓ
-                d1, d2, d3 = _u_dofs(ru, ncomp, I)
-                fe[d1] += Ndg * t[1]; fe[d2] += Ndg * t[2]; fe[d3] += Ndg * t[3]
+                @views fe[ru[3I-2:3I]] .+= (N * dΓ) * t
             end
         end
         f[cd] .+= fe
@@ -861,12 +856,13 @@ Follower pressure residual for embedded shell elements.
 """
 function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
         n_w = cross(a₁, a₂)
         for I in 1:n_nodes
-            @views re[5I-4:5I-2] .+= p * scv.N[I, qp] * n_w * w
+            @views re[ru[3I-2:3I]] .+= p * scv.N[I, qp] * n_w * w
         end
     end
 end
@@ -891,6 +887,7 @@ K_{IJ} = p N_I w \\bigl[\\partial_1 N_J (-\\mathrm{spin}(a_2)) + \\partial_2 N_J
 """
 function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, p) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
+    ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
         a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
@@ -901,7 +898,7 @@ function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVecto
             NI = scv.N[I, qp]
             for J in 1:n_nodes
                 ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
-                @views ke[5I-4:5I-2, 5J-4:5J-2] .+= (pw * NI) * (∂NJ1 * neg_sp_a₂ + ∂NJ2 * sp_a₁)
+                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= (pw * NI) * (∂NJ1 * neg_sp_a₂ + ∂NJ2 * sp_a₁)
             end
         end
     end
@@ -911,9 +908,8 @@ end
     apply_pointload!(f, dh, nodeset_name, load)
 
 Add a concentrated force `load::Vec{3}` to the displacement DOFs of all nodes in `nodeset_name`.
-The `:u` dofs are located through the SubDofHandler's `dof_range`, so the two-field
-(`:u` as ip³, `:θ` as ip²) layout, the single-field interleaved (`:u` as ip⁵) one, any
-field order and any additional fields are all handled.
+The `:u` dofs (`ip^3`) are located through the SubDofHandler's `dof_range`, so any field
+order and any additional fields are handled.
 """
 function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
     node_set  = getnodeset(dh.grid, nodeset_name)
@@ -924,12 +920,10 @@ function apply_pointload!(f, dh, nodeset_name::String, load::Vec{3})
         cd    = celldofs(cell)
         sdh   = dh.subdofhandlers[dh.cell_to_subdofhandler[Ferrite.cellid(cell)]]
         ru    = Ferrite.dof_range(sdh, :u)
-        ncomp = _u_ncomp(ru, length(nodes))
         for (I, gid) in enumerate(nodes)
             if gid ∈ node_set && gid ∉ processed
                 push!(processed, gid)
-                d1, d2, d3 = _u_dofs(ru, ncomp, I)
-                f[cd[d1]] += load[1]; f[cd[d2]] += load[2]; f[cd[d3]] += load[3]
+                @views f[cd[ru[3I-2:3I]]] .+= load
             end
         end
     end

@@ -133,24 +133,25 @@ end
 
 
 # default is no tying shear strain
-@inline tying_shear_strains(::NoMITC, u_e) = nothing
+@inline tying_shear_strains(::NoMITC, u_e, ru = nothing, rθ = nothing) = nothing
 
 """
-    tying_shear_strains(mitc::MITC{N,M,T}, u_e)
+    tying_shear_strains(mitc::MITC{N,M,T}, u_e, ru = 1:3N, rθ = 3N+1:5N)
 
 Compute the covariant shear strain ``\\gamma_k = a_{\\alpha_k} \\cdot d`` of every tying entry `k`
-from the current DOF vector `u_e` (5 DOFs/node: [``u_1``,``u_2``,``u_3``,``\\varphi_1``,``\\varphi_2``,``\\cdots``]).
+from the element vector `u_e`, with the displacement and rotation dofs at the local positions
+`ru` and `rθ` (`scv.ru`, `scv.rθ`; the defaults are the two-field layout `1:3N`, `3N+1:5N`).
 Returns an NTuple of length `M`, ForwardDiff-safe. Each value subtracts its own reference
 ``A_{\\alpha_k}\\cdot G_3``, so the tying strains vanish in the reference configuration.
 Call once before the quadrature-point loop and pass to `shear_strains`.
 """
-function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
+function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}, ru = 1:3N, rθ = 3N+1:5N) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
     ntuple(Val(M)) do k
         Δa = zero(Vec{3,T}); d_k = zero(Vec{3,T})
         for I in 1:N
-            u_I = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
+            u_I = Vec{3}(@view u_e[ru[3I-2:3I]])
             Δa += u_I * mitc.dN_tie[I,k]
-            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            φ₁ = u_e[rθ[2I-1]]; φ₂ = u_e[rθ[2I]]
             cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
             G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
             d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))

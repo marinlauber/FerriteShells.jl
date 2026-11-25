@@ -43,13 +43,13 @@ for cell in CellIterator(dh)
     u0 = zeros(5n_base)
     membrane_tangent_RM!(ke, scv, u0, mat)
     bending_tangent_RM!(ke, scv, u0, mat)
-    sd = shelldofs(cell)
+    sd = celldofs(cell)
     assemble!(asmb, sd, ke, re)
     for qp in 1:getnquadpoints(scv)
         ξ  = scv.qr.points[qp]; dΩ = scv.detJdV[qp]
         for I in 1:n_base
             NI = Ferrite.reference_shape_value(ip, ξ, I)
-            @views fe[5I-4:5I-2] .+= NI * q_sl * dΩ
+            @views fe[3I-2:3I] .+= NI * q_sl * dΩ
         end
     end
     @views f[sd] .+= fe
