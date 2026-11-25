@@ -18,11 +18,16 @@ include("material.jl")
 export LinearElastic, Hyperelastic
 export membrane_stress_and_tangent, bending_and_shear_stiffness
 
+include("kinematics.jl")
+
+include("membrane.jl")
+export membrane_residuals!, membrane_tangent!
+
 include("kirchhofflove.jl")
-export membrane_residuals_KL!, membrane_tangent_KL!, bending_residuals_KL!, bending_tangent_KL!
+export bending_residuals_KL!, bending_tangent_KL!
 
 include("reissnermindlin.jl")
-export membrane_residuals_RM!, membrane_tangent_RM!, bending_residuals_RM!, bending_tangent_RM!
+export bending_residuals_RM!, bending_tangent_RM!
 export residuals_RM!, tangent_RM!, residuals_and_tangent_RM!
 export residuals_RM_FD!, tangent_RM_FD!
 

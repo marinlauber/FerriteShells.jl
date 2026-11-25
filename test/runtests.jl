@@ -64,10 +64,10 @@ end
 
 # KL membrane helpers
 function kl_residual(scv, u, mat)
-    re = zeros(length(u)); membrane_residuals_KL!(re, scv, u, mat); re
+    re = zeros(length(u)); membrane_residuals!(re, scv, u, mat); re
 end
 function kl_tangent(scv, u, mat)
-    ke = zeros(length(u), length(u)); membrane_tangent_KL!(ke, scv, u, mat); ke
+    ke = zeros(length(u), length(u)); membrane_tangent!(ke, scv, u, mat); ke
 end
 function kl_fd_tangent(scv, u, mat; ε=1e-5)
     n = length(u); Kfd = zeros(n, n)
@@ -187,7 +187,7 @@ function assemble_kl_residual!(r, dh, scv, u, mat)
     n = ndofs_per_cell(dh); re = zeros(n)
     for cell in CellIterator(dh)
         fill!(re, 0.0); reinit!(scv, cell)
-        membrane_residuals_KL!(re, scv, u[celldofs(cell)], mat)
+        membrane_residuals!(re, scv, u[celldofs(cell)], mat)
         r[celldofs(cell)] .+= re
     end
 end
@@ -198,8 +198,8 @@ function assemble_kl_tangent!(K, r, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0); reinit!(scv, cell)
         u_e = u[celldofs(cell)]
-        membrane_tangent_KL!(ke, scv, u_e, mat)
-        membrane_residuals_KL!(re, scv, u_e, mat)
+        membrane_tangent!(ke, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         assemble!(asm, celldofs(cell), ke, re)
     end
 end

@@ -90,7 +90,7 @@ function assemble_pressure!(re, scv::ShellCellValues, u_e::AbstractVector{T}, p)
     ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
-        a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
+        a₁, a₂ = covariant_basis(scv, qp, u_e)
         n_w = cross(a₁, a₂)
         for I in 1:n_nodes
             @views re[ru[3I-2:3I]] .+= p * scv.N[I, qp] * n_w * w
@@ -121,7 +121,7 @@ function assemble_pressure_tangent!(ke, scv::ShellCellValues, u_e::AbstractVecto
     ru      = scv.ru
     for qp in 1:getnquadpoints(scv)
         w = scv.qr.weights[qp]
-        a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
+        a₁, a₂ = covariant_basis(scv, qp, u_e)
         neg_sp_a₂ = -spin(a₂)   # columns: eₗ × a₂
         sp_a₁     =  spin(a₁)   # columns: a₁ × eₗ
         pw = p * w

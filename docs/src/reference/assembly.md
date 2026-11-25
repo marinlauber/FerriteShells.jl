@@ -9,11 +9,16 @@ DocTestSetup = :(using FerriteShells)
 mass_matrix!
 ```
 
+## Membrane functions (Kirchhoff-Love and Reissner-Mindlin)
+
+```@docs
+membrane_residuals!
+membrane_tangent!
+```
+
 ## Kirchhoff-Love functions
 
 ```@docs
-membrane_residuals_KL!
-membrane_tangent_KL!
 bending_residuals_KL!
 bending_tangent_KL!
 bending_energy_KL
@@ -25,9 +30,7 @@ bending_energy_KL
 residuals_and_tangent_RM!
 residuals_RM!
 tangent_RM!
-membrane_residuals_RM!
 bending_residuals_RM!
-membrane_tangent_RM!
 bending_tangent_RM!
 residuals_RM_FD!
 tangent_RM_FD!

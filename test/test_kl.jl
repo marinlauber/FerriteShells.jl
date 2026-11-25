@@ -33,7 +33,7 @@ end
 
     # rigid-body rotation: zero membrane residual
     u_rbr = vcat([(R(-π/2)⋅xᵢ) - xᵢ for xᵢ in X_Q4_UNIT]...)
-    re_rbr = zeros(n_dof); membrane_residuals_KL!(re_rbr, scv, u_rbr, mat)
+    re_rbr = zeros(n_dof); membrane_residuals!(re_rbr, scv, u_rbr, mat)
     @test norm(re_rbr) ≤ 10eps(Float64)
 
     # tangent symmetry at zero displacement (geometric stiffness vanishes)
@@ -306,10 +306,10 @@ end
     end
 
     # combined membrane + bending: symmetry and FD consistency
-    combined_re(u) = (re = zeros(length(u)); membrane_residuals_KL!(re, scv, u, mat); bending_residuals_KL!(re, scv, u, mat); re)
+    combined_re(u) = (re = zeros(length(u)); membrane_residuals!(re, scv, u, mat); bending_residuals_KL!(re, scv, u, mat); re)
     @test norm(combined_re(zeros(n_dof))) ≤ 1e-14
     ke_comb = zeros(n_dof, n_dof)
-    membrane_tangent_KL!(ke_comb, scv, u_curve, mat); bending_tangent_KL!(ke_comb, scv, u_curve, mat)
+    membrane_tangent!(ke_comb, scv, u_curve, mat); bending_tangent_KL!(ke_comb, scv, u_curve, mat)
     @test norm(ke_comb .- ke_comb') / norm(ke_comb) ≤ 1e-10
     ke_comb_fd = zeros(n_dof, n_dof)
     for j in 1:n_dof

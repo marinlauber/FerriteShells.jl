@@ -70,7 +70,7 @@ end
         end
         re_ex  = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
         re_fd  = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
-        re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
+        re_mem = zeros(n_dof); membrane_residuals!(re_mem, scv_mitc, u_pert, mat)
         @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
         ke_ex  = zeros(n_dof, n_dof); bending_tangent_RM!(ke_ex, scv_mitc, u_pert, mat)
         ke_jac = ForwardDiff.jacobian(u -> begin
@@ -174,7 +174,7 @@ end
             u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(n_dof)
-        membrane_residuals_RM!(re, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
         @test norm(re) < 1e-8
     end

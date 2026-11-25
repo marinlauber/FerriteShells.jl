@@ -15,9 +15,9 @@ function assemble_global_shell!(K, g, u, dh, scv, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
         u_e = u[celldofs(cell)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
+        membrane_tangent!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)
-        membrane_residuals_RM!(re, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
         assemble!(asm, celldofs(cell), ke, re)
     end

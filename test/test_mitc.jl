@@ -72,14 +72,14 @@ end
     end
     re_ex_nm = zeros(n_dof); bending_residuals_RM!(re_ex_nm, scv_nomitc, u_pert, mat)
     re_fd_nm = zeros(n_dof); residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
-    re_mem_nm = zeros(n_dof); membrane_residuals_RM!(re_mem_nm, scv_nomitc, u_pert, mat)
+    re_mem_nm = zeros(n_dof); membrane_residuals!(re_mem_nm, scv_nomitc, u_pert, mat)
     @test norm(re_ex_nm .- (re_fd_nm .- re_mem_nm)) / norm(re_ex_nm) < 1e-10
 
     # MITC explicit residual agrees with MITC ForwardDiff gradient to within the
     # approximation level (~0.1%); difference is the MITC-δγ consistency error.
     re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
     re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
-    re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
+    re_mem = zeros(n_dof); membrane_residuals!(re_mem, scv_mitc, u_pert, mat)
     @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-2
 
     # Zero state.
@@ -92,11 +92,11 @@ end
     for I in 1:9; u_large[iφ(u_large,I,1)] = α*0.3; u_large[iφ(u_large,I,2)] = α*0.7; end
     re_ex_lg_nm = zeros(n_dof); bending_residuals_RM!(re_ex_lg_nm, scv_nomitc, u_large, mat)
     re_fd_lg_nm = zeros(n_dof); residuals_RM_FD!(re_fd_lg_nm, scv_nomitc, u_large, mat)
-    re_mem_lg_nm = zeros(n_dof); membrane_residuals_RM!(re_mem_lg_nm, scv_nomitc, u_large, mat)
+    re_mem_lg_nm = zeros(n_dof); membrane_residuals!(re_mem_lg_nm, scv_nomitc, u_large, mat)
     @test norm(re_ex_lg_nm .- (re_fd_lg_nm .- re_mem_lg_nm)) / norm(re_ex_lg_nm) < 1e-10
     re_ex_lg = zeros(n_dof); bending_residuals_RM!(re_ex_lg, scv_mitc, u_large, mat)
     re_fd_lg = zeros(n_dof); residuals_RM_FD!(re_fd_lg, scv_mitc, u_large, mat)
-    re_mem_lg = zeros(n_dof); membrane_residuals_RM!(re_mem_lg, scv_mitc, u_large, mat)
+    re_mem_lg = zeros(n_dof); membrane_residuals!(re_mem_lg, scv_mitc, u_large, mat)
     @test norm(re_ex_lg .- (re_fd_lg .- re_mem_lg)) / norm(re_ex_lg) < 1e-10
 
     # 2b. Consistent MITC9 tangent: the explicit MITC residual is the exact gradient of
@@ -275,12 +275,12 @@ end
     end
     re_ex_nm = zeros(n_dof); bending_residuals_RM!(re_ex_nm, scv_nomitc, u_pert, mat)
     re_fd_nm = zeros(n_dof); residuals_RM_FD!(re_fd_nm, scv_nomitc, u_pert, mat)
-    re_mem_nm = zeros(n_dof); membrane_residuals_RM!(re_mem_nm, scv_nomitc, u_pert, mat)
+    re_mem_nm = zeros(n_dof); membrane_residuals!(re_mem_nm, scv_nomitc, u_pert, mat)
     @test norm(re_ex_nm .- (re_fd_nm .- re_mem_nm)) / norm(re_ex_nm) < 1e-10
 
     re_ex = zeros(n_dof); bending_residuals_RM!(re_ex, scv_mitc, u_pert, mat)
     re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv_mitc, u_pert, mat)
-    re_mem = zeros(n_dof); membrane_residuals_RM!(re_mem, scv_mitc, u_pert, mat)
+    re_mem = zeros(n_dof); membrane_residuals!(re_mem, scv_mitc, u_pert, mat)
     @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-2
 
     # Zero state: residual is exactly zero.
@@ -554,7 +554,7 @@ end
     reinit!(scv, first(CellIterator(dh)), nf)
     re_ex  = zeros(20); bending_residuals_RM!(re_ex, scv, u_pert, mat)
     re_fd  = zeros(20); residuals_RM_FD!(re_fd, scv, u_pert, mat)
-    re_mem = zeros(20); membrane_residuals_RM!(re_mem, scv, u_pert, mat)
+    re_mem = zeros(20); membrane_residuals!(re_mem, scv, u_pert, mat)
     @test norm(re_ex .- (re_fd .- re_mem)) / norm(re_ex) < 1e-10
     ke_ex = zeros(20, 20); bending_tangent_RM!(ke_ex, scv, u_pert, mat)
     ke_jac = ForwardDiff.jacobian(u -> begin

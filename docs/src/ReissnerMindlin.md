@@ -106,7 +106,7 @@ with ``\mathbb{C}^{\alpha\beta\gamma\delta}`` the (thickness-independent) contra
 
 ### 2.1 Residual and first variation
 
-The residual is the first variation of ``\mathcal{W}_\text{int}``. The membrane part is identical to the Kirchhoff-Love case (``\delta\mathcal{W}_\text{mem}=\int_\omega N^{\alpha\beta}\,\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\,\sqrt{A}\,\mathrm{d}y``, giving [`membrane_residuals_RM!`](@ref)); here we derive the bending and shear parts explicitly. Their first variation is
+The residual is the first variation of ``\mathcal{W}_\text{int}``. The membrane part is identical to the Kirchhoff-Love case (``\delta\mathcal{W}_\text{mem}=\int_\omega N^{\alpha\beta}\,\delta\mathbf{a}_\alpha\cdot\mathbf{a}_\beta\,\sqrt{A}\,\mathrm{d}y``, giving [`membrane_residuals!`](@ref)); here we derive the bending and shear parts explicitly. Their first variation is
 ```math
 \delta\mathcal{W}_\text{bs}=\int_\omega \big(M^{\alpha\beta}\,\delta\kappa_{\alpha\beta} + Q^\alpha\,\delta\gamma_\alpha\big)\sqrt{A}\,\mathrm{d}y,\qquad M^{\alpha\beta}=D^{\alpha\beta\gamma\delta}\kappa_{\gamma\delta},\;\; Q^\alpha=\mathbb{C}_s^{\alpha\beta}\gamma_\beta,\;\; \mathbb{C}_s^{\alpha\beta}=\kappa_s G t\,A^{\alpha\beta}.
 ```
@@ -132,7 +132,7 @@ r_{Il}^\varphi=\int_\omega \mathbf{F}_I\cdot\mathrm{dd}_{Il}\,\sqrt{A}\,\mathrm{
 ```
 The three parts of ``\mathbf{F}_I`` are the bending moment acting through the tangent-plane rotation (``\mathbf{S}^\alpha``) and the shear acting through the director rotation (``Q^\alpha\mathbf{a}_\alpha``); both are contracted with the same Rodrigues Jacobian that maps ``\delta\boldsymbol{\varphi}_I\mapsto\delta\mathbf{d}_I``.
 
-In FerriteShells the explicit forms are implemented in [`membrane_residuals_RM!`](@ref) and [`bending_residuals_RM!`](@ref). ForwardDiff-based residuals are also available as [`residuals_RM_FD!`](@ref) for both membrane, bending and shear contributions.
+In FerriteShells the explicit forms are implemented in [`membrane_residuals!`](@ref) and [`bending_residuals_RM!`](@ref). ForwardDiff-based residuals are also available as [`residuals_RM_FD!`](@ref) for both membrane, bending and shear contributions.
 
 !!! note
     The advantage of the ForwardDiff-based residuals and tangents is that they are exact gradient and hessian of the internal energy, the explicit version should be as well but any small bug might break the energy consistency and lead to non-convergence of Newton-Raphson procedures. The explicit version is faster, but the ForwardDiff version is more robust, so it can be used as a reference to test the explicit version if you suspect an error in the explicit functions.
@@ -154,7 +154,7 @@ This produces four blocks per node pair ``(I,J)``.
 ```math
 \mathbf{K}^{uu}_{IJ}=\partial_\alpha N_I\,\partial_\gamma N_J\,D^{\alpha\beta\gamma\delta}\,\mathbf{d}_{,\beta}\otimes\mathbf{d}_{,\delta}+\big(\partial_\alpha N_I\,\mathbb{C}_s^{\alpha\beta}\,\partial_\beta N_J\big)\,\mathbf{d}\otimes\mathbf{d}.
 ```
-The first factor is the `frame_stiffness(D, d₁, d₂)` tensor ``\mathbf{L}_{\alpha\gamma}=D^{\alpha\beta\gamma\delta}\mathbf{d}_{,\beta}\otimes\mathbf{d}_{,\delta}``.
+The first factor is the `stiffness_block(D, d₁, d₂)` tensor ``\mathbf{L}_{\alpha\gamma}=D^{\alpha\beta\gamma\delta}\mathbf{d}_{,\beta}\otimes\mathbf{d}_{,\delta}``.
 
 **uφ block** (3×2). Column ``l`` couples ``\delta\mathbf{u}_I`` with ``\delta\varphi_{Jl}``. Writing ``c_\beta=\mathbf{a}_\beta\cdot\mathrm{dd}_{Jl}`` for the director rotation sensed by the current base vectors, the ``J``-side increments are ``\delta\kappa_{\gamma\delta}=\tfrac12(\partial_\gamma N_J c_\delta+\partial_\delta N_J c_\gamma)`` and ``\delta\gamma_\beta=N_J c_\beta``, hence ``\delta M^{\alpha\beta}=D^{\alpha\beta\gamma\delta}\delta\kappa_{\gamma\delta}`` and ``\delta Q^\alpha=\mathbb{C}_s^{\alpha\beta}\delta\gamma_\beta``. The block sums a material and a geometric part:
 ```math
@@ -174,7 +174,7 @@ K^{\varphi\varphi,\text{geo}}_{Ik,Il}=\mathbf{F}_I\cdot\frac{\partial^2\mathbf{d
 ```
 with the **same** traction ``\mathbf{F}_I`` as in the residual — the initial-stress (geometric) stiffness of the director.
 
-The explicit implementation is in [`membrane_tangent_RM!`](@ref) and [`bending_tangent_RM!`](@ref); ForwardDiff-based variants are available as [`tangent_RM_FD!`](@ref). The FD tangent tests (`rm_fd_tangent`) check that the explicit blocks above reproduce `ForwardDiff.hessian` of `energy_RM`.
+The explicit implementation is in [`membrane_tangent!`](@ref) and [`bending_tangent_RM!`](@ref); ForwardDiff-based variants are available as [`tangent_RM_FD!`](@ref). The FD tangent tests (`rm_fd_tangent`) check that the explicit blocks above reproduce `ForwardDiff.hessian` of `energy_RM`.
 
 !!! note
     With a MITC shear treatment the shear strains ``\gamma_\alpha`` are replaced by their tying-point interpolation, so the shear sensitivities ``\partial\gamma_\alpha/\partial u`` in the uu/uφ/φφ blocks use the MITC B-operators (see [`bending_tangent_RM!`](@ref)) instead of the QP-direct ``\partial_\alpha N\,\mathbf{d}`` and ``N\,\mathbf{a}_\alpha\cdot\mathrm{dd}`` forms above. The bending (``\kappa``) terms are unchanged.

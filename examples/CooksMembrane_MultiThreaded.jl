@@ -15,9 +15,9 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell) # prepares reference geometry
         u_e = u[celldofs(cell)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
+        membrane_tangent!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)
-        membrane_residuals_RM!(re, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
         assemble!(assembler, celldofs(cell), ke, re)
     end
@@ -47,8 +47,8 @@ function assemble_cell!(scratch::ScratchData, u, material, cellidx)
     reinit!(scv, cell_cache)
     fill!(ke, 0.0); fill!(fe, 0.0)
     u_e = u[celldofs(cell_cache)]
-    membrane_tangent_RM!(ke, scv, u_e, material); bending_tangent_RM!(ke, scv, u_e, material)
-    membrane_residuals_RM!(fe, scv, u_e, material); bending_residuals_RM!(fe, scv, u_e, material)
+    membrane_tangent!(ke, scv, u_e, material); bending_tangent_RM!(ke, scv, u_e, material)
+    membrane_residuals!(fe, scv, u_e, material); bending_residuals_RM!(fe, scv, u_e, material)
     assemble!(assembler, celldofs(cell_cache), ke, fe)
 end
 

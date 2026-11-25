@@ -10,9 +10,9 @@ function assemble_shell!(K, r, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = celldofs(cell)
         u_e = u[sd]
-        membrane_residuals_RM!(re, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
-        membrane_tangent_RM!(ke, scv, u_e, mat)
+        membrane_tangent!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)
         assemble!(asm, sd, ke, re)
     end

@@ -14,18 +14,18 @@ end
 
 # Per-QP helper loops (function barrier so we measure the loop body, not the
 # dynamic call boundary). director_field/covariant_basis must be allocation-free.
-function loop_director(scv, u_e, n_nodes, n_qp)
+function loop_director(scv, u_e, n_qp)
     s = zero(Vec{3,Float64})
     for qp in 1:n_qp
-        d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
+        d, d₁, d₂ = director_field(scv, qp, u_e)
         s += d + d₁ + d₂
     end
     s
 end
-function loop_covariant(scv, u_e, n_nodes, n_qp)
+function loop_covariant(scv, u_e, n_qp)
     s = zero(Vec{3,Float64})
     for qp in 1:n_qp
-        a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
+        a₁, a₂ = covariant_basis(scv, qp, u_e)
         s += a₁ + a₂
     end
     s
@@ -53,15 +53,14 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
         # update to match first cell
         reinit!(scv_mitc, first(CellIterator(dh)))
         n_e     = ndofs_per_cell(dh)
-        n_nodes = getnbasefunctions(scv_mitc.ip_shape)
         n_qp    = getnquadpoints(scv_mitc)
         u_e     = 0.001 .* randn(n_e)
         ke      = zeros(n_e, n_e)
         re      = zeros(n_e)
         f_ext   = zeros(ndofs(dh))
         # Per-QP geometry helpers: must allocate nothing.
-        @test alloc_of(() -> loop_director(scv_mitc, u_e, n_nodes, n_qp))  == 0
-        @test alloc_of(() -> loop_covariant(scv_mitc, u_e, n_nodes, n_qp)) == 0
+        @test alloc_of(() -> loop_director(scv_mitc, u_e, n_qp))  == 0
+        @test alloc_of(() -> loop_covariant(scv_mitc, u_e, n_qp)) == 0
         # Follower-pressure kernels
         @test alloc_of(() -> assemble_pressure!(re, scv_mitc, u_e, 1.0))         == 0
         @test alloc_of(() -> assemble_pressure_tangent!(ke, scv_mitc, u_e, 1.0)) == 0
@@ -71,16 +70,16 @@ elements = ((Quadrilateral, RefQuadrilateral, 1, MITC4),
         # mass matrix, although it's usually used once...
         @test alloc_of(() -> mass_matrix!(ke, scv_mitc, 1.0, mat)) == 0
         # Residual/tangent kernels
-        @test alloc_of(() -> membrane_residuals_RM!(re, scv_mitc, u_e, mat)) == 0
+        @test alloc_of(() -> membrane_residuals!(re, scv_mitc, u_e, mat)) == 0
         @test alloc_of(() -> bending_residuals_RM!(re, scv_mitc, u_e, mat))  == 0
-        @test alloc_of(() -> membrane_tangent_RM!(ke, scv_mitc, u_e, mat))   == 0
+        @test alloc_of(() -> membrane_tangent!(ke, scv_mitc, u_e, mat))   == 0
         @test alloc_of(() -> bending_tangent_RM!(ke, scv_mitc, u_e, mat))    == 0
         # non MITC case
         @test alloc_of(() -> bending_tangent_RM!(ke, scv, u_e, mat)) == 0
         # A full per-cell assembly sweep (all four kernels) — also allocation-free.
         full() = (fill!(ke, 0.0); fill!(re, 0.0);
-                  membrane_residuals_RM!(re, scv_mitc, u_e, mat); bending_residuals_RM!(re, scv_mitc, u_e, mat);
-                  membrane_tangent_RM!(ke, scv_mitc, u_e, mat);   bending_tangent_RM!(ke, scv_mitc, u_e, mat))
+                  membrane_residuals!(re, scv_mitc, u_e, mat); bending_residuals_RM!(re, scv_mitc, u_e, mat);
+                  membrane_tangent!(ke, scv_mitc, u_e, mat);   bending_tangent_RM!(ke, scv_mitc, u_e, mat))
         @test alloc_of(full) == 0
         # fused kernels, with and without MITC
         for sv in (scv_mitc, scv)

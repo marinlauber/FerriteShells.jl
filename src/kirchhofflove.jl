@@ -1,79 +1,10 @@
-# Kirchhoff-Love assembly routines
-
-"""
-    membrane_residuals_KL!(re, scv, u_e, mat)
-
-Kirchhoff–Love membrane residual. `u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
-"""
-function membrane_residuals_KL!(re, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    ru      = scv.ru
-    for qp in 1:getnquadpoints(scv)
-        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-        for i in 1:n_nodes
-            ui = Vec{3}(@view u_e[ru[3i-2:3i]])
-            Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
-        end
-        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
-        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        N, _ = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], scv.G₃[qp])
-        dΩ = scv.detJdV[qp]
-        for I in 1:n_nodes
-            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
-            v = ∂NI1 * (N[1,1]*a₁ + N[1,2]*a₂) +
-                ∂NI2 * (N[2,1]*a₁ + N[2,2]*a₂)
-            @views re[ru[3I-2:3I]] .+= v * dΩ
-        end
-    end
-end
-
-"""
-    membrane_tangent_KL!(ke, scv, u_e, mat)
-
-Kirchhoff–Love membrane tangent. `u_e = u[celldofs(cell)]`; its displacement dofs are read at `scv.ru`.
-"""
-function membrane_tangent_KL!(ke, scv::ShellCellValues, u_e::AbstractVector{T}, mat) where T
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    ru      = scv.ru
-    for qp in 1:getnquadpoints(scv)
-        Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-        for i in 1:n_nodes
-            ui = Vec{3}(@view u_e[ru[3i-2:3i]])
-            Δa₁ += ui * scv.dNdξ[i, qp][1]; Δa₂ += ui * scv.dNdξ[i, qp][2]
-        end
-        a₁ = scv.A₁[qp] + Δa₁; a₂ = scv.A₂[qp] + Δa₂
-        c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        N, C = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp],
-                   scv.A₁[qp], scv.A₂[qp], scv.G₃[qp])
-        dΩ = scv.detJdV[qp]
-        for I in 1:n_nodes
-            ∂NI1, ∂NI2 = scv.dNdξ[I, qp]
-            for J in 1:n_nodes
-                ∂NJ1, ∂NJ2 = scv.dNdξ[J, qp]
-                geo_scalar = ∂NI1*(N[1,1]*∂NJ1 + N[1,2]*∂NJ2) +
-                             ∂NI2*(N[2,1]*∂NJ1 + N[2,2]*∂NJ2)
-                Kgeo = geo_scalar * one(SymmetricTensor{2,3})
-                H1 = SymmetricTensor{2,2}((∂NJ1, 0.5∂NJ2, 0.0))
-                H2 = SymmetricTensor{2,2}((0.0, 0.5∂NJ1, ∂NJ2))
-                D1 = C ⊡ H1
-                D2 = C ⊡ H2
-                Kmat = zero(Tensor{2,3})
-                for (α,∂NIα) in enumerate((∂NI1, ∂NI2)), (β,aβ) in enumerate((a₁, a₂))
-                    v = D1[α,β]*a₁ + D2[α,β]*a₂
-                    Kmat += ∂NIα * (aβ ⊗ v)
-                end
-                @views ke[ru[3I-2:3I], ru[3J-2:3J]] .+= (Kgeo + Kmat) * dΩ
-            end
-        end
-    end
-end
-
+# Kirchhoff-Love bending; the membrane part is shared with RM (membrane.jl).
 
 # Per-QP bending energy for KL, dispatched on material type.
-# For LinearElastic: ½ κ:D:κ  (D evaluated at reference metric — safe, A_metric is plain Float64).
+# LinearElastic: ½ κ:D:κ, with D from the reference metric only (independent of u).
 @inline function bending_kl_qp_energy(mat::LinearElastic, c_ms, κ, A_metric, A₁, A₂, G₃)
-    D, _ = bending_and_shear_stiffness(mat, c_ms, A_metric)
+    _, C = membrane_stress_and_tangent(mat, A_metric, A_metric)
+    D = bending_stiffness(mat, C)
     0.5 * (κ ⊡ D ⊡ κ)
 end
 
@@ -81,8 +12,7 @@ end
 # Subtracts midsurface term to isolate the bending contribution (KL has no shear).
 @inline function bending_kl_qp_energy(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
                                        κ, A_metric, A₁, A₂, G₃) where T
-    det_A = det(A_metric)
-    Jinv  = inv(J_ref(A₁, A₂, G₃))
+    det_A, Jinv = reference_frame(A_metric, A₁, A₂, G₃)
     ξ3s, w3s = gauss3_thickness(mat.thickness)
     W_ms = W_phys(mat, c_ms, det_A, Jinv)
     W = zero(T)
@@ -90,6 +20,17 @@ end
         W += W_phys(mat, c_ms + 2*ξ3*κ, det_A, Jinv) * w3
     end
     return W - mat.thickness * W_ms
+end
+
+# Deformed second covariant derivatives (a₁₁, a₁₂, a₂₂) at qp; displacement dofs at scv.ru.
+@inline function covariant_basis_derivatives(scv, qp, u_e::AbstractVector{T}) where T
+    ru = scv.ru
+    Δa₁₁ = zero(Vec{3,T}); Δa₁₂ = zero(Vec{3,T}); Δa₂₂ = zero(Vec{3,T})
+    for I in 1:getnbasefunctions(scv)
+        u_I = Vec{3}(@view u_e[ru[3I-2:3I]]); d2N = scv.d2Ndξ2[I, qp]
+        Δa₁₁ += u_I * d2N[1,1]; Δa₁₂ += u_I * d2N[1,2]; Δa₂₂ += u_I * d2N[2,2]
+    end
+    scv.A₁₁[qp] + Δa₁₁, scv.A₁₂[qp] + Δa₁₂, scv.A₂₂[qp] + Δa₂₂
 end
 
 """
@@ -107,25 +48,15 @@ Computes the Kirchhoff–Love bending energy through the curvature change ``\\ka
 To capture the full curvature change ``\\kappa``, quadratic elements are required (linear element only captures twist ``\\kappa_{12}``).
 """
 function bending_energy_KL(u_flat, scv::ShellCellValues, mat)
-    T       = eltype(u_flat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
-    ru      = scv.ru
-    u_e     = [Vec{3}(@view u_flat[ru[3i-2:3i]]) for i in 1:n_nodes]
-    W  = zero(T)
+    T = eltype(u_flat)
+    W = zero(T)
     for qp in 1:getnquadpoints(scv)
-        A₁q = scv.A₁[qp]; A₂q = scv.A₂[qp]
-        a₁  = A₁q; a₂  = A₂q
-        a₁₁ = Vec{3,T}(Tuple(scv.A₁₁[qp])); a₁₂ = Vec{3,T}(Tuple(scv.A₁₂[qp])); a₂₂ = Vec{3,T}(Tuple(scv.A₂₂[qp]))
-        for I in 1:n_nodes
-            UI  = u_e[I]; dN  = scv.dNdξ[I, qp]; d2N = scv.d2Ndξ2[I, qp]
-            a₁  += UI * dN[1];     a₂  += UI * dN[2]
-            a₁₁ += UI * d2N[1,1]; a₁₂ += UI * d2N[1,2]; a₂₂ += UI * d2N[2,2]
-        end
-        n_n  = (a₁ × a₂) / norm(a₁ × a₂)
-        b    = SymmetricTensor{2,2,T}((dot(a₁₁,n_n), dot(a₁₂,n_n), dot(a₂₂,n_n)))
-        κ    = b - scv.B[qp]
+        a₁, a₂        = covariant_basis(scv, qp, u_flat)
+        a₁₁, a₁₂, a₂₂ = covariant_basis_derivatives(scv, qp, u_flat)
+        n    = a₁ × a₂; n /= norm(n)
+        κ    = SymmetricTensor{2,2,T}((dot(a₁₁,n), dot(a₁₂,n), dot(a₂₂,n))) - scv.B[qp]
         c_ms = SymmetricTensor{2,2,T}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
-        W   += bending_kl_qp_energy(mat, c_ms, κ, scv.A_metric[qp], A₁q, A₂q, scv.G₃[qp]) * scv.detJdV[qp]
+        W   += bending_kl_qp_energy(mat, c_ms, κ, scv.A_metric[qp], scv.A₁[qp], scv.A₂[qp], scv.G₃[qp]) * scv.detJdV[qp]
     end
     return W
 end
