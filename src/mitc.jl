@@ -32,12 +32,6 @@ struct MITC{N,M,T<:AbstractFloat} <: AbstractMITC
     G₃_node :: Vector{Vec{3,T}}   # per-element-local-node frame (length N)
     T₁_node :: Vector{Vec{3,T}}
     T₂_node :: Vector{Vec{3,T}}
-    # Reusable scratch for bending_tangent_RM! (overwritten each call; not thread-safe).
-    a_tie_s :: Vector{Vec{3,T}}; d_tie_s :: Vector{Vec{3,T}}     # length M (tying points)
-    dd1_s   :: Vector{Vec{3,T}}; dd2_s   :: Vector{Vec{3,T}}     # length N (nodes), Rodrigues ∂d/∂φ
-    Bγ₁u_s  :: Vector{Vec{3,T}}; Bγ₂u_s  :: Vector{Vec{3,T}}     # length N
-    Bγ₁φ1_s :: Vector{T}; Bγ₁φ2_s :: Vector{T}
-    Bγ₂φ1_s :: Vector{T}; Bγ₂φ2_s :: Vector{T}
 end
 function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vector{Int},
                  h_tie_1::Matrix{T}, h_tie_2::Matrix{T}) where {N,T}
@@ -57,11 +51,6 @@ function MITC{N}(ip_shape::Interpolation, ξ_tie::Vector{Vec{2,T}}, α_tie::Vect
         N_tie, dN_tie, h_tie_1, h_tie_2, ξ_tie, α_tie,
         fill(zero(Vec{3,T}), M), fill(zero(Vec{3,T}), M),
         fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N), fill(zero(Vec{3,T}), N),
-        Vector{Vec{3,T}}(undef, M), Vector{Vec{3,T}}(undef, M),
-        Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
-        Vector{Vec{3,T}}(undef, N), Vector{Vec{3,T}}(undef, N),
-        Vector{T}(undef, N), Vector{T}(undef, N),
-        Vector{T}(undef, N), Vector{T}(undef, N),
     )
 end
 
@@ -106,11 +95,11 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
         mitc.T₂_node[I] = T₂_nodes[I]
     end
     # d₀_tie is left un-normalized — exactly the field `d_k` builds at u = 0 in
-    # `tying_shear_strains` below. Normalizing it here (the earlier behaviour) leaves a
+    # `shear_tying_state` below. Normalizing it here (the earlier behaviour) leaves a
     # reference shear γ_α(0) = (A_α·d₀)(1 − 1/‖d₀‖) at every tying point, nonzero whenever
     # the nodal frames are not all parallel, i.e. on any curved element driven with
-    # `NodeFrames`. This is the same rule `reference_director` follows for the QP-direct
-    # (NoMITC) path.
+    # `NodeFrames`. This is the same rule the QP-direct (NoMITC) reference shear `scv.γ₀`
+    # follows.
     for k in 1:M
         ξ_k = mitc.ξ_tie[k]; α = mitc.α_tie[k]
         # A_α from the *geometric* interpolation (n_geo coordinates) ...
@@ -120,7 +109,7 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
             A += x[i] * dN[α]
         end
         # ... d₀ from the *shape* interpolation, through the precomputed `N_tie`: the nodal
-        # frames are sized to `ip_shape` (N entries), and `tying_shear_strains` interpolates
+        # frames are sized to `ip_shape` (N entries), and `shear_tying_state` interpolates
         # the current director with the very same weights, so the two agree term by term.
         d₀ = zero(Vec{3,T})
         for I in 1:N
@@ -132,7 +121,25 @@ function reinit!(mitc::MITC{N,M,T}, ip_geo::Interpolation, x::AbstractVector{<:V
 end
 
 
-# default is no tying shear strain
+# Deformed tangent and director (a_k, d_k) at every MITC tying point, from the element
+# vector (displacement dofs at `ru`) and the nodal directors `dirs`; nothing without MITC.
+shear_tying_state(::NoMITC, u_e, ru, dirs) = nothing
+function shear_tying_state(mitc::MITC{N,M}, u_e::AbstractVector{T}, ru, dirs) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
+    ntuple(Val(M)) do k
+        Δa = zero(Vec{3,T}); d_k = zero(Vec{3,T})
+        @inbounds for I in 1:N
+            Δa  += Vec{3}(@view u_e[ru[3I-2:3I]]) * mitc.dN_tie[I,k]
+            d_k += mitc.N_tie[I,k] * dirs[I]
+        end
+        (mitc.A_tie[k] + Δa, d_k)
+    end
+end
+
+# Tying strains γ_k = a_k·d_k − A_k·d₀_k of a tying state; each vanishes in the reference.
+tying_strains(::NoMITC, ::Nothing) = nothing
+tying_strains(mitc::MITC{N,M}, tie) where {N,M} =
+    ntuple(k -> dot(tie[k][1], tie[k][2]) - dot(mitc.A_tie[k], mitc.d₀_tie[k]), Val(M))
+
 @inline tying_shear_strains(::NoMITC, u_e, ru = nothing, rθ = nothing) = nothing
 
 """
@@ -143,21 +150,11 @@ from the element vector `u_e`, with the displacement and rotation dofs at the lo
 `ru` and `rθ` (`scv.ru`, `scv.rθ`; the defaults are the two-field layout `1:3N`, `3N+1:5N`).
 Returns an NTuple of length `M`, ForwardDiff-safe. Each value subtracts its own reference
 ``A_{\\alpha_k}\\cdot G_3``, so the tying strains vanish in the reference configuration.
-Call once before the quadrature-point loop and pass to `shear_strains`.
+The kernels build the same values from the element's nodal directors (`element_tying_strains`).
 """
-function tying_shear_strains(mitc::MITC{N,M}, u_e::AbstractVector{T}, ru = 1:3N, rθ = 3N+1:5N) where {N,M,T} # do not put T in type params of MITC, breaks autodiff
-    ntuple(Val(M)) do k
-        Δa = zero(Vec{3,T}); d_k = zero(Vec{3,T})
-        for I in 1:N
-            u_I = Vec{3}(@view u_e[ru[3I-2:3I]])
-            Δa += u_I * mitc.dN_tie[I,k]
-            φ₁ = u_e[rθ[2I-1]]; φ₂ = u_e[rθ[2I]]
-            cosθ, sincθ = cos_sinc_sq(φ₁*φ₁ + φ₂*φ₂)
-            G₃_I = mitc.G₃_node[I]; T₁_I = mitc.T₁_node[I]; T₂_I = mitc.T₂_node[I]
-            d_k += mitc.N_tie[I,k] * (cosθ*G₃_I + sincθ*(φ₁*T₁_I + φ₂*T₂_I))
-        end
-        dot(mitc.A_tie[k] + Δa, d_k) - dot(mitc.A_tie[k], mitc.d₀_tie[k])
-    end
+function tying_shear_strains(mitc::MITC{N}, u_e, ru = 1:3N, rθ = 3N+1:5N) where N
+    dirs = nodal_directors(mitc.G₃_node, mitc.T₁_node, mitc.T₂_node, u_e, rθ, Val(N))
+    tying_strains(mitc, shear_tying_state(mitc, u_e, ru, dirs))
 end
 
 # default shear strains
@@ -168,7 +165,8 @@ end
 
 Return (`γ₁`, `γ₂`) at quadrature point `qp`.
 With MITC: weighted sum of the tying-entry values from `tying_shear_strains`.
-Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`.
+Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`, still to be measured from the reference
+shear `scv.γ₀[qp]` (the MITC tying strains already are).
 """
 @inline function shear_strains(a₁, a₂, d, qp::Int, γ_k, mitc::MITC{N,M,T}) where {N,M,T}
     γ₁ = zero(eltype(γ_k)); γ₂ = zero(eltype(γ_k))
@@ -178,16 +176,6 @@ Without MITC: direct `dot(a₁, d)`, `dot(a₂, d)`.
     end
     γ₁, γ₂
 end
-
-# Reference (u=0) shear to subtract so the strain is measured from the reference state.
-# NoMITC: QP-direct `dot(A_α, d₀)` (the raw `shear_strains` is not yet referenced).
-# MITC: the tying strains already subtract their own per-tying-point reference, so the
-# interpolated `shear_strains` is referenced — subtracting `dot(A_α, d₀)` again would
-# double-count. That extra term is zero on flat elements (A_α ⟂ d₀) but a spurious
-# reference shear on curved ones, which pre-stresses the reference and renders the
-# tangent indefinite. Dispatch to 0 for MITC.
-@inline reference_shear_offset(A₁, A₂, d₀, ::NoMITC) = dot(A₁, d₀), dot(A₂, d₀)
-@inline reference_shear_offset(A₁, A₂, d₀, ::MITC)    = 0.0, 0.0
 
 """
     tying_weights(qr, conds, basis)

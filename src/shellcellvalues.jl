@@ -56,7 +56,8 @@ struct ShellCellValues{QR, IPG, IPS, T<:AbstractFloat, M, F} <: AbstractCellValu
     T₁       :: Vector{Vec{3, T}}
     T₂       :: Vector{Vec{3, T}}
     B        :: Vector{SymmetricTensor{2, 2, T, 3}}
-    B₀       :: Vector{SymmetricTensor{2, 2, T, 3}}  # reference director-gradient curvature, see reference_director_curvature!
+    B₀       :: Vector{SymmetricTensor{2, 2, T, 3}}  # reference director-gradient curvature, see reference_director_measures!
+    γ₀       :: Vector{Vec{2, T}}  # reference transverse shear A_α·d₀ (zero with MITC), see reference_director_measures!
     G₃_elem  :: Vector{Vec{3, T}}   # per-node frame (length n_shape) — updated each reinit!
     T₁_elem  :: Vector{Vec{3, T}}
     T₂_elem  :: Vector{Vec{3, T}}
@@ -100,7 +101,7 @@ function ShellCellValues(qr::QuadratureRule, ip_geo::Interpolation, ip_shape::In
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(Vec{3, T}), n_qp),
         fill(zero(Vec{3, T}), n_qp), fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
-        fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp),
+        fill(zero(SymmetricTensor{2, 2, T, 3}), n_qp), fill(zero(Vec{2, T}), n_qp),
         fill(zero(Vec{3, T}), n_shape), fill(zero(Vec{3, T}), n_shape),
         fill(zero(Vec{3, T}), n_shape), m, frames, ru, rθ
     )
@@ -135,7 +136,7 @@ function Base.copy(scv::ShellCellValues)
         copy(scv.N), copy(scv.dNdξ), copy(scv.d2Ndξ2), copy(scv.detJdV),
         copy(scv.A₁), copy(scv.A₂), copy(scv.A₁₁), copy(scv.A₁₂), copy(scv.A₂₂),
         copy(scv.A_metric), copy(scv.G₃), copy(scv.T₁), copy(scv.T₂), copy(scv.B),
-        copy(scv.B₀), copy(scv.G₃_elem), copy(scv.T₁_elem), copy(scv.T₂_elem),
+        copy(scv.B₀), copy(scv.γ₀), copy(scv.G₃_elem), copy(scv.T₁_elem), copy(scv.T₂_elem),
         copy(scv.mitc), scv.frames, scv.ru, scv.rθ
     )
 end
@@ -263,13 +264,15 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}})
     for I in 1:n_shape
         scv.G₃_elem[I] = G₃_c; scv.T₁_elem[I] = T₁_c; scv.T₂_elem[I] = T₂_c
     end
-    reference_director_curvature!(scv)
+    reference_director_measures!(scv)
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
 
-# Reference director-gradient curvature B₀_αβ = ½(A_α·d₀,β + A_β·d₀,α), with
-# d₀ = Σ N_I G₃_elem[I] the initial director field interpolated from the frames the
-# element actually rotates about. The bending measure of the RM kernels is the
+# Reference measures of the initial director field d₀ = Σ N_I G₃_elem[I], interpolated
+# from the frames the element actually rotates about, so that both the bending and the
+# shear strain of the RM kernels vanish identically at u = 0:
+#
+# B₀_αβ = ½(A_α·d₀,β + A_β·d₀,α), the reference director-gradient curvature. The bending measure of the RM kernels is the
 # *change* κ = ½(a_α·d,β + a_β·d,α) − B₀, which vanishes identically at u = 0 for
 # any geometry and any frame choice. Subtracting the patch curvature B instead — the
 # earlier behaviour — leaves a spurious reference bending strain κ(0) = B₀ − B on
@@ -277,12 +280,19 @@ end
 # (`NodeFrames`) the Scordelis-Lo roof stalls at 9.3% error under refinement, and with
 # centroid frames the answer drifts past the reference instead of settling on it.
 # On flat elements with centroid frames B₀ = B = 0 and nothing changes.
-function reference_director_curvature!(scv::ShellCellValues)
+#
+# γ₀_α = A_α·d₀, the reference transverse shear, subtracted from the QP-direct shear
+# a_α·d. With MITC it is zero: the tying strains already subtract their own per-tying-point
+# reference, and subtracting A_α·d₀ again would double-count — zero on flat elements
+# (A_α ⟂ d₀) but a spurious reference shear on curved ones, which pre-stresses the
+# reference and renders the tangent indefinite.
+function reference_director_measures!(scv::ShellCellValues)
     n_shape = getnbasefunctions(scv.ip_shape)
     for q in 1:getnquadpoints(scv)
-        d0_1 = zero(Vec{3, Float64}); d0_2 = zero(Vec{3, Float64})
+        d0 = zero(Vec{3, Float64}); d0_1 = zero(Vec{3, Float64}); d0_2 = zero(Vec{3, Float64})
         for I in 1:n_shape
             dN = scv.dNdξ[I, q]
+            d0   += scv.N[I, q] * scv.G₃_elem[I]
             d0_1 += dN[1] * scv.G₃_elem[I]
             d0_2 += dN[2] * scv.G₃_elem[I]
         end
@@ -290,6 +300,7 @@ function reference_director_curvature!(scv::ShellCellValues)
         scv.B₀[q] = SymmetricTensor{2, 2, Float64}(
             (dot(A₁, d0_1), 0.5 * (dot(A₁, d0_2) + dot(A₂, d0_1)), dot(A₂, d0_2))
         )
+        scv.γ₀[q] = scv.mitc isa NoMITC ? Vec{2}((dot(A₁, d0), dot(A₂, d0))) : zero(Vec{2, Float64})
     end
     return scv
 end

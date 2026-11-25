@@ -75,7 +75,7 @@ reinit!(scv::ShellCellValues, cc::CellCache, nf::NodeFrames) = reinit!(scv, getc
 function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFrames, node_ids)
     reinit_geometry!(scv, x)
     # The frames live on `ip_shape` nodes (that is how `G₃_elem` is sized and how
-    # `reference_director_curvature!` reads them), but `nf` is indexed by grid node id.
+    # `reference_director_measures!` reads them), but `nf` is indexed by grid node id.
     # The two only line up when every shape node is a grid node.
     n_shape = getnbasefunctions(scv.ip_shape)
     length(node_ids) ≥ n_shape || throw(ArgumentError(
@@ -87,7 +87,7 @@ function reinit!(scv::ShellCellValues, x::AbstractVector{<:Vec{3}}, nf::NodeFram
         scv.T₁_elem[I] = nf.T₁[node_ids[I]]
         scv.T₂_elem[I] = nf.T₂[node_ids[I]]
     end
-    reference_director_curvature!(scv)   # B₀ follows the frames actually in use
+    reference_director_measures!(scv)   # B₀ and γ₀ follow the frames actually in use
     reinit!(scv.mitc, scv.ip_geo, x, scv.G₃_elem, scv.T₁_elem, scv.T₂_elem)
 end
 

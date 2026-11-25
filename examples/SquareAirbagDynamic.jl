@@ -19,10 +19,7 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = celldofs(cell)
         u_e = u[sd]
-        membrane_residuals_RM!(re_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
-        membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
+        residuals_and_tangent_RM!(ke_i, re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
 end
@@ -40,7 +37,6 @@ function assemble_mass!(M, dh, scv, ρ, mat)
 end
 
 function max_principal_stress_qp(dh, scv, u, mat)
-    n_nodes = getnbasefunctions(scv.ip_shape)
     n_qp    = getnquadpoints(scv)
     out     = [zeros(n_qp) for _ in 1:getncells(dh.grid)]
     for cell in CellIterator(dh)
@@ -49,7 +45,7 @@ function max_principal_stress_qp(dh, scv, u, mat)
         G₃ = scv.G₃_elem[1]
         qp_vals = out[cellid(cell)]
         @inbounds for qp in 1:n_qp
-            a₁, a₂ = FerriteShells.covariant_basis(scv, qp, u_e, n_nodes)
+            a₁, a₂ = FerriteShells.covariant_basis(scv, qp, u_e)
             c_ms = SymmetricTensor{2,2}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
             N, _ = membrane_stress_and_tangent(mat, c_ms, scv.A_metric[qp],
                                                scv.A₁[qp], scv.A₂[qp], G₃)

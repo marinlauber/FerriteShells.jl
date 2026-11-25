@@ -42,8 +42,7 @@ for cell in CellIterator(dh)
     fill!(ke, 0.0); fill!(fe, 0.0)
     reinit!(scv, cell, nf)
     u_e = zeros(n_el)
-    membrane_tangent_RM!(ke, scv, u_e, mat)
-    bending_tangent_RM!(ke, scv, u_e, mat)
+    tangent_RM!(ke, scv, u_e, mat)
     for qp in 1:getnquadpoints(scv)
         dΩ = scv.detJdV[qp]; ξ = scv.qr.points[qp]
         for I in 1:n_base

@@ -471,8 +471,8 @@ end
             fill!(ke, 0.0); fill!(re, 0.0)
             reinit!(scv, cell)
             u_e = u[celldofs(cell)]
-            membrane_tangent_RM!(ke, scv, u_e, mat); bending_tangent_RM!(ke, scv, u_e, mat)
-            membrane_residuals_RM!(re, scv, u_e, mat); bending_residuals_RM!(re, scv, u_e, mat)
+            membrane_tangent!(ke, scv, u_e, mat); bending_tangent_RM!(ke, scv, u_e, mat)
+            membrane_residuals!(re, scv, u_e, mat); bending_residuals_RM!(re, scv, u_e, mat)
             assemble!(asm, celldofs(cell), ke, re)
         end
         K, r
@@ -687,7 +687,7 @@ end
         fill!(ke, 0.0)
         reinit!(scv, cc)
         u_e = u[celldofs(cc)]
-        membrane_tangent_RM!(ke, scv, u_e, mat)
+        membrane_tangent!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)   # writes the MITC scratch
         return ke
     end
@@ -752,8 +752,7 @@ end
     tilted = false
     for nid in nset
         φ₁, φ₂ = u[dofmap[nid][1]], u[dofmap[nid][2]]
-        cosθ, sincθ = FerriteShells.cos_sinc_sq(φ₁^2 + φ₂^2)
-        d = cosθ * nf.G₃[nid] + sincθ * (φ₁ * nf.T₁[nid] + φ₂ * nf.T₂[nid])
+        d = FerriteShells.rodrigues_director(φ₁, φ₂, nf.G₃[nid], nf.T₁[nid], nf.T₂[nid])
         @test abs(d ⋅ n̂) ≤ 1e-12
         hypot(φ₁, φ₂) > 1e-6 && (tilted = true)
     end

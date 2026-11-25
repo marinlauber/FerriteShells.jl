@@ -33,15 +33,11 @@ function membrane_stress_and_tangent(mat::LinearElastic, c_ms::SymmetricTensor{2
 end
 
 # LinearElastic: frame arguments accepted but ignored.
-function bending_and_shear_stiffness(mat::LinearElastic, c_ms,
-                                     A_metric::SymmetricTensor{2,2,T},
-                                     A₁=nothing, A₂=nothing, G₃=nothing) where T
-    _, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
-    D    = (mat.thickness^2 / 12) * C
-    cs   = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
-    Aup  = inv(A_metric)
-    Cs   = SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
-    return D, Cs
+function shear_stiffness(mat::LinearElastic, c_ms, A_metric::SymmetricTensor{2,2,T},
+                         A₁=nothing, A₂=nothing, G₃=nothing) where T
+    cs  = T(5//6) * mat.E / (2*(1 + mat.ν)) * mat.thickness
+    Aup = inv(A_metric)
+    SymmetricTensor{2,2,T}((cs*Aup[1,1], cs*Aup[1,2], cs*Aup[2,2]))
 end
 
 # used to specialise the Hyperelastic formulation
@@ -138,9 +134,7 @@ end
 # det_A = det(A_metric) = |A₁ × A₂|² (reference area element squared).
 # Reduces to det_A/det₂(c) when γ=0 (KL / no-shear limit).
 @inline get_C33(c::SymmetricTensor{2,2}, γ₁, γ₂, det_A) = (det_A + c[2,2]*γ₁^2 - 2*c[1,2]*γ₁*γ₂ + c[1,1]*γ₂^2) / det(c)
-@inline function get_C33(mat::Hyperelastic{Incompressible}, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv)
-    return (det_A + c[2,2]*γ₁^2 - 2*c[1,2]*γ₁*γ₂ + c[1,1]*γ₂^2) / det(c)
-end
+@inline get_C33(::Hyperelastic{Incompressible}, c::SymmetricTensor{2,2}, γ₁, γ₂, det_A, Jinv) = get_C33(c, γ₁, γ₂, det_A)
 
 # Build the full 3×3 right Cauchy–Green tensor.
 # SymmetricTensor{2,3} lower-triangle column-major storage: (C₁₁,C₁₂,C₁₃,C₂₂,C₂₃,C₃₃)
@@ -151,6 +145,15 @@ end
 
 # Reference Jacobian: columns = A₁, A₂, G₃ in Cartesian.  Stored column-major.
 @inline J_ref(A₁, A₂, G₃) = Tensor{2,3}((A₁[1],A₁[2],A₁[3], A₂[1],A₂[2],A₂[3], G₃[1],G₃[2],G₃[3]))
+
+# Reference data the Hyperelastic energy needs at a point: det(A_metric) and J_ref⁻¹.
+@inline reference_frame(A_metric, A₁, A₂, G₃) = det(A_metric), inv(J_ref(A₁, A₂, G₃))
+
+# 3-point Gauss-Legendre on [-t/2, t/2]: exact for polynomials up to degree 5 in ξ₃.
+@inline function gauss3_thickness(t)
+    h = t / 2; r = sqrt(3.0/5.0)
+    return (-h*r, 0.0, h*r), (5.0/9.0*h, 8.0/9.0*h, 5.0/9.0*h)
+end
 
 # Transform C_nat (natural frame) → C_cart (Cartesian): C_cart = Jinv' C_nat Jinv.
 @inline to_C_cart(C_nat::SymmetricTensor{2,3}, Jinv::Tensor{2,3}) = symmetric(Jinv' ⋅ Tensor{2,3}(C_nat) ⋅ Jinv)
@@ -191,10 +194,9 @@ end
 
 # Membrane stress N and consistent tangent C via nested gradient of W_phys.
 # N^{αβ} = 2t ∂W/∂C_{αβ}; factor 2 from Tensors.jl Mandel off-diagonal convention.
-function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,2},
-                                     A_metric, A₁, A₂, G₃)
-    det_A = det(A_metric)
-    Jinv  = inv(J_ref(A₁, A₂, G₃))
+membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,2}, A_metric, A₁, A₂, G₃) =
+    membrane_stress_and_tangent(mat, c_ms, reference_frame(A_metric, A₁, A₂, G₃))
+function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,2}, (det_A, Jinv)::Tuple)
     ∇W(c) = gradient(x -> W_phys(mat, x, det_A, Jinv), c)
     H, S  = gradient(∇W, c_ms, :all)
     N = 2 * mat.thickness * S
@@ -202,15 +204,41 @@ function membrane_stress_and_tangent(mat::Hyperelastic, c_ms::SymmetricTensor{2,
     return N, C
 end
 
-# Bending and shear stiffness tensors in the physical Cartesian frame.
-function bending_and_shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T},
-                                     A_metric, A₁, A₂, G₃) where T
-    _, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
-    D     = (mat.thickness^2 / 12) * C
-    det_A = det(A_metric)
-    Jinv  = inv(J_ref(A₁, A₂, G₃))
+# Transverse shear stiffness in the physical Cartesian frame.
+shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2}, A_metric, A₁, A₂, G₃) =
+    shear_stiffness(mat, c_ms, reference_frame(A_metric, A₁, A₂, G₃))
+function shear_stiffness(mat::Hyperelastic, c_ms::SymmetricTensor{2,2,T}, (det_A, Jinv)::Tuple) where T
     W_sh(γ) = W_phys(mat, c_ms, γ[1], γ[2], det_A, Jinv)
     Cs_full = mat.thickness * hessian(W_sh, zero(Vec{2,T}))
-    Cs = SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
-    return D, Cs
+    SymmetricTensor{2,2,T}((Cs_full[1,1], Cs_full[1,2], Cs_full[2,2]))
+end
+
+# Bending stiffness D = t²/12·C from the membrane tangent C.
+@inline bending_stiffness(mat, C) = (mat.thickness^2 / 12) * C
+
+# Membrane stress and tangent, bending stiffness and shear stiffness, with the membrane
+# tangent evaluated once — for Hyperelastic it is the dominant per-point cost, and the
+# reference frame it shares with the shear stiffness is built once too.
+function shell_stress_and_stiffness(mat::LinearElastic, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C = membrane_stress_and_tangent(mat, c_ms, A_metric)
+    N, C, bending_stiffness(mat, C), shear_stiffness(mat, c_ms, A_metric)
+end
+function shell_stress_and_stiffness(mat::Hyperelastic, c_ms, A_metric, A₁, A₂, G₃)
+    ref  = reference_frame(A_metric, A₁, A₂, G₃)
+    N, C = membrane_stress_and_tangent(mat, c_ms, ref)
+    N, C, bending_stiffness(mat, C), shear_stiffness(mat, c_ms, ref)
+end
+
+# Any other material, through its membrane_stress_and_tangent / bending_and_shear_stiffness.
+function shell_stress_and_stiffness(mat, c_ms, A_metric, A₁=nothing, A₂=nothing, G₃=nothing)
+    N, C  = membrane_stress_and_tangent(mat, c_ms, A_metric, A₁, A₂, G₃)
+    D, Cs = bending_and_shear_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+    N, C, D, Cs
+end
+
+# Bending and shear stiffness tensors in the physical Cartesian frame.
+function bending_and_shear_stiffness(mat::Union{LinearElastic,Hyperelastic}, c_ms, A_metric,
+                                     A₁=nothing, A₂=nothing, G₃=nothing)
+    _, _, D, Cs = shell_stress_and_stiffness(mat, c_ms, A_metric, A₁, A₂, G₃)
+    D, Cs
 end

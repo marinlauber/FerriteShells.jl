@@ -188,10 +188,7 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = celldofs(cell)
         u_e = u[sd]
-        membrane_residuals_RM!(re_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
-        membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
+        residuals_and_tangent_RM!(ke_i, re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
 end

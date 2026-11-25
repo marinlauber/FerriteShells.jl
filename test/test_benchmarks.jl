@@ -199,7 +199,7 @@ function pinched_hemisphere_rm_solve_test(n)
         fill!(ke, 0.0)
         reinit!(scv, cell, nf)
         u0 = zeros(5n_base)
-        membrane_tangent_RM!(ke, scv, u0, mat)
+        membrane_tangent!(ke, scv, u0, mat)
         bending_tangent_RM!(ke, scv, u0, mat)
         assemble!(asm, celldofs(cell), ke, re)
     end

@@ -72,21 +72,15 @@ function assemble_shell!(K_int, r_int, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0); fill!(re_i, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
-        membrane_residuals_RM!(re_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
-        membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
+        residuals_and_tangent_RM!(ke_i, re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
 end
 ```
 
-where `shelldofs` is a helper function (similar to `celldofs`) that returns the degrees of freedom of the shell element, ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
-
-> [!WARNING]
-> `shelldofs` is only useful for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements; the rotations are obtained from them. In this case, `celldofs` must be used instead of `shelldofs`.
+`residuals_and_tangent_RM!` evaluates the membrane, bending and shear contributions in a single quadrature loop. The element vectors use Ferrite's own cell-dof order (`celldofs(cell)`), for both Reissner–Mindlin (`:u` and `:θ` fields) and Kirchhoff–Love (`:u` only) shells. The parts are also available separately (`membrane_residuals!`, `bending_residuals_RM!`, `membrane_tangent!`, `bending_tangent_RM!`), and `tangent_RM!` / `residuals_RM!` compute only one of the two.
 
 ### External loadings
 

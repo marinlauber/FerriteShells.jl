@@ -21,11 +21,6 @@ function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(
                 facetsets=grid.facetsets, cellsets=grid.cellsets, nodesets=grid.nodesets)
 end
 
-"""
-    get_ferrite_grid(::String; T=Float64)
-
-Loads the `*.inp` file into ferrite an return the `Grid`
-"""
 # Reverse the winding order of a shell element from CW to CCW (or vice versa).
 # Permutation: corners 1,2,3,4 → 1,4,3,2; edge midpoints follow their new corners.
 @inline function _flip_shell_nodes!(ns::Vector{Int})
@@ -244,10 +239,8 @@ function director_field(dh::DofHandler, scv::ShellCellValues, u)
         reinit!(scv, cell)   # populates scv.*_elem from scv.frames (NodeFrames or centroid)
         u_e = @views u[celldofs(cell)]
         for (I, nid) in enumerate(cell.nodes)
-            φ₁ = u_e[scv.rθ[2I-1]]; φ₂ = u_e[scv.rθ[2I]]
-            cosθ, sincθ = cos_sinc_sq(φ₁^2 + φ₂^2)
             G₃_I = scv.G₃_elem[I]
-            d_I  = cosθ * G₃_I + sincθ * (φ₁ * scv.T₁_elem[I] + φ₂ * scv.T₂_elem[I])
+            d_I  = rodrigues_director(u_e[scv.rθ[2I-1]], u_e[scv.rθ[2I]], G₃_I, scv.T₁_elem[I], scv.T₂_elem[I])
             @views d_sum[:, nid]  .+= d_I
             @views G3_sum[:, nid] .+= G₃_I
             count[nid] += 1
@@ -271,27 +264,14 @@ Compute all three RM shell strain measures at quadrature point `qp` from the ele
 
 Returns:
 - `E :: SymmetricTensor{2,2}` — membrane strain, Green–Lagrange: Eαβ = ½(aα·aβ − Aα·Aβ)
-- `κ :: SymmetricTensor{2,2}` — bending curvature change: καβ = ½(aα·d,β + aβ·d,α) − Bαβ
+- `κ :: SymmetricTensor{2,2}` — bending curvature change: καβ = ½(aα·d,β + aβ·d,α) − B₀αβ
 - `γ :: Vec{2}` — transverse shear strain: γα = aα·d − Aα·G₃ (MITC-corrected if applicable)
 """
 function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
-    n_nodes = getnbasefunctions(scv.ip_shape)
-
-    a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
-
-    E = membrane_strain(a₁, a₂, scv.A_metric[qp])
-
-    d, d₁, d₂ = director_field(scv, qp, u_e, n_nodes)
-
-    κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
-
-    γ_k = tying_shear_strains(scv.mitc, u_e, scv.ru, scv.rθ)
-    γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ_k, scv.mitc)
-    d₀  = reference_director(scv, qp, n_nodes)
-    r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)
-    γ₁ -= r₁; γ₂ -= r₂
-
-    return E, κ, Vec{2,T}((γ₁, γ₂))
+    dirs = nodal_directors(scv, u_e)
+    γ_k  = element_tying_strains(scv, u_e, dirs)
+    a₁, a₂, _, _, _, κ, γ₁, γ₂ = rm_kinematics(scv, qp, u_e, dirs, γ_k)
+    return membrane_strain(a₁, a₂, scv.A_metric[qp]), κ, Vec{2,T}((γ₁, γ₂))
 end
 
 """

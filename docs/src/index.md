@@ -74,16 +74,15 @@ function assemble_shell!(K_int, r_int, dh, scv, u, mat)
         reinit!(scv, cell)
         sd  = celldofs(cell)
         u_e = u[sd]
-        membrane_residuals_RM!(re_i, scv, u_e, mat)
-        bending_residuals_RM!(re_i, scv, u_e, mat)
-        membrane_tangent_RM!(ke_i, scv, u_e, mat)
-        bending_tangent_RM!(ke_i, scv, u_e, mat)
+        residuals_and_tangent_RM!(ke_i, re_i, scv, u_e, mat)
         assemble!(asm_i, sd, ke_i, re_i)
     end
 end
 ```
 
 where `dh` carries the displacement field `:u` (as `ip^3`) and the rotation field `:θ` (as `ip^2`), added in that order. The element vector is Ferrite's own `u[celldofs(cell)]`: no reordering is needed, the kernels locate the displacement and rotation dofs by their local positions in the element vector.
+
+The membrane and bending/shear parts are also available on their own ([`membrane_residuals!`](@ref), [`bending_residuals_RM!`](@ref), [`membrane_tangent!`](@ref), [`bending_tangent_RM!`](@ref)), e.g. for membrane-only problems; the combined call evaluates the kinematics and the material once per quadrature point, which matters most for `Hyperelastic` materials.
 
 !!! note "Other DofHandler layouts"
     By default `ShellCellValues` assumes `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, for which the displacement dofs sit at `1:3n` and the rotation dofs at `3n+1:5n` of the element vector. For any other layout (fields added in another order, additional fields), pass the `SubDofHandler` (or a single-subdomain `DofHandler`) when constructing it, and the dof ranges are read from it by name:

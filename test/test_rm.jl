@@ -113,15 +113,48 @@ end
     end
     re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv, u_pert, mat)
     re_impl = zeros(n_dof)
-    membrane_residuals_RM!(re_impl, scv, u_pert, mat)
+    membrane_residuals!(re_impl, scv, u_pert, mat)
     bending_residuals_RM!(re_impl, scv, u_pert, mat)
     @test norm(re_fd .- re_impl) / (norm(re_impl) + 1e-14) < 1e-10
     # same for tangent
     Ke_fd = zeros(n_dof, n_dof); tangent_RM_FD!(Ke_fd, scv, u_pert, mat)
     Ke_impl = zeros(n_dof, n_dof)
-    membrane_tangent_RM!(Ke_impl, scv, u_pert, mat)
+    membrane_tangent!(Ke_impl, scv, u_pert, mat)
     bending_tangent_RM!(Ke_impl, scv, u_pert, mat)
     @test norm(Ke_fd .- Ke_impl) / (norm(Ke_impl) + 1e-14) < 1e-10
+end
+
+@testset "Fused RM kernels match the split membrane + bending kernels" begin
+    # Curved, distorted element and finite rotations so every term of both parts is active.
+    X = [x + Vec{3}((0.05*x[2], -0.03*x[1], 0.2*x[1]*x[2] + 0.1*x[1]^2)) for x in X_Q9_UNIT]
+    Random.seed!(7)
+    u = 1e-2 .* randn(45)
+    for mitc in (nothing, MITC9),
+        mat in (LinearElastic(1.0e6, 0.3, 0.01), mat_NH, mat_SVK_ps)
+        scv = mitc === nothing ? make_q9_scv() :
+              ShellCellValues(QuadratureRule{RefQuadrilateral}(3), Lagrange{RefQuadrilateral,2}(),
+                              Lagrange{RefQuadrilateral,2}(); mitc=mitc)
+        reinit!(scv, X)
+        re_split = zeros(45); ke_split = zeros(45, 45)
+        membrane_residuals!(re_split, scv, u, mat); bending_residuals_RM!(re_split, scv, u, mat)
+        membrane_tangent!(ke_split, scv, u, mat);   bending_tangent_RM!(ke_split, scv, u, mat)
+        re = zeros(45); residuals_RM!(re, scv, u, mat)
+        ke = zeros(45, 45); tangent_RM!(ke, scv, u, mat)
+        re_both = zeros(45); ke_both = zeros(45, 45)
+        residuals_and_tangent_RM!(ke_both, re_both, scv, u, mat)
+        @test re ≈ re_split rtol=1e-12
+        @test ke ≈ ke_split rtol=1e-12
+        @test re_both == re
+        @test ke_both == ke
+    end
+    # the residual stays ForwardDiff-differentiable, and its Jacobian is the fused tangent
+    scv = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), Lagrange{RefQuadrilateral,2}(),
+                          Lagrange{RefQuadrilateral,2}(); mitc=MITC9)
+    reinit!(scv, X)
+    mat = LinearElastic(1.0e6, 0.3, 0.01)
+    ke = zeros(45, 45); tangent_RM!(ke, scv, u, mat)
+    J  = ForwardDiff.jacobian(v -> (r = zeros(eltype(v), 45); residuals_RM!(r, scv, v, mat); r), u)
+    @test J ≈ ke rtol=1e-10
 end
 
 @testset "RM membrane patch test" begin
@@ -504,7 +537,7 @@ end
     # 1. Membrane residual is exactly zero (membrane energy depends only on stretch,
     #    which is zero at u=0 by construction).
     re_mem = zeros(45)
-    membrane_residuals_RM!(re_mem, scv, zeros(45), mat)
+    membrane_residuals!(re_mem, scv, zeros(45), mat)
     @test norm(re_mem) ≤ 1e-12
 
     # 2. Initial bending/shear residual is small: O(h²/R) per unit shear stiffness.
@@ -642,7 +675,7 @@ end  # RM bending h-convergence
         reinit!(scv, x_nodes)
         u_e = rigid_dofs_q9(x_nodes)
         re = zeros(45)
-        membrane_residuals_RM!(re, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
         @test norm(re) < 1e-8
     end
@@ -660,7 +693,7 @@ end  # RM bending h-convergence
             u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(20)
-        membrane_residuals_RM!(re, scv4s, u_e, mat)
+        membrane_residuals!(re, scv4s, u_e, mat)
         bending_residuals_RM!(re, scv4s, u_e, mat)
         @test norm(re) < 1e-8
     end
@@ -677,7 +710,7 @@ end  # RM bending h-convergence
             u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(15)
-        membrane_residuals_RM!(re, scv_t3s, u_e, mat)
+        membrane_residuals!(re, scv_t3s, u_e, mat)
         bending_residuals_RM!(re, scv_t3s, u_e, mat)
         @test norm(re) < 1e-8
     end
@@ -695,7 +728,7 @@ end  # RM bending h-convergence
             u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(30)
-        membrane_residuals_RM!(re, scv_t6s, u_e, mat)
+        membrane_residuals!(re, scv_t6s, u_e, mat)
         bending_residuals_RM!(re, scv_t6s, u_e, mat)
         @test norm(re) < 1e-8
     end
@@ -734,7 +767,7 @@ end
         for (l, g) in enumerate(en), d in 1:5
             u_e[rmdof(u_e,l,d)] = u_rm[rmdof(u_rm,g,d)]
         end
-        membrane_residuals_RM!(re, scv4, u_e, mat4)
+        membrane_residuals!(re, scv4, u_e, mat4)
         bending_residuals_RM!(re, scv4, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
             r_rm[rmdof(r_rm,g,d)] += re[rmdof(re,l,d)]
@@ -754,7 +787,7 @@ end
         for (l, g) in enumerate(en), d in 1:3
             u_e[3(l-1)+d] = u_kl[3(g-1)+d]
         end
-        membrane_residuals_KL!(re, scv4, u_e, mat4)
+        membrane_residuals!(re, scv4, u_e, mat4)
         bending_residuals_KL!(re, scv4, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:3
             r_kl[3(g-1)+d] += re[3(l-1)+d]
@@ -814,7 +847,7 @@ end
         for (l, g) in enumerate(en), d in 1:5
             u_e[rmdof(u_e,l,d)] = u_rm9[rmdof(u_rm9,g,d)]
         end
-        membrane_residuals_RM!(re, scv9, u_e, mat4)
+        membrane_residuals!(re, scv9, u_e, mat4)
         bending_residuals_RM!(re, scv9, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
             r_rm9[rmdof(r_rm9,g,d)] += re[rmdof(re,l,d)]
@@ -833,7 +866,7 @@ end
         for (l, g) in enumerate(en), d in 1:3
             u_e[3(l-1)+d] = u_kl9[3(g-1)+d]
         end
-        membrane_residuals_KL!(re, scv9, u_e, mat4)
+        membrane_residuals!(re, scv9, u_e, mat4)
         bending_residuals_KL!(re, scv9, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:3
             r_kl9[3(g-1)+d] += re[3(l-1)+d]
@@ -851,7 +884,7 @@ end
         for (l, g) in enumerate(en), d in 1:5
             u_e[rmdof(u_e,l,d)] = u_rm[rmdof(u_rm,g,d)]
         end
-        membrane_residuals_RM!(re, scv_m4, u_e, mat4)
+        membrane_residuals!(re, scv_m4, u_e, mat4)
         bending_residuals_RM!(re, scv_m4, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
             r_m4[rmdof(r_m4,g,d)] += re[rmdof(re,l,d)]
@@ -868,7 +901,7 @@ end
         for (l, g) in enumerate(en), d in 1:5
             u_e[rmdof(u_e,l,d)] = u_rm9[rmdof(u_rm9,g,d)]
         end
-        membrane_residuals_RM!(re, scv_m9, u_e, mat4)
+        membrane_residuals!(re, scv_m9, u_e, mat4)
         bending_residuals_RM!(re, scv_m9, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
             r_m9[rmdof(r_m9,g,d)] += re[rmdof(re,l,d)]
@@ -897,7 +930,7 @@ end
         reinit!(scv_t3m, [X_patch[i] for i in en])
         u_e = zeros(15); re = zeros(15)
         for (l, g) in enumerate(en), d in 1:5; u_e[rmdof(u_e,l,d)] = u_rm_t3[rmdof(u_rm_t3,g,d)]; end
-        membrane_residuals_RM!(re, scv_t3m, u_e, mat4)
+        membrane_residuals!(re, scv_t3m, u_e, mat4)
         bending_residuals_RM!(re, scv_t3m, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5; r_rm_t3[rmdof(r_rm_t3,g,d)] += re[rmdof(re,l,d)]; end
     end
@@ -912,7 +945,7 @@ end
         reinit!(scv_t3m, [X_patch[i] for i in en])
         u_e = zeros(9); re = zeros(9)
         for (l, g) in enumerate(en), d in 1:3; u_e[3(l-1)+d] = u_kl_t3[3(g-1)+d]; end
-        membrane_residuals_KL!(re, scv_t3m, u_e, mat4)
+        membrane_residuals!(re, scv_t3m, u_e, mat4)
         bending_residuals_KL!(re, scv_t3m, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:3; r_kl_t3[3(g-1)+d] += re[3(l-1)+d]; end
     end
@@ -938,7 +971,7 @@ end
         reinit!(scv_t6m, [X_t6_2tri[i] for i in en])
         u_e = zeros(30); re = zeros(30)
         for (l, g) in enumerate(en), d in 1:5; u_e[rmdof(u_e,l,d)] = u_rm_t6[rmdof(u_rm_t6,g,d)]; end
-        membrane_residuals_RM!(re, scv_t6m, u_e, mat4)
+        membrane_residuals!(re, scv_t6m, u_e, mat4)
         bending_residuals_RM!(re, scv_t6m, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5; r_rm_t6[rmdof(r_rm_t6,g,d)] += re[rmdof(re,l,d)]; end
     end

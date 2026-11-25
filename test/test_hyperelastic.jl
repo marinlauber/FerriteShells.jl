@@ -42,9 +42,9 @@ function _cook_assemble_rm!(K, f, dh, scv, mat)
         reinit!(scv, cell)
         sd  = celldofs(cell)
         u_e = zeros(n_el)
-        membrane_residuals_RM!(re, scv, u_e, mat)
+        membrane_residuals!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
-        membrane_tangent_RM!(ke, scv, u_e, mat)
+        membrane_tangent!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)
         assemble!(asm, sd, ke, re)
     end
@@ -108,12 +108,12 @@ end
     ε = 1e-5
     u_m = zeros(n)
     u_m[3*2-2] = ε; u_m[3*3-2] = ε    # stretch nodes 2,3 in x (ε₁₁ ≈ ε/2)
-    re_NH = zeros(n); membrane_residuals_RM!(re_NH, scv, u_m, mat_NH)
-    re_LE = zeros(n); membrane_residuals_RM!(re_LE, scv, u_m, mat_LE_HE)
+    re_NH = zeros(n); membrane_residuals!(re_NH, scv, u_m, mat_NH)
+    re_LE = zeros(n); membrane_residuals!(re_LE, scv, u_m, mat_LE_HE)
     @test maximum(abs, re_NH .- re_LE) / (maximum(abs, re_LE) + 1e-20) < 1e-3
 
     # Explicit membrane residual ≈ FD (same energy, should be exact)
-    re_ex = zeros(n); membrane_residuals_RM!(re_ex, scv, u_m, mat_NH)
+    re_ex = zeros(n); membrane_residuals!(re_ex, scv, u_m, mat_NH)
     re_fd = zeros(n); residuals_RM_FD!(re_fd, scv, u_m, mat_NH)
     @test maximum(abs, re_ex .- re_fd) / (maximum(abs, re_fd) + 1e-20) < 1e-8
 
@@ -175,13 +175,13 @@ end
     # Verify det(C_cart) = 1 at every QP under a non-trivial deformation.
     scv = make_q4_scv()
     reinit!(scv, X_Q4_SQ)
-    n = 20; n_nodes = 4
+    n = 20
     u = zeros(n)
     for (I, X) in enumerate(X_Q4_SQ)
         u[3I-2] = 0.05 * (X[1] + 1)/2   # ~5% uniaxial stretch, linear in x
     end
     for qp in 1:getnquadpoints(scv)
-        a₁, a₂ = FerriteShells.covariant_basis(scv, qp, u, n_nodes)
+        a₁, a₂ = FerriteShells.covariant_basis(scv, qp, u)
         a_metric = SymmetricTensor{2,2}((dot(a₁,a₁), dot(a₁,a₂), dot(a₂,a₂)))
         det_A = det(scv.A_metric[qp])
         C33 = FerriteShells.get_C33(a_metric, 0.0, 0.0, det_A)
@@ -378,14 +378,14 @@ end
         u_mem[3I-2] = 2e-3*X[1]; u_mem[3I-1] = -1e-3*X[2]
     end
     re_ex = zeros(n)
-    membrane_residuals_RM!(re_ex, scv_ps, u_mem, mat_SVK_ps)
+    membrane_residuals!(re_ex, scv_ps, u_mem, mat_SVK_ps)
     bending_residuals_RM!(re_ex, scv_ps, u_mem, mat_SVK_ps)
     re_fd = zeros(n)
     residuals_RM_FD!(re_fd, scv_ps, u_mem, mat_SVK_ps)
     @test maximum(abs, re_ex .- re_fd) / maximum(abs, re_fd) < 1e-8
     # and against LinearElastic, which the condensed SVK must reproduce
     re_le = zeros(n)
-    membrane_residuals_RM!(re_le, scv_ps, u_mem, mat_LE_SVK)
+    membrane_residuals!(re_le, scv_ps, u_mem, mat_LE_SVK)
     bending_residuals_RM!(re_le, scv_ps, u_mem, mat_LE_SVK)
     @test maximum(abs, re_ex .- re_le) / maximum(abs, re_le) < 1e-10
 
@@ -425,22 +425,22 @@ end
             u0 = zeros(5nn)
             r0 = zeros(5nn); residuals_RM_FD!(r0, scv_n, u0, mat)
             @test norm(r0) < 1e-10
-            r0 = zeros(5nn); membrane_residuals_RM!(r0, scv_n, u0, mat); bending_residuals_RM!(r0, scv_n, u0, mat)
+            r0 = zeros(5nn); membrane_residuals!(r0, scv_n, u0, mat); bending_residuals_RM!(r0, scv_n, u0, mat)
             @test norm(r0) < 1e-10
             u = zeros(5nn)
             for I in 1:nn; u[3I-2] = 1e-6 * x[I][1]; u[3I-1] = -4e-7 * x[I][2]; end
-            re = zeros(5nn); membrane_residuals_RM!(re, scv_n, u, mat); bending_residuals_RM!(re, scv_n, u, mat)
+            re = zeros(5nn); membrane_residuals!(re, scv_n, u, mat); bending_residuals_RM!(re, scv_n, u, mat)
             rf = zeros(5nn); residuals_RM_FD!(rf, scv_n, u, mat)
             @test norm(re - rf) / norm(rf) < 1e-6
 
             # KL: no director, so the response must not depend on the frame choice
             uk = zeros(3nn)
             for I in 1:nn; uk[3I-2] = 1e-3 * x[I][1]; uk[3I-1] = -4e-4 * x[I][2]; uk[3I] = 2e-3 * x[I][1] * x[I][2]; end
-            rn = zeros(3nn); membrane_residuals_KL!(rn, scv_n, uk, mat)
-            rc = zeros(3nn); membrane_residuals_KL!(rc, scv_c, uk, mat)
+            rn = zeros(3nn); membrane_residuals!(rn, scv_n, uk, mat)
+            rc = zeros(3nn); membrane_residuals!(rc, scv_c, uk, mat)
             @test rn ≈ rc rtol=1e-12
-            kn = zeros(3nn, 3nn); membrane_tangent_KL!(kn, scv_n, uk, mat)
-            kc = zeros(3nn, 3nn); membrane_tangent_KL!(kc, scv_c, uk, mat)
+            kn = zeros(3nn, 3nn); membrane_tangent!(kn, scv_n, uk, mat)
+            kc = zeros(3nn, 3nn); membrane_tangent!(kc, scv_c, uk, mat)
             @test kn ≈ kc rtol=1e-12
             @test FerriteShells.bending_energy_KL(uk, scv_n, mat) ≈ FerriteShells.bending_energy_KL(uk, scv_c, mat) rtol=1e-12
         end
