@@ -72,7 +72,7 @@ function assemble_shell!(K_int, r_int, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0); fill!(re_i, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
         membrane_residuals_RM!(re_i, scv, u_e, mat)
         bending_residuals_RM!(re_i, scv, u_e, mat)
@@ -83,7 +83,10 @@ function assemble_shell!(K_int, r_int, dh, scv, u, mat)
 end
 ```
 
-where `shelldofs` is a helper function (similar to `celldofs`) to get the degrees of freedom of the shell element, which are ordered as follows: first the in-plane displacements, then the out-of-plane displacements, and finally the rotations.
+where `dh` carries the displacement field `:u` (as `ip^3`) and the rotation field `:θ` (as `ip^2`), added in that order. The element vector is Ferrite's own `u[celldofs(cell)]`: no reordering is needed, the kernels locate the displacement and rotation dofs by their local positions in the element vector.
 
-!!! warning
-    `shelldofs` is only usefull for Reissner–Mindlin shells where both displacements and rotations are degrees of freedom. For Kirchhoff–Love shells, the degrees of freedom are only the displacements, and the rotations are obtained from the displacements. In this case, `celldofs` must be used instead of `shelldofs`.
+!!! note "Other DofHandler layouts"
+    By default `ShellCellValues` assumes `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, for which the displacement dofs sit at `1:3n` and the rotation dofs at `3n+1:5n` of the element vector. For any other layout (fields added in another order, additional fields), pass the `SubDofHandler` (or a single-subdomain `DofHandler`) when constructing it, and the dof ranges are read from it by name:
+    ```julia
+    scv = ShellCellValues(qr, ip, ip; dofs = sdh)
+    ```

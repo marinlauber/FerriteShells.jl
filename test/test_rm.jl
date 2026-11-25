@@ -10,14 +10,14 @@
     @test rm_residual(scv, zeros(n_dof), mat) ≈ zeros(n_dof) atol=1e-14
 
     # 2. Tangent FD consistency at a non-trivial displacement.
-    # Apply sinusoidal z-perturbation through displacement DOFs (index 5I-2)
-    # and a small rotation through φ DOFs (indices 5I-1, 5I).
+    # Apply sinusoidal z-perturbation through displacement DOFs (index 3I)
+    # and a small rotation through φ DOFs (iφ(u, I, 1:2), after the 27 displacement dofs).
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
-        u_pert[5I-1] = 1e-3 * randn()
-        u_pert[5I  ] = 1e-3 * randn()
+        u_pert[3I] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
+        u_pert[iφ(u_pert,I,1)] = 1e-3 * randn()
+        u_pert[iφ(u_pert,I,2)] = 1e-3 * randn()
     end
     ke_an = rm_tangent(scv, u_pert, mat)
     ke_fd = rm_fd_tangent(scv, u_pert, mat)
@@ -31,9 +31,9 @@
     # Translation: add a constant offset to all node positions (u only, not φ).
     u_trans = copy(u_pert)
     for I in 1:9
-        u_trans[5I-4] += 3.7
-        u_trans[5I-3] += -1.2
-        u_trans[5I-2] += 0.5
+        u_trans[3I-2] += 3.7
+        u_trans[3I-1] += -1.2
+        u_trans[3I] += 0.5
     end
     @test FerriteShells.energy_RM(u_trans, scv, mat) ≈
           FerriteShells.energy_RM(u_pert,  scv, mat) rtol=1e-10
@@ -48,10 +48,10 @@
     scv_rot = make_q9_scv(); reinit!(scv_rot, x_rot)
     u_rot   = copy(u_pert)
     for I in 1:9
-        u_rot[5I-4:5I-2] = Rz * u_pert[5I-4:5I-2]
-        φ₁, φ₂ = u_pert[5I-1], u_pert[5I]
-        u_rot[5I-1] = cos(θ)*φ₁ - sin(θ)*φ₂
-        u_rot[5I  ] = sin(θ)*φ₁ + cos(θ)*φ₂
+        u_rot[3I-2:3I] = Rz * u_pert[3I-2:3I]
+        φ₁, φ₂ = u_pert[iφ(u_pert,I,1)], u_pert[iφ(u_pert,I,2)]
+        u_rot[iφ(u_rot,I,1)] = cos(θ)*φ₁ - sin(θ)*φ₂
+        u_rot[iφ(u_rot,I,2)] = sin(θ)*φ₁ + cos(θ)*φ₂
     end
     @test FerriteShells.energy_RM(u_rot, scv_rot, mat) ≈
           FerriteShells.energy_RM(u_pert, scv, mat) rtol=1e-8
@@ -73,9 +73,9 @@ end
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
-        u_pert[5I-1] = 1e-3 * randn()
-        u_pert[5I  ] = 1e-3 * randn()
+        u_pert[3I] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
+        u_pert[iφ(u_pert,I,1)] = 1e-3 * randn()
+        u_pert[iφ(u_pert,I,2)] = 1e-3 * randn()
     end
     Ke_fd2 = ForwardDiff.jacobian(u -> begin re = zeros(eltype(u), n_dof); bending_residuals_RM!(re, scv, u, mat); re end, u_pert)
     Ke_ex2 = zeros(n_dof, n_dof); bending_tangent_RM!(Ke_ex2, scv, u_pert, mat)
@@ -107,9 +107,9 @@ end
     Random.seed!(42)
     u_pert = zeros(n_dof)
     for I in 1:9
-        u_pert[5I-2] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
-        u_pert[5I-1] = 1e-3 * randn()
-        u_pert[5I  ] = 1e-3 * randn()
+        u_pert[3I] = 1e-2 * sin(π * X_Q9_UNIT[I][1]) * sin(π * X_Q9_UNIT[I][2])
+        u_pert[iφ(u_pert,I,1)] = 1e-3 * randn()
+        u_pert[iφ(u_pert,I,2)] = 1e-3 * randn()
     end
     re_fd = zeros(n_dof); residuals_RM_FD!(re_fd, scv, u_pert, mat)
     re_impl = zeros(n_dof)
@@ -140,7 +140,7 @@ end
 
     ip_q4  = Lagrange{RefQuadrilateral,1}()
     scv_p  = ShellCellValues(QuadratureRule{RefQuadrilateral}(2), ip_q4, ip_q4)
-    dh_p   = DofHandler(grid_p); add!(dh_p, :u, ip_q4^5); close!(dh_p)
+    dh_p   = DofHandler(grid_p); add!(dh_p, :u, ip_q4^3); add!(dh_p, :θ, ip_q4^2); close!(dh_p)
     mat_p  = LinearElastic(1.0e6, 0.3, 0.01)
     ε_xx, ε_yy, γ_xy = 1e-3, 2e-3, 5e-4
 
@@ -150,8 +150,8 @@ end
     for cell in CellIterator(dh_p)
         coords = getcoordinates(cell); dofs = celldofs(cell)
         for (i, xi) in enumerate(coords)
-            u_ex[dofs[5i-4]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
-            u_ex[dofs[5i-3]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
+            u_ex[dofs[3i-2]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
+            u_ex[dofs[3i-1]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
         end
     end
 
@@ -164,7 +164,7 @@ end
         r_p[celldofs(cell)] .+= re_p
     end
     ch_tmp = ConstraintHandler(dh_p)
-    add!(ch_tmp, Dirichlet(:u, getnodeset(grid_p, "boundary"), x -> zeros(5), [1,2,3,4,5]))
+    add!(ch_tmp, Dirichlet(:u, getnodeset(grid_p, "boundary"), x -> zeros(3), [1,2,3])); add!(ch_tmp, Dirichlet(:θ, getnodeset(grid_p, "boundary"), x -> zeros(2), [1,2]))
     close!(ch_tmp)
     @test norm(r_p[ch_tmp.free_dofs]) ≤ 1e-8 * norm(r_p)
     @test abs(sum(r_p)) < 1e-12
@@ -181,8 +181,9 @@ end
     end
     ch2 = ConstraintHandler(dh_p)
     add!(ch2, Dirichlet(:u, getnodeset(grid_p, "boundary"),
-         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0, 0.0, 0.0], [1,2,3,4,5]))
-    add!(ch2, Dirichlet(:u, getnodeset(grid_p, "interior"), x -> zeros(3), [3,4,5]))
+         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0], [1,2,3]))
+    add!(ch2, Dirichlet(:θ, getnodeset(grid_p, "boundary"), x -> zeros(2), [1,2]))
+    add!(ch2, Dirichlet(:u, getnodeset(grid_p, "interior"), x -> zeros(1), [3])); add!(ch2, Dirichlet(:θ, getnodeset(grid_p, "interior"), x -> zeros(2), [1,2]))
     close!(ch2); Ferrite.update!(ch2, 0.0)
     apply!(K_p, r_p2, ch2)
     u_sol = K_p \ r_p2
@@ -232,15 +233,15 @@ end
                isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10)))
     ip_q9m = Lagrange{RefQuadrilateral,2}()
     scv_q9m = ShellCellValues(QuadratureRule{RefQuadrilateral}(4), ip_q9m, ip_q9m)
-    dh_q9m  = DofHandler(grid_q9m); add!(dh_q9m, :u, ip_q9m^5); close!(dh_q9m)
+    dh_q9m  = DofHandler(grid_q9m); add!(dh_q9m, :u, ip_q9m^3); add!(dh_q9m, :θ, ip_q9m^2); close!(dh_q9m)
     n_q9m   = ndofs(dh_q9m)
 
     u_ex9 = zeros(n_q9m)
     for cell in CellIterator(dh_q9m)
         coords = getcoordinates(cell); dofs = celldofs(cell)
         for (i, xi) in enumerate(coords)
-            u_ex9[dofs[5i-4]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
-            u_ex9[dofs[5i-3]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
+            u_ex9[dofs[3i-2]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
+            u_ex9[dofs[3i-1]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
         end
     end
 
@@ -251,7 +252,7 @@ end
         r_q9m[celldofs(cell)] .+= re_q9m
     end
     ch_tmp9 = ConstraintHandler(dh_q9m)
-    add!(ch_tmp9, Dirichlet(:u, getnodeset(grid_q9m, "boundary"), x -> zeros(5), [1,2,3,4,5]))
+    add!(ch_tmp9, Dirichlet(:u, getnodeset(grid_q9m, "boundary"), x -> zeros(3), [1,2,3])); add!(ch_tmp9, Dirichlet(:θ, getnodeset(grid_q9m, "boundary"), x -> zeros(2), [1,2]))
     close!(ch_tmp9)
     @test norm(r_q9m[ch_tmp9.free_dofs]) ≤ 1e-8 * norm(r_q9m)
 
@@ -267,8 +268,9 @@ end
     end
     ch2_q9m = ConstraintHandler(dh_q9m)
     add!(ch2_q9m, Dirichlet(:u, getnodeset(grid_q9m, "boundary"),
-         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0, 0.0, 0.0], [1,2,3,4,5]))
-    add!(ch2_q9m, Dirichlet(:u, getnodeset(grid_q9m, "interior"), x -> zeros(3), [3,4,5]))
+         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0], [1,2,3]))
+    add!(ch2_q9m, Dirichlet(:θ, getnodeset(grid_q9m, "boundary"), x -> zeros(2), [1,2]))
+    add!(ch2_q9m, Dirichlet(:u, getnodeset(grid_q9m, "interior"), x -> zeros(1), [3])); add!(ch2_q9m, Dirichlet(:θ, getnodeset(grid_q9m, "interior"), x -> zeros(2), [1,2]))
     close!(ch2_q9m); Ferrite.update!(ch2_q9m, 0.0)
     apply!(K_q9m, r2_q9m, ch2_q9m)
     u_sol9 = K_q9m \ r2_q9m
@@ -286,15 +288,15 @@ end
                isapprox(x[2],0.0,atol=1e-10)||isapprox(x[2],10.0,atol=1e-10)))
     ip_t3m  = Lagrange{RefTriangle,1}()
     scv_t3m = ShellCellValues(QuadratureRule{RefTriangle}(2), ip_t3m, ip_t3m)
-    dh_t3m  = DofHandler(grid_t3m); add!(dh_t3m, :u, ip_t3m^5); close!(dh_t3m)
+    dh_t3m  = DofHandler(grid_t3m); add!(dh_t3m, :u, ip_t3m^3); add!(dh_t3m, :θ, ip_t3m^2); close!(dh_t3m)
     n_t3m   = ndofs(dh_t3m)
 
     u_ex_t3 = zeros(n_t3m)
     for cell in CellIterator(dh_t3m)
         coords = getcoordinates(cell); dofs = celldofs(cell)
         for (i, xi) in enumerate(coords)
-            u_ex_t3[dofs[5i-4]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
-            u_ex_t3[dofs[5i-3]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
+            u_ex_t3[dofs[3i-2]] = ε_xx*xi[1] + 0.5γ_xy*xi[2]
+            u_ex_t3[dofs[3i-1]] = 0.5γ_xy*xi[1] + ε_yy*xi[2]
         end
     end
 
@@ -305,7 +307,7 @@ end
         r_t3m[celldofs(cell)] .+= re_t3m
     end
     ch_t3m_tmp = ConstraintHandler(dh_t3m)
-    add!(ch_t3m_tmp, Dirichlet(:u, getnodeset(grid_t3m, "boundary"), x -> zeros(5), [1,2,3,4,5]))
+    add!(ch_t3m_tmp, Dirichlet(:u, getnodeset(grid_t3m, "boundary"), x -> zeros(3), [1,2,3])); add!(ch_t3m_tmp, Dirichlet(:θ, getnodeset(grid_t3m, "boundary"), x -> zeros(2), [1,2]))
     close!(ch_t3m_tmp)
     @test norm(r_t3m[ch_t3m_tmp.free_dofs]) ≤ 1e-8 * norm(r_t3m)
 
@@ -320,8 +322,9 @@ end
     end
     ch2_t3m = ConstraintHandler(dh_t3m)
     add!(ch2_t3m, Dirichlet(:u, getnodeset(grid_t3m, "boundary"),
-         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0, 0.0, 0.0], [1,2,3,4,5]))
-    add!(ch2_t3m, Dirichlet(:u, getnodeset(grid_t3m, "interior"), x -> zeros(3), [3,4,5]))
+         x -> [ε_xx*x[1]+0.5γ_xy*x[2], 0.5γ_xy*x[1]+ε_yy*x[2], 0.0], [1,2,3]))
+    add!(ch2_t3m, Dirichlet(:θ, getnodeset(grid_t3m, "boundary"), x -> zeros(2), [1,2]))
+    add!(ch2_t3m, Dirichlet(:u, getnodeset(grid_t3m, "interior"), x -> zeros(1), [3])); add!(ch2_t3m, Dirichlet(:θ, getnodeset(grid_t3m, "interior"), x -> zeros(2), [1,2]))
     close!(ch2_t3m); Ferrite.update!(ch2_t3m, 0.0)
     apply!(K_t3m, r2_t3m, ch2_t3m)
     u_sol_t3 = K_t3m \ r2_t3m
@@ -366,7 +369,7 @@ end
 
     ip_b  = Lagrange{RefQuadrilateral,2}()
     scv_b = ShellCellValues(QuadratureRule{RefQuadrilateral}(4), ip_b, ip_b)
-    dh_b  = DofHandler(grid_b); add!(dh_b, :u, ip_b^5); close!(dh_b)
+    dh_b  = DofHandler(grid_b); add!(dh_b, :u, ip_b^3); add!(dh_b, :θ, ip_b^2); close!(dh_b)
     mat_b = LinearElastic(1.0e6, 0.3, 0.01)
     n_b   = ndofs(dh_b)
 
@@ -375,9 +378,9 @@ end
     for cell in CellIterator(dh_b)
         coords = getcoordinates(cell); dofs = celldofs(cell)
         for (i, xi) in enumerate(coords)
-            u_exb[dofs[5i-2]] =  0.5κ₁₁*xi[1]^2 + 0.5κ₂₂*xi[2]^2 + κ₁₂*xi[1]*xi[2]
-            u_exb[dofs[5i-1]] = -κ₁₁*xi[1] - κ₁₂*xi[2]
-            u_exb[dofs[5i  ]] = -κ₂₂*xi[2] - κ₁₂*xi[1]
+            u_exb[dofs[3i]] =  0.5κ₁₁*xi[1]^2 + 0.5κ₂₂*xi[2]^2 + κ₁₂*xi[1]*xi[2]
+            u_exb[dofs[iφ(dofs,i,1)]] = -κ₁₁*xi[1] - κ₁₂*xi[2]
+            u_exb[dofs[iφ(dofs,i,2)]] = -κ₂₂*xi[2] - κ₁₂*xi[1]
         end
     end
 
@@ -396,8 +399,9 @@ end
     ch_b = ConstraintHandler(dh_b)
     add!(ch_b, Dirichlet(:u, getnodeset(grid_b, "allnodes"), x -> zeros(2), [1,2]))
     add!(ch_b, Dirichlet(:u, getnodeset(grid_b, "boundary"),
-         x -> [0.5κ₁₁*x[1]^2+0.5κ₂₂*x[2]^2+κ₁₂*x[1]*x[2],
-                -κ₁₁*x[1]-κ₁₂*x[2], -κ₂₂*x[2]-κ₁₂*x[1]], [3,4,5]))
+         x -> [0.5κ₁₁*x[1]^2+0.5κ₂₂*x[2]^2+κ₁₂*x[1]*x[2]], [3]))
+    add!(ch_b, Dirichlet(:θ, getnodeset(grid_b, "boundary"),
+         x -> [-κ₁₁*x[1]-κ₁₂*x[2], -κ₂₂*x[2]-κ₁₂*x[1]], [1,2]))
     close!(ch_b); Ferrite.update!(ch_b, 0.0)
     apply!(K_b, r_b, ch_b)
     u_sol_b = K_b \ r_b
@@ -415,9 +419,9 @@ end
     for I in 1:9
         xI, yI = X_Q9_UNIT[I][1], X_Q9_UNIT[I][2]
         u_kl[3I]    = α * xI * yI
-        u_rm5[5I-2] = α * xI * yI
-        u_rm5[5I-1] = -α * yI   # φ₁ = -∂u₃/∂x = -α·y
-        u_rm5[5I  ] = -α * xI   # φ₂ = -∂u₃/∂y = -α·x
+        u_rm5[3I] = α * xI * yI
+        u_rm5[iφ(u_rm5,I,1)] = -α * yI   # φ₁ = -∂u₃/∂x = -α·y
+        u_rm5[iφ(u_rm5,I,2)] = -α * xI   # φ₂ = -∂u₃/∂y = -α·x
     end
     W_kl = FerriteShells.bending_energy_KL(u_kl, scv_kl, mat_kl)
     W_rm = FerriteShells.energy_RM(u_rm5, scv_kl, mat_kl)
@@ -435,7 +439,7 @@ end
 
     ip_b  = Lagrange{RefQuadrilateral,2}()
     scv_b = ShellCellValues(QuadratureRule{RefQuadrilateral}(3), ip_b, ip_b)
-    dh_b  = DofHandler(grid3d); add!(dh_b, :u, ip_b^5); close!(dh_b)
+    dh_b  = DofHandler(grid3d); add!(dh_b, :u, ip_b^3); add!(dh_b, :θ, ip_b^2); close!(dh_b)
 
     # Assemble linear stiffness at u = 0.
     n_el_b = ndofs_per_cell(dh_b)
@@ -456,7 +460,7 @@ end
                        Vec{3}((0.0, 0.0, P_b/W_b)))
 
     ch_b = ConstraintHandler(dh_b)
-    add!(ch_b, Dirichlet(:u, getfacetset(grid3d, "left"), x -> zeros(5), [1,2,3,4,5]))
+    add!(ch_b, Dirichlet(:u, getfacetset(grid3d, "left"), x -> zeros(3), [1,2,3])); add!(ch_b, Dirichlet(:θ, getfacetset(grid3d, "left"), x -> zeros(2), [1,2]))
     close!(ch_b); Ferrite.update!(ch_b, 0.0)
     apply!(K_b, f_b, ch_b)
     u_b = K_b \ f_b
@@ -466,7 +470,7 @@ end
     for cell in CellIterator(dh_b)
         coords = getcoordinates(cell); dofs = celldofs(cell)
         for (i, xi) in enumerate(coords)
-            isapprox(xi[1], L, atol=1e-10) && push!(tip_z, u_b[dofs[5i-2]])
+            isapprox(xi[1], L, atol=1e-10) && push!(tip_z, u_b[dofs[3i]])
         end
     end
     unique!(tip_z)
@@ -514,9 +518,9 @@ end
     Random.seed!(99)
     u_c = zeros(45)
     for I in 1:9
-        u_c[5I-2] = 0.01 * randn()
-        u_c[5I-1] = 1e-3 * randn()
-        u_c[5I  ] = 1e-3 * randn()
+        u_c[3I] = 0.01 * randn()
+        u_c[iφ(u_c,I,1)] = 1e-3 * randn()
+        u_c[iφ(u_c,I,2)] = 1e-3 * randn()
     end
     ke_an = rm_tangent(scv, u_c, mat)
     ke_fd = rm_fd_tangent(scv, u_c, mat)
@@ -571,18 +575,18 @@ end
             x   = getcoordinates(cell)
             u_e = zeros(n_el)
             tangent_RM_FD!(ke, scv_h, u_e, mat_h)
-            assemble!(asmb, shelldofs(cell), ke, re)
-            # z-body force in interleaved layout; scatter via shelldofs mapping
+            assemble!(asmb, celldofs(cell), ke, re)
+            # z-body force on the u₃ dofs; the element layout is celldofs order
             for qp in 1:getnquadpoints(scv_h)
                 ξ  = scv_h.qr.points[qp]; dΩ = scv_h.detJdV[qp]
                 xp = sum(Ferrite.reference_shape_value(ip, ξ, I) * x[I] for I in 1:n_base)
                 q  = q0 * sin(π*xp[1]) * sin(π*xp[2])
                 for I in 1:n_base
                     NI = Ferrite.reference_shape_value(ip, ξ, I)
-                    fe[5I-2] += NI * q * dΩ   # u₃ position in interleaved 5-DOF layout
+                    fe[3I] += NI * q * dΩ   # u₃ position of node I
                 end
             end
-            sd = shelldofs(cell)
+            sd = celldofs(cell)
             @views f[sd] .+= fe
         end
 
@@ -627,9 +631,9 @@ end  # RM bending h-convergence
     function rigid_dofs_q9(x_nodes)
         u_e = zeros(45)
         for I in eachindex(x_nodes)
-            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
-            u_e[5I-2] = x_nodes[I][1] * sin(α)
-            u_e[5I-1] = -α
+            u_e[3I-2] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[3I] = x_nodes[I][1] * sin(α)
+            u_e[iφ(u_e,I,1)] = -α
         end
         u_e
     end
@@ -651,9 +655,9 @@ end  # RM bending h-convergence
         reinit!(scv4s, x_nodes)
         u_e = zeros(20)
         for I in eachindex(x_nodes)
-            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
-            u_e[5I-2] = x_nodes[I][1] * sin(α)
-            u_e[5I-1] = -α
+            u_e[3I-2] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[3I] = x_nodes[I][1] * sin(α)
+            u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(20)
         membrane_residuals_RM!(re, scv4s, u_e, mat)
@@ -668,9 +672,9 @@ end  # RM bending h-convergence
         reinit!(scv_t3s, x_nodes)
         u_e = zeros(15)
         for I in eachindex(x_nodes)
-            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
-            u_e[5I-2] = x_nodes[I][1] * sin(α)
-            u_e[5I-1] = -α
+            u_e[3I-2] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[3I] = x_nodes[I][1] * sin(α)
+            u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(15)
         membrane_residuals_RM!(re, scv_t3s, u_e, mat)
@@ -686,9 +690,9 @@ end  # RM bending h-convergence
         reinit!(scv_t6s, x_nodes)
         u_e = zeros(30)
         for I in eachindex(x_nodes)
-            u_e[5I-4] = x_nodes[I][1] * (cos(α) - 1)
-            u_e[5I-2] = x_nodes[I][1] * sin(α)
-            u_e[5I-1] = -α
+            u_e[3I-2] = x_nodes[I][1] * (cos(α) - 1)
+            u_e[3I] = x_nodes[I][1] * sin(α)
+            u_e[iφ(u_e,I,1)] = -α
         end
         re = zeros(30)
         membrane_residuals_RM!(re, scv_t6s, u_e, mat)
@@ -721,19 +725,19 @@ end
     # RM: φ₁ = -α, φ₂ = 0 in the global frame (T₁_c = ê_x for all flat elements)
     u_rm = zeros(5n_p)
     for (I, X) in enumerate(X_patch)
-        u_rm[5I-4] = X[1] * (cos(α) - 1); u_rm[5I-2] = X[1] * sin(α); u_rm[5I-1] = -α
+        u_rm[3I-2] = X[1] * (cos(α) - 1); u_rm[3I] = X[1] * sin(α); u_rm[iφ(u_rm,I,1)] = -α
     end
     r_rm = zeros(5n_p)
     for en in connectivity
         reinit!(scv4, [X_patch[i] for i in en])
         u_e = zeros(20); re = zeros(20)
         for (l, g) in enumerate(en), d in 1:5
-            u_e[5(l-1)+d] = u_rm[5(g-1)+d]
+            u_e[rmdof(u_e,l,d)] = u_rm[rmdof(u_rm,g,d)]
         end
         membrane_residuals_RM!(re, scv4, u_e, mat4)
         bending_residuals_RM!(re, scv4, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
-            r_rm[5(g-1)+d] += re[5(l-1)+d]
+            r_rm[rmdof(r_rm,g,d)] += re[rmdof(re,l,d)]
         end
     end
     @test norm(r_rm) < 1e-8
@@ -801,19 +805,19 @@ end
 
     u_rm9 = zeros(5n_p9)
     for (I, X) in enumerate(X_p9)
-        u_rm9[5I-4] = X[1] * (cos(α) - 1); u_rm9[5I-2] = X[1] * sin(α); u_rm9[5I-1] = -α
+        u_rm9[3I-2] = X[1] * (cos(α) - 1); u_rm9[3I] = X[1] * sin(α); u_rm9[iφ(u_rm9,I,1)] = -α
     end
     r_rm9 = zeros(5n_p9)
     for en in conn9
         reinit!(scv9, [X_p9[i] for i in en])
         u_e = zeros(45); re = zeros(45)
         for (l, g) in enumerate(en), d in 1:5
-            u_e[5(l-1)+d] = u_rm9[5(g-1)+d]
+            u_e[rmdof(u_e,l,d)] = u_rm9[rmdof(u_rm9,g,d)]
         end
         membrane_residuals_RM!(re, scv9, u_e, mat4)
         bending_residuals_RM!(re, scv9, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
-            r_rm9[5(g-1)+d] += re[5(l-1)+d]
+            r_rm9[rmdof(r_rm9,g,d)] += re[rmdof(re,l,d)]
         end
     end
     @test norm(r_rm9) < 1e-8
@@ -845,12 +849,12 @@ end
         reinit!(scv_m4, [X_patch[i] for i in en])
         u_e = zeros(20); re = zeros(20)
         for (l, g) in enumerate(en), d in 1:5
-            u_e[5(l-1)+d] = u_rm[5(g-1)+d]
+            u_e[rmdof(u_e,l,d)] = u_rm[rmdof(u_rm,g,d)]
         end
         membrane_residuals_RM!(re, scv_m4, u_e, mat4)
         bending_residuals_RM!(re, scv_m4, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
-            r_m4[5(g-1)+d] += re[5(l-1)+d]
+            r_m4[rmdof(r_m4,g,d)] += re[rmdof(re,l,d)]
         end
     end
     @test norm(r_m4) < 1e-8
@@ -862,12 +866,12 @@ end
         reinit!(scv_m9, [X_p9[i] for i in en])
         u_e = zeros(45); re = zeros(45)
         for (l, g) in enumerate(en), d in 1:5
-            u_e[5(l-1)+d] = u_rm9[5(g-1)+d]
+            u_e[rmdof(u_e,l,d)] = u_rm9[rmdof(u_rm9,g,d)]
         end
         membrane_residuals_RM!(re, scv_m9, u_e, mat4)
         bending_residuals_RM!(re, scv_m9, u_e, mat4)
         for (l, g) in enumerate(en), d in 1:5
-            r_m9[5(g-1)+d] += re[5(l-1)+d]
+            r_m9[rmdof(r_m9,g,d)] += re[rmdof(re,l,d)]
         end
     end
     @test norm(r_m9) < 1e-8
@@ -886,16 +890,16 @@ end
 
     u_rm_t3 = zeros(5n_t3p)
     for (I, X) in enumerate(X_patch)
-        u_rm_t3[5I-4] = X[1]*(cos(α)-1); u_rm_t3[5I-2] = X[1]*sin(α); u_rm_t3[5I-1] = -α
+        u_rm_t3[3I-2] = X[1]*(cos(α)-1); u_rm_t3[3I] = X[1]*sin(α); u_rm_t3[iφ(u_rm_t3,I,1)] = -α
     end
     r_rm_t3 = zeros(5n_t3p)
     for en in conn_t3patch
         reinit!(scv_t3m, [X_patch[i] for i in en])
         u_e = zeros(15); re = zeros(15)
-        for (l, g) in enumerate(en), d in 1:5; u_e[5(l-1)+d] = u_rm_t3[5(g-1)+d]; end
+        for (l, g) in enumerate(en), d in 1:5; u_e[rmdof(u_e,l,d)] = u_rm_t3[rmdof(u_rm_t3,g,d)]; end
         membrane_residuals_RM!(re, scv_t3m, u_e, mat4)
         bending_residuals_RM!(re, scv_t3m, u_e, mat4)
-        for (l, g) in enumerate(en), d in 1:5; r_rm_t3[5(g-1)+d] += re[5(l-1)+d]; end
+        for (l, g) in enumerate(en), d in 1:5; r_rm_t3[rmdof(r_rm_t3,g,d)] += re[rmdof(re,l,d)]; end
     end
     @test norm(r_rm_t3) < 1e-8
 
@@ -927,16 +931,16 @@ end
 
     u_rm_t6 = zeros(5n_t6_2)
     for (I, X) in enumerate(X_t6_2tri)
-        u_rm_t6[5I-4] = X[1]*(cos(α)-1); u_rm_t6[5I-2] = X[1]*sin(α); u_rm_t6[5I-1] = -α
+        u_rm_t6[3I-2] = X[1]*(cos(α)-1); u_rm_t6[3I] = X[1]*sin(α); u_rm_t6[iφ(u_rm_t6,I,1)] = -α
     end
     r_rm_t6 = zeros(5n_t6_2)
     for en in conn_t6_2
         reinit!(scv_t6m, [X_t6_2tri[i] for i in en])
         u_e = zeros(30); re = zeros(30)
-        for (l, g) in enumerate(en), d in 1:5; u_e[5(l-1)+d] = u_rm_t6[5(g-1)+d]; end
+        for (l, g) in enumerate(en), d in 1:5; u_e[rmdof(u_e,l,d)] = u_rm_t6[rmdof(u_rm_t6,g,d)]; end
         membrane_residuals_RM!(re, scv_t6m, u_e, mat4)
         bending_residuals_RM!(re, scv_t6m, u_e, mat4)
-        for (l, g) in enumerate(en), d in 1:5; r_rm_t6[5(g-1)+d] += re[5(l-1)+d]; end
+        for (l, g) in enumerate(en), d in 1:5; r_rm_t6[rmdof(r_rm_t6,g,d)] += re[rmdof(re,l,d)]; end
     end
     @test norm(r_rm_t6) < 1e-8
 end
@@ -963,7 +967,7 @@ end
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0); reinit!(scv, cell)
         tangent_RM_FD!(ke, scv, zeros(n_el), mat)
-        assemble!(asmb, shelldofs(cell), ke, re)
+        assemble!(asmb, celldofs(cell), ke, re)
     end
 
     fqr = FacetQuadratureRule{RefQuadrilateral}(2)

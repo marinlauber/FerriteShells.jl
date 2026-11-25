@@ -40,7 +40,7 @@ function _cook_assemble_rm!(K, f, dh, scv, mat)
     for cell in CellIterator(dh)
         fill!(ke, 0); fill!(re, 0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = zeros(n_el)
         membrane_residuals_RM!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
@@ -107,7 +107,7 @@ end
     # small-strain match with near-incompressible LinearElastic
     ε = 1e-5
     u_m = zeros(n)
-    u_m[5*2-4] = ε; u_m[5*3-4] = ε    # stretch nodes 2,3 in x (ε₁₁ ≈ ε/2)
+    u_m[3*2-2] = ε; u_m[3*3-2] = ε    # stretch nodes 2,3 in x (ε₁₁ ≈ ε/2)
     re_NH = zeros(n); membrane_residuals_RM!(re_NH, scv, u_m, mat_NH)
     re_LE = zeros(n); membrane_residuals_RM!(re_LE, scv, u_m, mat_LE_HE)
     @test maximum(abs, re_NH .- re_LE) / (maximum(abs, re_LE) + 1e-20) < 1e-3
@@ -119,15 +119,15 @@ end
 
     # Rigid-body translation: energy unchanged
     u_trans = zeros(n)
-    for I in 1:4; u_trans[5I-4]=3.14; u_trans[5I-3]=2.72; u_trans[5I-2]=1.41; end
+    for I in 1:4; u_trans[3I-2]=3.14; u_trans[3I-1]=2.72; u_trans[3I]=1.41; end
     @test FerriteShells.energy_RM(u_trans, scv, mat_NH) ≈ FerriteShells.energy_RM(zeros(n), scv, mat_NH) rtol=1e-10
 
     # tangent symmetry
     u_pert = zeros(n)
     for (I, X) in enumerate(X_Q4_SQ)
-        u_pert[5I-4] = 1e-4 * sin(π/2 * X[1])
-        u_pert[5I-2] = 2e-4 * cos(π/2 * X[2])
-        u_pert[5I-1] = 5e-5; u_pert[5I] = -3e-5
+        u_pert[3I-2] = 1e-4 * sin(π/2 * X[1])
+        u_pert[3I] = 2e-4 * cos(π/2 * X[2])
+        u_pert[iφ(u_pert,I,1)] = 5e-5; u_pert[iφ(u_pert,I,2)] = -3e-5
     end
     ke = rm_tangent(scv, u_pert, mat_NH)
     @test norm(ke .- ke') / (norm(ke) + 1e-14) < 1e-10
@@ -147,8 +147,8 @@ end
     # tangent symmetry
     u_pert = zeros(n)
     for (I, X) in enumerate(X_Q9_SQ)
-        u_pert[5I-2] = 1e-3 * sin(π/2 * X[1]) * sin(π/2 * X[2])
-        u_pert[5I-1] = 5e-5 * X[1]; u_pert[5I] = 5e-5 * X[2]
+        u_pert[3I] = 1e-3 * sin(π/2 * X[1]) * sin(π/2 * X[2])
+        u_pert[iφ(u_pert,I,1)] = 5e-5 * X[1]; u_pert[iφ(u_pert,I,2)] = 5e-5 * X[2]
     end
     ke = rm_tangent(scv, u_pert, mat_NH)
     @test norm(ke .- ke') / (norm(ke) + 1e-14) < 1e-10
@@ -162,12 +162,12 @@ end
     u_rot = zeros(n)
     for (I, X) in enumerate(X_Q9_SQ)
         X_rot = R(θ) ⋅ X - X
-        u_rot[5I-4] = X_rot[1]; u_rot[5I-3] = X_rot[2]; u_rot[5I-2] = X_rot[3]
+        u_rot[3I-2] = X_rot[1]; u_rot[3I-1] = X_rot[2]; u_rot[3I] = X_rot[3]
     end
     @test FerriteShells.energy_RM(u_rot,   scv, mat_NH) ≈ FerriteShells.energy_RM(zeros(n), scv, mat_NH) rtol=1e-6
 
     # bending residuals agree with FD at small rotation
-    u_b = zeros(n); for I in 1:9; u_b[5I-1] = 1e-6; end
+    u_b = zeros(n); for I in 1:9; u_b[iφ(u_b,I,1)] = 1e-6; end
     rb_ex = zeros(n); bending_residuals_RM!(rb_ex, scv, u_b, mat_NH)
     rb_fd = zeros(n); residuals_RM_FD!(rb_fd, scv, u_b, mat_NH)
     @test maximum(abs, rb_ex .- rb_fd) / (maximum(abs, rb_fd) + 1e-20) < 5e-6
@@ -178,7 +178,7 @@ end
     n = 20; n_nodes = 4
     u = zeros(n)
     for (I, X) in enumerate(X_Q4_SQ)
-        u[5I-4] = 0.05 * (X[1] + 1)/2   # ~5% uniaxial stretch, linear in x
+        u[3I-2] = 0.05 * (X[1] + 1)/2   # ~5% uniaxial stretch, linear in x
     end
     for qp in 1:getnquadpoints(scv)
         a₁, a₂ = FerriteShells.covariant_basis(scv, qp, u, n_nodes)
@@ -217,7 +217,7 @@ end
 
     # tangent symmetry and FD consistency
     u_pert = zeros(n)
-    for I in 1:4; u_pert[5I-4]=1e-4; u_pert[5I-2]=5e-5; u_pert[5I-1]=3e-5; u_pert[5I]=-2e-5; end
+    for I in 1:4; u_pert[3I-2]=1e-4; u_pert[3I]=5e-5; u_pert[iφ(u_pert,I,1)]=3e-5; u_pert[iφ(u_pert,I,2)]=-2e-5; end
     ke    = rm_tangent(scv, u_pert, mat_MR)
     ke_fd = rm_fd_tangent(scv, u_pert, mat_MR)
     @test norm(ke .- ke') / (norm(ke) + 1e-14) < 1e-10
@@ -225,7 +225,7 @@ end
 
     # MR is stiffer than NH at finite strain when c₁+c₂ > μ_NH
     u_stretch = zeros(n)
-    for (I, X) in enumerate(X_Q4_SQ); u_stretch[5I-4] = 0.1*(X[1]+1)/2; end
+    for (I, X) in enumerate(X_Q4_SQ); u_stretch[3I-2] = 0.1*(X[1]+1)/2; end
     # Initial shear modulus: NH=μ_HE=80e3, MR=c₁+c₂=80e3 → equal initially
     # but MR has extra c₂*I₂ term that increases energy faster
     @test FerriteShells.energy_RM(u_stretch, scv, mat_MR) > FerriteShells.energy_RM(u_stretch, scv, mat_NH)
@@ -291,8 +291,8 @@ end
     # tangent symmetry
     u_pert = zeros(n)
     for (I, X) in enumerate(X_Q9_SQ)
-        u_pert[5I-2] = 1e-3 * X[1] * X[2]
-        u_pert[5I-1] = 2e-4 * X[1]
+        u_pert[3I] = 1e-3 * X[1] * X[2]
+        u_pert[iφ(u_pert,I,1)] = 2e-4 * X[1]
     end
     ke = rm_tangent(scv_mitc, u_pert, mat_NH)
     @test norm(ke .- ke') / (norm(ke) + 1e-14) < 1e-10
@@ -305,9 +305,9 @@ end
     scv_ref = make_q9_scv(); reinit!(scv_ref, X_Q9_SQ)
     u_kl = zeros(n)
     for (I, X) in enumerate(X_Q9_SQ)
-        u_kl[5I-2] = 1e-3 * X[1] * X[2]
-        u_kl[5I-1] = -1e-3 * X[2]    # φ₁ ≈ -∂w/∂x
-        u_kl[5I  ] = -1e-3 * X[1]    # φ₂ ≈ -∂w/∂y
+        u_kl[3I] = 1e-3 * X[1] * X[2]
+        u_kl[iφ(u_kl,I,1)] = -1e-3 * X[2]    # φ₁ ≈ -∂w/∂x
+        u_kl[iφ(u_kl,I,2)] = -1e-3 * X[1]    # φ₂ ≈ -∂w/∂y
     end
     W_mitc   = FerriteShells.energy_RM(u_kl, scv_mitc, mat_NH)
     W_nomitc = FerriteShells.energy_RM(u_kl, scv_ref,  mat_NH)
@@ -363,8 +363,8 @@ end
     n = 20
     u_pert = zeros(n)
     for (I, X) in enumerate(X_Q4_SQ)
-        u_pert[5I-4] = 2e-3*X[1]; u_pert[5I-3] = -1e-3*X[2]; u_pert[5I-2] = 3e-3*X[1]*X[2]
-        u_pert[5I-1] = 4e-4; u_pert[5I] = -2e-4
+        u_pert[3I-2] = 2e-3*X[1]; u_pert[3I-1] = -1e-3*X[2]; u_pert[3I] = 3e-3*X[1]*X[2]
+        u_pert[iφ(u_pert,I,1)] = 4e-4; u_pert[iφ(u_pert,I,2)] = -2e-4
     end
     ke    = rm_tangent(scv_ps, u_pert, mat_SVK_ps)
     ke_fd = rm_fd_tangent(scv_ps, u_pert, mat_SVK_ps)
@@ -375,7 +375,7 @@ end
     # both reduce to the membrane response of the condensed material
     u_mem = zeros(n)
     for (I, X) in enumerate(X_Q4_SQ)
-        u_mem[5I-4] = 2e-3*X[1]; u_mem[5I-3] = -1e-3*X[2]
+        u_mem[3I-2] = 2e-3*X[1]; u_mem[3I-1] = -1e-3*X[2]
     end
     re_ex = zeros(n)
     membrane_residuals_RM!(re_ex, scv_ps, u_mem, mat_SVK_ps)
@@ -428,7 +428,7 @@ end
             r0 = zeros(5nn); membrane_residuals_RM!(r0, scv_n, u0, mat); bending_residuals_RM!(r0, scv_n, u0, mat)
             @test norm(r0) < 1e-10
             u = zeros(5nn)
-            for I in 1:nn; u[5I-4] = 1e-6 * x[I][1]; u[5I-3] = -4e-7 * x[I][2]; end
+            for I in 1:nn; u[3I-2] = 1e-6 * x[I][1]; u[3I-1] = -4e-7 * x[I][2]; end
             re = zeros(5nn); membrane_residuals_RM!(re, scv_n, u, mat); bending_residuals_RM!(re, scv_n, u, mat)
             rf = zeros(5nn); residuals_RM_FD!(rf, scv_n, u, mat)
             @test norm(re - rf) / norm(rf) < 1e-6

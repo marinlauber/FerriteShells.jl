@@ -21,72 +21,6 @@ function shell_grid(grid::Grid{2,P,T}; map::Function=(n)->(n.x[1], n.x[2], zero(
                 facetsets=grid.facetsets, cellsets=grid.cellsets, nodesets=grid.nodesets)
 end
 
-import Ferrite: CellCache
-"""
-    shelldofs(cell)
-
-Reorder DOFs from a two-field `DofHandler` layout (`:u` as ip³, `:θ` as ip²)
-to the interleaved 5-DOF-per-node layout expected by the RM assembly functions.
-
-Input layout: ``[u_{1x},u_{1y},u_{1z},\\, u_{2x},\\ldots,u_{nz} \\mid \\theta_{1,1},\\theta_{1,2},\\, \\theta_{2,1},\\ldots,\\theta_{n,2}]``
-
-Output layout: ``[u_{1x},u_{1y},u_{1z},\\theta_{1,1},\\theta_{1,2},\\; u_{2x},u_{2y},u_{2z},\\theta_{2,1},\\theta_{2,2},\\ldots]``
-
-This method reads the layout off the dof count alone, so it is correct only for a
-`DofHandler` carrying exactly `:u` then `:θ` and nothing else. Pass the `SubDofHandler`
-— `shelldofs(sdh, cell)` or [`shelldofs!`](@ref) — to have the ranges read by name
-instead, which stays correct for any field order and any extra fields.
-"""
-function shelldofs(cell::CellCache)
-    dofs = cell.dofs
-    rem(length(dofs), 5) == 0 || throw(ArgumentError(
-        "shelldofs expects the two-field layout `add!(dh, :u, ip^3); add!(dh, :θ, ip^2)`, " *
-        "whose cells carry a multiple of 5 dofs; this cell has $(length(dofs)). " *
-        "Use `shelldofs(sdh, cell)` to read the dof ranges by name."))
-    n = length(dofs) ÷ 5
-    perm = similar(dofs)
-    for I in 1:n
-        @views perm[5I-4:5I-2] .= dofs[3I-2:3I]
-        perm[5I-1] = dofs[3n + 2I-1]
-        perm[5I  ] = dofs[3n + 2I]
-    end
-    return perm
-end
-
-"""
-    shelldofs(sdh::SubDofHandler, cell) -> Vector{Int}
-    shelldofs!(sd::AbstractVector{Int}, sdh::SubDofHandler, cell) -> sd
-
-Layout-safe form of [`shelldofs`](@ref): the same interleaved 5-dof-per-node order,
-but built from the `SubDofHandler`'s own `dof_range`s for `:u` and `:θ`, so it stays
-correct whatever else the `DofHandler` carries and in whatever order the fields were
-added. The in-place form resizes and overwrites `sd` and allocates nothing.
-"""
-shelldofs(sdh::Ferrite.SubDofHandler, cell) = shelldofs!(Int[], sdh, cell)
-
-"""
-    shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell) -> sd
-
-In-place, allocation-free form of [`shelldofs`](@ref): resizes and overwrites `sd`
-with the interleaved 5-dof-per-node order.
-"""
-function shelldofs!(sd::AbstractVector{Int}, sdh::Ferrite.SubDofHandler, cell)
-    dofs = celldofs(cell)
-    ru, rθ = Ferrite.dof_range(sdh, :u), Ferrite.dof_range(sdh, :θ)
-    n = length(ru) ÷ 3
-    length(ru) == 3n || throw(ArgumentError(":u carries $(length(ru)) dofs per cell, not a multiple of 3"))
-    length(rθ) == 2n || throw(ArgumentError(":u spans $n nodes but :θ spans $(length(rθ) / 2)"))
-    resize!(sd, 5n)
-    @inbounds for I in 1:n
-        sd[5I-4] = dofs[ru[3I-2]]
-        sd[5I-3] = dofs[ru[3I-1]]
-        sd[5I-2] = dofs[ru[3I]]
-        sd[5I-1] = dofs[rθ[2I-1]]
-        sd[5I  ] = dofs[rθ[2I]]
-    end
-    sd
-end
-
 using OrderedCollections
 
 """
@@ -207,7 +141,7 @@ function compute_volume(dh, scv, u::AbstractVector{T}; cellset=1:getncells(dh.gr
     for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
-        uₑ = u[shelldofs(cell)] # arranged as [u₁,u₂,u₃,φ₁,φ₂,…]
+        uₑ = u[celldofs(cell)]
         volume += volume_residual(scv, coords, uₑ, h, b)
     end
     return volume
@@ -241,7 +175,7 @@ function volume_residuals!(re, dh, scv::ShellCellValues, u::AbstractVector{T}, V
     for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
-        uₑ = u[shelldofs(cell)]
+        uₑ = u[celldofs(cell)]
         re[1] += volume_residual(scv, coords, uₑ, h, b)
     end
     re[1] += V⁰
@@ -252,7 +186,7 @@ end
 
 Compute the volume gradient ``\\partial V_{3D}/\\partial u`` into `dVdu` via ForwardDiff.
 Each element contribution is `ForwardDiff.gradient(ue -> volume_residual(..., ue, h, b), ue)`
-assembled into the global DOF vector using the shell DOF permutation.
+assembled into the global DOF vector through `celldofs`.
 
 See also [`compute_volume`](@ref).
 """
@@ -262,7 +196,7 @@ function volume_gradient!(dVdu, dh, scv::ShellCellValues, u::AbstractVector{T}; 
     for cell in CellIterator(dh, cellset)
         reinit!(scv, cell)
         coords = getcoordinates(cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         uₑ  = u[sd]
         #TODO this could be replaced by an expression to save allocations
         dVdu[sd] .+= ForwardDiff.gradient(v -> volume_residual(scv, coords, v, h, b), uₑ)
@@ -290,7 +224,8 @@ d_I = \\cos|\\varphi|\\, G_3 + \\operatorname{sinc}|\\varphi|\\,(\\varphi_1 T_1 
 ```
 
 which preserves unit length exactly for any rotation magnitude.
-Requires a two-field `DofHandler` with `:u` (ip³) and `:θ` (ip²).
+Requires a `DofHandler` with a `:θ` field (ip²), located in the element vector at
+`scv.rθ` (see the `dofs` keyword of [`ShellCellValues`](@ref)).
 
 # Example
 ```julia
@@ -309,10 +244,9 @@ function director_field(dh::DofHandler, scv::ShellCellValues, u)
     count  = zeros(Int, n_nodes)
     for cell in CellIterator(dh)
         reinit!(scv, cell)   # populates scv.*_elem from scv.frames (NodeFrames or centroid)
-        sd  = shelldofs(cell)
-        u_e = @views u[sd]
+        u_e = @views u[celldofs(cell)]
         for (I, nid) in enumerate(cell.nodes)
-            φ₁ = u_e[5I-1]; φ₂ = u_e[5I]
+            φ₁ = u_e[scv.rθ[2I-1]]; φ₂ = u_e[scv.rθ[2I]]
             cosθ, sincθ = cos_sinc_sq(φ₁^2 + φ₂^2)
             G₃_I = scv.G₃_elem[I]
             d_I  = cosθ * G₃_I + sincθ * (φ₁ * scv.T₁_elem[I] + φ₂ * scv.T₂_elem[I])
@@ -334,8 +268,8 @@ end
 """
     shell_strains(scv, qp, u_e) -> (E, κ, γ)
 
-Compute all three RM shell strain measures at quadrature point `qp` from a flat
-5-DOF/node element vector `u_e = [u₁,u₂,u₃,φ₁,φ₂, …]`.
+Compute all three RM shell strain measures at quadrature point `qp` from the element vector
+`u_e = u[celldofs(cell)]`, with the displacement and rotation dofs at `scv.ru` and `scv.rθ`.
 
 Returns:
 - `E :: SymmetricTensor{2,2}` — membrane strain, Green–Lagrange: Eαβ = ½(aα·aβ − Aα·Aβ)
@@ -345,14 +279,7 @@ Returns:
 function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) where T
     n_nodes = getnbasefunctions(scv.ip_shape)
 
-    Δa₁ = zero(Vec{3,T}); Δa₂ = zero(Vec{3,T})
-    for I in 1:n_nodes
-        u_I  = Vec{3,T}((u_e[5I-4], u_e[5I-3], u_e[5I-2]))
-        Δa₁ += u_I * scv.dNdξ[I, qp][1]
-        Δa₂ += u_I * scv.dNdξ[I, qp][2]
-    end
-    a₁ = scv.A₁[qp] + Δa₁
-    a₂ = scv.A₂[qp] + Δa₂
+    a₁, a₂ = covariant_basis(scv, qp, u_e, n_nodes)
 
     E = membrane_strain(a₁, a₂, scv.A_metric[qp])
 
@@ -360,7 +287,7 @@ function shell_strains(scv::ShellCellValues, qp::Int, u_e::AbstractVector{T}) wh
 
     κ = curvature_tensor(a₁, a₂, d₁, d₂, scv.B₀[qp])
 
-    γ_k = tying_shear_strains(scv.mitc, u_e)
+    γ_k = tying_shear_strains(scv.mitc, u_e, scv.ru, scv.rθ)
     γ₁, γ₂ = shear_strains(a₁, a₂, d, qp, γ_k, scv.mitc)
     d₀  = reference_director(scv, qp, n_nodes)
     r₁, r₂ = reference_shear_offset(scv.A₁[qp], scv.A₂[qp], d₀, scv.mitc)

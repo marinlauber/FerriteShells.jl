@@ -14,12 +14,12 @@ function assemble_membrane!(K, r, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell) # prepares reference geometry
-        u_e = u[shelldofs(cell)]
+        u_e = u[celldofs(cell)]
         membrane_tangent_RM!(ke, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)
         membrane_residuals_RM!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
-        assemble!(assembler, shelldofs(cell), ke, re)
+        assemble!(assembler, celldofs(cell), ke, re)
     end
 end
 
@@ -46,10 +46,10 @@ function assemble_cell!(scratch::ScratchData, u, material, cellidx)
     reinit!(cell_cache, cellidx)
     reinit!(scv, cell_cache)
     fill!(ke, 0.0); fill!(fe, 0.0)
-    u_e = u[shelldofs(cell_cache)]
+    u_e = u[celldofs(cell_cache)]
     membrane_tangent_RM!(ke, scv, u_e, material); bending_tangent_RM!(ke, scv, u_e, material)
     membrane_residuals_RM!(fe, scv, u_e, material); bending_residuals_RM!(fe, scv, u_e, material)
-    assemble!(assembler, shelldofs(cell_cache), ke, fe)
+    assemble!(assembler, celldofs(cell_cache), ke, fe)
 end
 
 function assemble_membrane_atomic!(K, r, dh, cellvalue_template::ShellCellValues, u, material, ntasks=Threads.nthreads())
@@ -72,7 +72,7 @@ function compute_strains(dh, scv, u)
     gamma     = [Vector{Vec{3,Float64}}(undef, n_qp) for _ in 1:n_cells]
     for cell in CellIterator(dh)
         reinit!(scv, cell)
-        u_e = u[shelldofs(cell)]
+        u_e = u[celldofs(cell)]
         id  = cellid(cell)
         @inbounds for qp in 1:n_qp
             E, κ, γ = shell_strains(scv, qp, u_e)

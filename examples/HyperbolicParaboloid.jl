@@ -48,10 +48,10 @@ for cell in CellIterator(dh)
         dΩ = scv.detJdV[qp]; ξ = scv.qr.points[qp]
         for I in 1:n_base
             NI = Ferrite.reference_shape_value(scv.ip_shape, ξ, I)
-            fe[5(I-1)+3] -= NI * q_z * dΩ   # u_z in shelldofs ordering
+            fe[3I] -= NI * q_z * dΩ   # u_z of node I (`:u` block first in celldofs)
         end
     end
-    assemble!(asm, shelldofs(cell), ke, fe)
+    assemble!(asm, celldofs(cell), ke, fe)
 end
 
 # solution

@@ -46,12 +46,12 @@ function assemble_global!(K, r, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
-        u_e = u[shelldofs(cell)]
+        u_e = u[celldofs(cell)]
         membrane_tangent_RM!(ke, scv, u_e, mat)
         membrane_residuals_RM!(re, scv, u_e, mat)
         bending_tangent_RM!(ke, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
-        assemble!(asm, shelldofs(cell), ke, re)
+        assemble!(asm, celldofs(cell), ke, re)
     end
 end
 
@@ -60,7 +60,7 @@ function strain_energy(dh, scv, u, mat)
     E = 0.0
     for cell in CellIterator(dh)
         reinit!(scv, cell)
-        u_e = u[shelldofs(cell)]
+        u_e = u[celldofs(cell)]
         E += FerriteShells.energy_RM(u_e, scv, mat)
     end
     return E

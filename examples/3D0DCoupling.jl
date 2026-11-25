@@ -186,7 +186,7 @@ function assemble_all!(K_int, r_int, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke_i, 0.0); fill!(re_i, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
         membrane_residuals_RM!(re_i, scv, u_e, mat)
         bending_residuals_RM!(re_i, scv, u_e, mat)
@@ -204,7 +204,7 @@ function assemble_pressure_region!(K_plv, F_plv, scv, u_vec, dh, cellset; Pᵢ=1
     for cell in CellIterator(dh, cellset)
         fill!(ke_p, 0.0); fill!(re_p, 0.0)
         reinit!(scv, cell)
-        sd = shelldofs(cell)
+        sd = celldofs(cell)
         u_e = u_vec[sd]
         assemble_pressure!(re_p, scv, u_e, Pᵢ) # unit pressure
         assemble_pressure_tangent!(ke_p, scv, u_e, Pᵢ)

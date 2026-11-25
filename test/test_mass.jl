@@ -14,24 +14,25 @@ end
     # symmetry
     @test me ≈ me'
 
-    # rotational DOFs (indices 4,5 per node) must be zero — no rotational inertia
-    rot_dofs = vcat([5I-1:5I for I in 1:9]...)
+    # rotational DOFs (default layout: 28:45, after the 27 displacement dofs) must be
+    # zero — no rotational inertia
+    rot_dofs = 28:45
     @test all(me[rot_dofs, :] .== 0.0)
     @test all(me[:, rot_dofs] .== 0.0)
 
     # translational diagonal entries must all be positive
-    trans_dofs = vcat([5I-4:5I-2 for I in 1:9]...)
+    trans_dofs = 1:27
     @test all(diag(me)[trans_dofs] .> 0.0)
 
     # total mass: ∑_{IJ} M_{IJ,aa} = ρ*t*A (partition of unity, A=1 for unit square)
     expected_mass = ρ * mat.thickness * 1.0
-    x_dofs = 1:5:45
+    x_dofs = 1:3:27
     @test sum(me[x_dofs, x_dofs]) ≈ expected_mass  rtol=1e-10
     @test sum(me[x_dofs.+1, x_dofs.+1]) ≈ expected_mass  rtol=1e-10  # y-direction
     @test sum(me[x_dofs.+2, x_dofs.+2]) ≈ expected_mass  rtol=1e-10  # z-direction
 
     # rigid body test: M * v_rigid = momentum vector, total momentum = ρ*t*A
-    v_rigid = zeros(45); v_rigid[1:5:45] .= 1.0    # unit x-velocity at all nodes
+    v_rigid = zeros(45); v_rigid[x_dofs] .= 1.0    # unit x-velocity at all nodes
     @test sum(me * v_rigid) ≈ expected_mass  rtol=1e-10
 
     # isotropy: all three translational blocks are identical

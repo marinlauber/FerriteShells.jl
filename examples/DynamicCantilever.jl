@@ -8,7 +8,7 @@ function assemble_shell!(K, r, dh, scv, u, mat)
     for cell in CellIterator(dh)
         fill!(ke, 0.0); fill!(re, 0.0)
         reinit!(scv, cell)
-        sd  = shelldofs(cell)
+        sd  = celldofs(cell)
         u_e = u[sd]
         membrane_residuals_RM!(re, scv, u_e, mat)
         bending_residuals_RM!(re, scv, u_e, mat)
@@ -25,7 +25,7 @@ function assemble_mass_global!(M, dh, scv, ρ, mat)
         fill!(me, 0.0)
         reinit!(scv, cell)
         mass_matrix!(me, scv, ρ, mat)
-        assemble!(asm, shelldofs(cell), me)
+        assemble!(asm, celldofs(cell), me)
     end
 end
 
