@@ -38,11 +38,6 @@ end
     end
 end
 
-"""
-    get_ferrite_grid(::String; T=Float64)
-
-Loads the `*.inp` file into ferrite an return the `Grid`
-"""
 function get_ferrite_grid(fname; T=Float64, orient=true)
     #INP file format
     @assert endswith(fname,".inp") "file type not supported"
